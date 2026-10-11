@@ -70,7 +70,7 @@ test("startup diagnostics stay out of the primary row and optional details mask 
       contextManager: createContextManager(workspace), workspace, provider: "scripted", modelId: "broken",
       sessionId: "sensitive-startup", startupError: "Provider failed: Bearer opaque-startup-token\npayload: private customer text and address\nbody: private invoice records\ndata: private account notes\ntoken=unknown-token" });
     const primary = tui.snapshot().transcript.at(-1)?.text ?? "";
-    expect(primary).toContain("Connection unavailable · Check provider settings");
+    expect(primary).toContain("Connection unavailable · Check the details");
     expect(primary).not.toContain("opaque-startup-token");
     expect(primary).not.toContain("private customer text");
     expect(tui.inspectRecovery()).toBe(true);

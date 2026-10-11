@@ -15,7 +15,7 @@ cursor 6 27 visible
  It merges defaults, user and project settings.
 
  ▌ ! Error
- ▌ Not connected · Connect to continue
+ ▌ Sign-in needed · Connect to continue
  ▌ Alt+L connect · F2 details
  ▌ Esc keep editing
 
@@ -71,8 +71,8 @@ cursor 6 27 visible
 09 0-1 #ffffff #f7f7f4 -
 09 1-2 #a61f16 #edddd9 -
 09 2-3 #ffffff #edddd9 -
-09 3-38 #a61f16 #edddd9 -
-09 38-48 #ffffff #edddd9 -
+09 3-39 #a61f16 #edddd9 -
+09 39-48 #ffffff #edddd9 -
 09 48-50 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-2 #a61f16 #edddd9 -

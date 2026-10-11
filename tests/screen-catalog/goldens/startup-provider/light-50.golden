@@ -15,9 +15,9 @@ cursor 6 27 visible
  It merges defaults, user and project settings.
 
  ▌ ! Error
- ▌ Connection unavailable
- ▌ Check provider settings
+ ▌ Connection unavailable · Check the details
  ▌ F2 details · Esc keep editing
+
 
 
 
@@ -71,24 +71,19 @@ cursor 6 27 visible
 09 0-1 #ffffff #f7f7f4 -
 09 1-2 #a61f16 #edddd9 -
 09 2-3 #ffffff #edddd9 -
-09 3-25 #a61f16 #edddd9 -
-09 25-48 #ffffff #edddd9 -
+09 3-45 #a61f16 #edddd9 -
+09 45-48 #ffffff #edddd9 -
 09 48-50 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-2 #a61f16 #edddd9 -
 10 2-3 #ffffff #edddd9 -
-10 3-26 #a61f16 #edddd9 -
-10 26-48 #ffffff #edddd9 -
+10 3-5 #1d232c #c9cbd0 b
+10 5-16 #a61f16 #edddd9 -
+10 16-19 #1d232c #c9cbd0 b
+10 19-32 #a61f16 #edddd9 -
+10 32-48 #ffffff #edddd9 -
 10 48-50 #ffffff #f7f7f4 -
-11 0-1 #ffffff #f7f7f4 -
-11 1-2 #a61f16 #edddd9 -
-11 2-3 #ffffff #edddd9 -
-11 3-5 #1d232c #c9cbd0 b
-11 5-16 #a61f16 #edddd9 -
-11 16-19 #1d232c #c9cbd0 b
-11 19-32 #a61f16 #edddd9 -
-11 32-48 #ffffff #edddd9 -
-11 48-50 #ffffff #f7f7f4 -
+11 0-50 #ffffff #f7f7f4 -
 12 0-50 #ffffff #f7f7f4 -
 13 0-50 #ffffff #f7f7f4 -
 14 0-50 #ffffff #f7f7f4 -

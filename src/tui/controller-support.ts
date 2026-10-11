@@ -32,10 +32,10 @@ export function startupFailureCategory(message: string): "auth" | "credential-st
 /** Explain a startup failure in words; the action row beneath names every key, and the diagnostic stays out of both. */
 export function startupRecoveryMessage(category: "auth" | "credential-store" | "model" | "provider"): string {
   switch (category) {
-    case "auth": return "Not connected · Connect to continue";
+    case "auth": return "Sign-in needed · Connect to continue";
     case "credential-store": return "Credential storage unavailable · Unlock the secure store";
     case "model": return "Model unavailable · Choose another model";
-    case "provider": return "Connection unavailable · Check provider settings";
+    case "provider": return "Connection unavailable · Check the details";
   }
 }
 

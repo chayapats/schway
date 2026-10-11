@@ -19,6 +19,9 @@ test("startup recovery messages name their next step with the action row's verb"
   expect(startupRecoveryMessage("model").split(" · ")[1]).toStartWith("Choose ");
   expect(verb(RECOVERY_ACTION_LABELS["choose-model"])).toBe("choose");
   expect(startupRecoveryMessage("auth")).not.toMatch(/sign in/i);
+  // A provider failure has no repair key, so its step points at the details the row offers.
+  expect(startupRecoveryMessage("provider").split(" · ")[1]).toEndWith(" details");
+  expect(verb(RECOVERY_ACTION_LABELS.details)).toBe("details");
 });
 
 test("each startup error row names each key once", async () => {

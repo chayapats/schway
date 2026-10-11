@@ -199,13 +199,13 @@ test("missing credentials explain the interactive login path", async () => {
     });
     let snapshot = controller.snapshot();
     expect(snapshot.status).toBe("error");
-    expect(snapshot.transcript.some((entry) => entry.text.includes("Not connected · Connect to continue"))).toBe(true);
+    expect(snapshot.transcript.some((entry) => entry.text.includes("Sign-in needed · Connect to continue"))).toBe(true);
     expect(JSON.stringify(snapshot).toLowerCase().includes("subscription login")).toBe(false);
 
     await controller.submit("hello");
     snapshot = controller.snapshot();
     const lastError = [...snapshot.transcript].reverse().find((entry) => entry.kind === "error");
-    expect(lastError?.text).toContain("Not connected · Connect to continue");
+    expect(lastError?.text).toContain("Sign-in needed · Connect to continue");
     expect(lastError?.text).toContain("Alt+L connect");
     expect(snapshot.status).toBe("error");
   });
