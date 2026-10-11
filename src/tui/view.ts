@@ -93,7 +93,7 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   let renderedInspection: InspectionContent | undefined;
   let paintedInspection: InspectionContent & { node: ReturnType<typeof inspectionNode>; y: number; scroll: number; width: number; height: number } | undefined;
   let scrollToInspection = false;
-  let detailsReturn: { key: string; entryId: string; scroll: number; inspection?: InspectionTarget } | undefined;
+  let detailsReturn: { key: string; entryId: string; kind: "notice" | "recovery"; scroll: number; inspection?: InspectionTarget } | undefined;
   let scrollToDetails = false;
   // The reader is a read-only layer above inspection; `readerReturn` is the single
   // checkpoint kept when Esc hands input to a deferred tool approval.
@@ -1851,10 +1851,11 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       else if (panelMode === "sessions") controller.toggleSessionPickerDetails();
       else if ((!panelMode || leftChooser) && !controller.running && snapshot.readiness !== "loading" && !detailsReturn) {
         const prior = { key: sessionKey, scroll: transcript.scrollTop, inspection };
-        const opened = snapshot.noticeDetailsAvailable ? controller.inspectNoticeDetails()
+        const notice = !!snapshot.noticeDetailsAvailable;
+        const opened = notice ? controller.inspectNoticeDetails()
           : snapshot.recovery?.actions.includes("details") || snapshot.outcome?.reason === "failed" ? controller.inspectRecovery() : false;
         if (opened) {
-          detailsReturn = { ...prior, entryId: controller.snapshot().transcript.at(-1)!.id };
+          detailsReturn = { ...prior, entryId: controller.snapshot().transcript.at(-1)!.id, kind: notice ? "notice" : "recovery" };
           clearInspection(); transcript.stickyScroll = false; scrollToDetails = true;
         }
       }
@@ -2178,6 +2179,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     panelMode: (): PanelMode | "" => panelMode,
     /** Report the transcript entry that open F2 details show, or undefined while details are closed. */
     detailsEntryId: (): string | undefined => detailsReturn?.entryId,
+    /** Report whether the open F2 details are a notice or a failed-turn recovery. */
+    detailsKind: (): "notice" | "recovery" | undefined => detailsReturn?.kind,
     /** Report the whole hint text the hint row was last built from; the row shows whole ` · ` segments of it. */
     hintText: (): string => hintSource,
     /** Freeze edits and capture the latest ordinary text without doing any filesystem I/O. */

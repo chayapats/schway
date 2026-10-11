@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ScreenGolden } from "./screen-catalog/format.ts";
 import {
-  applyExemptions, cursorCell, formatInvariantFailure, INVARIANT_EVIDENCE_FRAMES, SCREEN_INVARIANT_EXEMPTIONS, screenInvariantFailures, sliceCells,
+  applyExemptions, cursorCell, formatInvariantFailure, frameDetailsState, INVARIANT_EVIDENCE_FRAMES, SCREEN_INVARIANT_EXEMPTIONS, screenInvariantFailures, sliceCells,
   type FrameState, type InvariantExemption,
 } from "./helpers/screen-invariants.ts";
 
@@ -49,6 +49,18 @@ test("I2 fails failed-turn details that put the cause below the counts or out of
   // No visible heading, or details without a cause, also fail.
   expect(invariants(frame([" Failure details: Provider request"], { rows: 8 }), details)).toEqual(["I2"]);
   expect(invariants(frame([" ✗ Failed", " No tool results or commands."], { rows: 8 }), { ...idle, failedDetails: { heading: "✗ Failed", cause: "" } })).toEqual(["I2"]);
+});
+
+test("I2 classifies notice details after a failed turn by the open entry, not the outcome", () => {
+  const notice = { id: "sys-2", kind: "notice" as const, text: "Details · Esc keep editing\nThe choice could not be saved." };
+  const state = { ...idle, ...frameDetailsState(notice, true) };
+  expect(state.openDetails).toEqual({ entryId: "sys-2", kind: "notice" });
+  expect(state.failedDetails).toBeUndefined();
+  expect(invariants(frame([" Details · Esc keep editing", " The choice could not be saved."]), state)).toEqual([]);
+  const recovery = { id: "sys-3", kind: "recovery" as const, text: "✗ Failed\nNo tool results or commands." };
+  const failed = { ...idle, ...frameDetailsState(recovery, true) };
+  expect(failed.openDetails).toEqual({ entryId: "sys-3", kind: "recovery" });
+  expect(invariants(frame([" ✗ Failed", " No tool results or commands."], { rows: 8 }), failed)).toEqual(["I2"]);
 });
 
 test("I2 passes details that lead with the cause: whole at 20 rows, its start at 8", () => {
@@ -100,6 +112,27 @@ test("I4 passes a masked value with the cursor after its last mask cell, and fra
   const key: FrameState = { panel: "credential", idle: true, input: { surface: "credential entry", row: 1, col: 5, columns: 30, value: masked, cursor: masked.length, placeholder: "Paste key…" } };
   expect(invariants(frame(["  API key · OpenAI", `     ${masked}`], { cursor: [5 + 14 + 1, 2] }), key)).toEqual([]);
   expect(invariants(frame(["  Review · current changes"]), { panel: "review", idle: true })).toEqual([]);
+});
+
+test("I4 follows composer word wrap, so a soft-wrapped draft keeps the cursor on the next word", () => {
+  // Character wrap of "aaaa bbbb" in 7 cells lands at (2, 1). The composer wraps before "bbbb", at (4, 1).
+  expect(cursorCell("aaaa bbbb", 9, 7)).toEqual({ x: 2, y: 1 });
+  expect(cursorCell("aaaa bbbb", 9, 7, "word")).toEqual({ x: 4, y: 1 });
+  // A word wider than the field fills the row. A path breaks after `/`, and a run of spaces keeps the overflow space.
+  expect(cursorCell("bbbbbbbb", 8, 7, "word")).toEqual({ x: 1, y: 1 });
+  expect(cursorCell("bbbbbbbb", 7, 7, "word")).toEqual({ x: 0, y: 1 });
+  expect(cursorCell("aaaa b", 4, 4, "word")).toEqual({ x: 4, y: 0 });
+  expect(cursorCell("aaaa b", 6, 4, "word")).toEqual({ x: 1, y: 1 });
+  expect(cursorCell("src/tui/view.ts", 15, 10, "word")).toEqual({ x: 7, y: 1 });
+  expect(cursorCell("pre-wrap me", 11, 6, "word")).toEqual({ x: 2, y: 2 });
+  expect(cursorCell("    a", 5, 3, "word")).toEqual({ x: 2, y: 1 });
+  expect(cursorCell("x".repeat(20), 20, 1, "word")).toEqual({ x: 1, y: 19 });
+  const value = "aaaa bbbb";
+  const state: FrameState = { ...idle, input: { surface: "composer", row: 1, col: 0, columns: 7, value, cursor: value.length, placeholder: "", wrap: "word" } };
+  expect(invariants(frame(["", "aaaa", "bbbb"], { cursor: [5, 3] }), state)).toEqual([]);
+  const token = "bbbbbbbb";
+  const wide: FrameState = { ...idle, input: { surface: "composer", row: 0, col: 0, columns: 7, value: token, cursor: token.length, placeholder: "", wrap: "word" } };
+  expect(invariants(frame(["bbbbbbb", "b"], { cursor: [2, 2] }), wide)).toEqual([]);
 });
 
 test("I4 follows line breaks, wrapping and editor scrolling", () => {

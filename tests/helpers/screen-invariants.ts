@@ -1,9 +1,11 @@
+import { EditBuffer, EditorView } from "@opentui/core";
 import type { ScreenGolden } from "../screen-catalog/format.ts";
 import { hintRowSegments } from "./hint-grammar.ts";
 
 /**
- * Cross-screen invariants every catalog frame must hold (#304). The checker is pure: it reads a parsed golden and a
- * frame-state record captured with it, and classifies the frame from that record rather than from its screen ID.
+ * Cross-screen invariants every catalog frame must hold (#304). The checker reads a parsed golden and a frame-state
+ * record captured with it, and classifies the frame from that record rather than from its screen ID. A word-wrapped
+ * cursor is measured with the composer editor so the break matches the field.
  */
 
 /** Identifier of one screen invariant: I1 approval choices, I2 recovery cause first, I3 no stop when idle, I4 visible input cursor. */
@@ -19,13 +21,15 @@ export interface FrameState {
   idle: boolean;
   /** Present while F2 details for a failed turn are open: their outcome heading and the failure cause line ("" when none shows). */
   failedDetails?: { heading: string; cause: string };
+  /** The F2 entry that is open. A notice stays a notice when the latest outcome failed. */
+  openDetails?: { entryId: string; kind: "notice" | "recovery" };
   /**
    * The focused typing surface, if any. `row` and `col` are the zero-based screen cell where the value (or placeholder) starts,
    * `columns` the field width, `value` the displayed value (masked where the view masks it), `cursor` the logical cursor as a
-   * UTF-16 offset into `value`, `placeholder` the text shown while `value` is empty, and `scroll` the field's visual rows
-   * scrolled above `row` (0 when its first row shows).
+   * UTF-16 offset into `value`, `placeholder` the text shown while `value` is empty, `scroll` the field's visual rows
+   * scrolled above `row` (0 when its first row shows), and `wrap` how the field breaks lines (`word` for the composer).
    */
-  input?: { surface: string; row: number; col: number; columns: number; value: string; cursor: number; placeholder: string; scroll?: number };
+  input?: { surface: string; row: number; col: number; columns: number; value: string; cursor: number; placeholder: string; scroll?: number; wrap?: "char" | "word" };
 }
 
 /** One violated invariant, naming the screen, variant and, when one is at fault, the offending zero-based text row. */
@@ -36,16 +40,88 @@ export interface InvariantExemption { screen: string; variant?: string; invarian
 
 const graphemes = (text: string) => [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].map(part => part.segment);
 
-/** Zero-based cell of a UTF-16 `offset` within `value`, wrapping grapheme by grapheme at `columns` cells and at line breaks. */
-export function cursorCell(value: string, offset: number, columns: number): { x: number; y: number } {
-  let x = 0, y = 0;
-  for (const segment of graphemes(value.slice(0, offset))) {
-    if (segment === "\n") { x = 0; y++; continue; }
+/** Classify the open F2 entry from the kind the view recorded. A notice is not failed-turn details, so I2 does not ask it for a failure cause. */
+export function frameDetailsState(entry: { id: string; text: string; kind: "notice" | "recovery" } | undefined, outcomeFailed: boolean): Pick<FrameState, "openDetails" | "failedDetails"> {
+  if (!entry) return {};
+  const lines = entry.text.split("\n");
+  return {
+    openDetails: { entryId: entry.id, kind: entry.kind },
+    ...(entry.kind === "recovery" && outcomeFailed ? { failedDetails: { heading: lines[0] ?? "", cause: lines.find(line => line.startsWith("Failure details:")) ?? "" } } : {}),
+  };
+}
+
+/** Display cells in the UTF-16 prefix, counting a line break as one cell, as the composer editor's cursor offset does. */
+function cellCount(value: string, offset: number): number {
+  let cells = 0, consumed = 0;
+  for (const segment of graphemes(value)) {
+    if (consumed >= offset) break;
+    cells += segment === "\n" ? 1 : Bun.stringWidth(segment);
+    consumed += segment.length;
+  }
+  return cells;
+}
+
+/** Run `read` against one editor buffer and destroy both native objects. */
+function withEditor<T>(value: string, columns: number, wrap: "char" | "word", read: (buffer: EditBuffer, view: EditorView) => T): T {
+  const buffer = EditBuffer.create("unicode");
+  const view = EditorView.create(buffer, Math.max(1, columns), graphemes(value).length + 2);
+  try {
+    view.setWrapMode(wrap);
+    buffer.setText(value);
+    return read(buffer, view);
+  } finally {
+    view.destroy();
+    buffer.destroy();
+  }
+}
+
+/** Zero-based cell of a UTF-16 `offset` within `value`. `char` wraps grapheme by grapheme; `word` uses the composer editor. */
+export function cursorCell(value: string, offset: number, columns: number, wrap: "char" | "word" = "char"): { x: number; y: number } {
+  if (wrap === "word") {
+    if (columns < 1) return { x: 0, y: 0 };
+    return withEditor(value, columns, wrap, (buffer, view) => {
+      buffer.setCursorByOffset(cellCount(value, offset));
+      const cursor = view.getVisualCursor();
+      return { x: cursor.visualCol, y: cursor.visualRow };
+    });
+  }
+  const segments = graphemes(value);
+  let x = 0, y = 0, consumed = 0;
+  for (const segment of segments) {
+    if (consumed >= offset) break;
+    if (segment === "\n") { x = 0; y++; consumed += segment.length; continue; }
     const width = Bun.stringWidth(segment);
     if (x > 0 && x + width > columns) { x = 0; y++; }
     x += width;
+    consumed += segment.length;
   }
   return { x, y };
+}
+
+/** Text of the first visual line of `value`, using the same wrap as `cursorCell`. */
+function firstWrappedLine(value: string, columns: number, wrap: "char" | "word"): string {
+  const segments = graphemes(value.split("\n")[0]!);
+  if (wrap === "word") {
+    if (columns < 1) return "";
+    return withEditor(value, columns, wrap, (buffer, view) => {
+      let text = "", consumed = 0;
+      for (const segment of segments) {
+        buffer.setCursorByOffset(cellCount(value, consumed));
+        if (view.getVisualCursor().visualRow > 0) break;
+        text += segment;
+        consumed += segment.length;
+      }
+      return text;
+    });
+  }
+  let x = 0, text = "";
+  for (const segment of segments) {
+    const width = Bun.stringWidth(segment);
+    if (x > 0 && x + width > columns) break;
+    text += segment;
+    x += width;
+  }
+  return text;
 }
 
 /** The part of a text row that starts at terminal cell `start`, measuring cells with `Bun.stringWidth`. */
@@ -108,14 +184,14 @@ export function screenInvariantFailures(golden: ScreenGolden, state: FrameState)
 
   // I4: a focused text field shows the terminal cursor on its input row, at its logical cursor cell.
   if (state.input) {
-    const { surface, row, col, columns, value, cursor, placeholder, scroll = 0 } = state.input;
+    const { surface, row, col, columns, value, cursor, placeholder, scroll = 0, wrap = "char" } = state.input;
     // The input row starts with the value's first visible cells, or the placeholder's first word, which a narrow field may clip.
     const shown = sliceCells(golden.text[row] ?? "", col).trimEnd();
-    const lead = value ? graphemes(value.split("\n")[0]!).reduce((text, part) => Bun.stringWidth(text + part) <= columns ? text + part : text, "").trimEnd()
+    const lead = value ? firstWrappedLine(value.split("\n")[0]!, columns, wrap).trimEnd()
       : placeholder.split(" ")[0]!.replace(/…$/, "");
     const length = Math.min(lead.length, shown.length);
     if (scroll === 0 && lead && (!length || shown.slice(0, length) !== lead.slice(0, length))) fail("I4", `${surface} input row does not start with "${lead}" at cell ${col}`, row);
-    const cell = cursorCell(value, cursor, columns), x = col + cell.x + 1, y = row + cell.y - scroll + 1;
+    const cell = cursorCell(value, cursor, columns, wrap), x = col + cell.x + 1, y = row + cell.y - scroll + 1;
     if (!golden.cursor.visible) fail("I4", `${surface} has focus but the cursor is hidden`, row);
     else if (golden.cursor.x !== x || golden.cursor.y !== y) {
       fail("I4", `${surface} cursor is at ${golden.cursor.x} ${golden.cursor.y}, expected ${x} ${y}`, Math.max(0, golden.cursor.y - 1));
