@@ -659,8 +659,10 @@ URL fills the field as a real value. The terminal cursor, in the composer's styl
 color and blink, sits right after the last displayed character (the last `•` of a
 mask or the last URL character), or where the value starts while the field is
 empty. It follows wrapped rows and stays on the value row while an error shows; a
-long URL shows its end behind a leading `…` in a few rows, so the caret stays on
-the last value row. Its position comes only from the displayed
+long URL shows its end behind a leading `…` in at most six rows, so the caret stays
+on the last value row. On a short terminal the keys and the caret always stay:
+extra value rows go first, then the error shortens to its first sentence, then
+the title shortens to one row or goes. Its position comes only from the displayed
 mask, so it reveals nothing more about a secret. Entry is append and backspace
 only. The sign-in chooser and sign-in waits are not typing surfaces: the composer
 row reads `Choosing sign-in` or `Typing resumes after sign-in`, no cursor shows,

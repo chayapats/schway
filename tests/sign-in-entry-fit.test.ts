@@ -45,8 +45,21 @@ const SIZES = [[24, 8], [32, 12], [40, 10]] as const;
 // A short URL, the 75-character URL and the 420-character URL from the report; none has a scheme, so Enter shows an error.
 const URLS = ["localhost:8787", `localhost:8787/${"a".repeat(59)}z`, `localhost:8787/${"a".repeat(404)}z`];
 
+/** Open the OpenAI API-key entry (Alt+L, then OpenAI) or the ChatGPT callback entry (Alt+L, Tab, then the callback row) and paste `secret`. */
+async function pasteMasked(ui: EntryView, surface: "openai" | "callback", secret: string): Promise<void> {
+  ui.mockInput.pressKey("l", { meta: true }); await ui.settle();
+  if (surface === "callback") { ui.mockInput.pressTab(); await ui.settle(); }
+  const id = surface === "callback" ? "chatgpt-callback" : "openai";
+  while (ui.controller.snapshot().loginChooser!.selectedId !== id) ui.mockInput.pressArrow("down");
+  ui.mockInput.pressEnter(); await ui.settle();
+  await ui.mockInput.pasteBracketedText(secret); await ui.settle();
+}
+
+/** True for a row that shows the end of the endpoint URLs these tests paste. */
+const urlEnd = (row: string) => /[az]$|8787$/.test(row.trimEnd()) && !row.includes("Enter a full");
+
 /** Assert the hint rows sit whole between the last value row and the composer cap, and the status bar names only Esc. */
-function expectEntryFits(ui: EntryView, height: number, label: string): string[] {
+function expectEntryFits(ui: EntryView, height: number, label: string, hint = HINT, valueRow = urlEnd): string[] {
   const frame = ui.captureCharFrame(), rows = frame.split("\n").slice(0, height), cursor = ui.renderer.getCursorState();
   const context = `${label}\n${frame}`;
   expect(rows[height - 1]!.trim(), context).toEndWith("Esc cancel");
@@ -54,19 +67,19 @@ function expectEntryFits(ui: EntryView, height: number, label: string): string[]
   expect(rows[height - 2]!.trim(), context).toMatch(/^▀+$/);
   // Walk up from the cap until the trimmed rows spell the whole hint; a wrapped hint breaks only at ` · `.
   let start = height - 2, text = "";
-  while (text !== HINT && start > 0) {
+  while (text !== hint && start > 0) {
     const row = rows[--start]!.trim();
     expect(row, context).not.toEndWith("·");
     text = text ? `${row} · ${text}` : row;
   }
-  expect(text, context).toBe(HINT);
+  expect(text, context).toBe(hint);
   // The caret sits right after the value's last cell on the last value row, above any error and the hint.
   expect(cursor.visible, context).toBe(true);
   const caretRow = rows[cursor.y - 1]!;
-  expect(caretRow.trimEnd().endsWith("z") || caretRow.trimEnd().endsWith("8787"), context).toBe(true);
+  expect(valueRow(caretRow), context).toBe(true);
   expect(cursor.x, context).toBe(Bun.stringWidth(caretRow.trimEnd()) + 1);
   expect(cursor.y - 1, context).toBeLessThan(start);
-  expect(rows.slice(cursor.y, start).every(row => !/[az]$|8787$/.test(row.trimEnd()) || row.includes("Enter a full")), context).toBe(true);
+  expect(rows.slice(cursor.y, start).some(valueRow), context).toBe(false);
   return rows;
 }
 
@@ -80,6 +93,27 @@ test("at 24x8, 32x12 and 40x10 the endpoint entry keeps its hint, value and care
       const rows = expectEntryFits(ui, height, label);
       // The error keeps at least its first sentence on screen.
       if (submit) expect(rows.some(row => row.includes("Enter a full URL")), `${label}\n${rows.join("\n")}`).toBe(true);
+    } finally { ui.dispose(); }
+  }
+});
+
+test("at 24x8, 32x12 and 40x10 the masked API-key and callback entries keep their hint, last mask row and caret above the status bar", async () => {
+  const hints = { openai: "Enter save · Esc cancel", callback: "Enter sign in · Esc cancel" } as const;
+  // Long enough that each mask reaches its 64-bullet cap, which takes four rows at 24 columns.
+  const secrets = { openai: `sk-${"k".repeat(120)}`, callback: `http://localhost:1455/auth/callback?code=${"x".repeat(120)}` } as const;
+  for (const surface of ["openai", "callback"] as const) for (const [width, height] of SIZES) {
+    const ui = await entryView(width, height);
+    try {
+      await pasteMasked(ui, surface, secrets[surface]);
+      const snapshot = ui.controller.snapshot(), masked = surface === "openai" ? snapshot.credentialEntry?.masked : snapshot.loginCallbackEntry?.masked;
+      expect(masked).toBe("•".repeat(64));
+      const rows = expectEntryFits(ui, height, `${surface} ${width}x${height}`, hints[surface], row => row.trimEnd().endsWith("•"));
+      // The mask shows whole or keeps its end behind `…` within the value row bound, and never shows the secret.
+      const maskRows = rows.filter(row => row.includes("•")), shown = maskRows.map(row => row.trim()).join("");
+      expect(maskRows.length).toBeLessThanOrEqual(Math.max(1, Math.min(6, Math.floor(height / 4))));
+      expect(shown === masked || /^…•+$/.test(shown), shown).toBe(true);
+      if (width === 24) expect(shown).toStartWith("…");
+      expect(rows.join("\n")).not.toMatch(/kkkk|xxxx|localhost:1455/);
     } finally { ui.dispose(); }
   }
 });

@@ -64,11 +64,9 @@ function charRows(cells: readonly number[], columns: number): number {
   return rows;
 }
 
-/**
- * Fit a displayed value into `rows` rows of `columns` cells as character wrapping lays it out; a longer value keeps its end,
- * where the caret sits, behind a leading `…`. A wide grapheme that skips a row's last cell counts that cell.
- */
+/** Fit a displayed value into `rows` character-wrapped rows of `columns` cells; a longer value keeps its end, where the caret sits, behind a leading `…`. */
 export function fitEntryValue(value: string, columns: number, rows: number): string {
+  // Rows are counted as the renderer wraps them, so a wide grapheme that skips a row's last cell costs that cell.
   // A pasted line break or tab would add rows the bound cannot see, so the field shows it as a space.
   const line = value.replace(/[\t\n\r]/g, " ");
   const width = Math.max(1, columns), limit = Math.max(1, rows), room = width * limit;
@@ -104,12 +102,10 @@ function errorRow(error: string, columns: number): string {
   return fitLine(sentences[0]!, columns);
 }
 
-/**
- * Fit an entry panel into `rows` rows of `columns` cells, with at most `maxValueRows` value rows. The hint and one value row
- * always stay. When rows run short, the panel gives up extra value rows first, then the error's wrapped rows (it keeps its
- * leading sentences on one row), then the title's wrapped rows (it shortens to one row), then the title, then the error.
- */
+/** Fit an entry panel into `rows` rows of `columns` cells with at most `maxValueRows` value rows, always keeping the whole hint and one value row. */
 export function fitCredentialEntry(panel: CredentialEntryPanel, columns: number, rows: number, maxValueRows: number): CredentialEntryLayout {
+  // When rows run short the panel gives up extra value rows first, then the error's wrapped rows (it keeps its leading
+  // sentences on one row), then the title's wrapped rows (it shortens to one row), then the title, then the error.
   const hintRows = wrapHintSegments(panel.hint, columns);
   // The value row keeps one spare cell so a caret after a full row stays inside the panel.
   const valueColumns = Math.max(1, columns - 1);
