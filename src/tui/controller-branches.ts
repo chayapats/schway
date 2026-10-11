@@ -13,8 +13,8 @@ export abstract class BranchesLayer extends SessionsLayer {
     const [action, id, ...label] = args.trim().split(/\s+/);
     if ((action === "tree" || action === "show") && id === undefined) {
       if (this.disposed) return false;
+      // The hint row shows the tree keys while it is open, so the transcript gets no notice that would go stale after Esc.
       this.openBranchTree();
-      this.notice("Choose a conversation · ↑↓ browse · Enter continue · Esc back");
       return true;
     }
     if (action === "list" && id === undefined) {
