@@ -11,7 +11,7 @@ cursor 1 1 hidden
  ChatGPT browser sign-in started
 
  ▌ ! Error
- ▌ Sign-in timed out · Alt+L retry
+ ▌ Sign-in timed out · Alt+L sign in
  ▌ F2 details
 
 
@@ -57,8 +57,8 @@ cursor 1 1 hidden
 05 0-1 #ffffff #0e1117 -
 05 1-2 #e6eaf0 #282b31 -
 05 2-3 #ffffff #282b31 -
-05 3-34 #e6eaf0 #282b31 -
-05 34-38 #ffffff #282b31 -
+05 3-36 #e6eaf0 #282b31 -
+05 36-38 #ffffff #282b31 -
 05 38-40 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
 06 1-2 #e6eaf0 #282b31 -

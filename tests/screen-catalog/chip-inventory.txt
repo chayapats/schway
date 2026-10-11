@@ -74,13 +74,13 @@ details-unavailable | Enter send | Shift+Tab change mode | Ctrl+F find | Alt+I i
 retry-countdown | Esc stop | Shift+Tab change mode | Ctrl+F find
 retry-rate-limit | Esc stop | Shift+Tab change mode | Ctrl+F find
 retry-network | Esc stop | Shift+Tab change mode | Ctrl+F find
-recovery-auth | Alt+L connect | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
+recovery-auth | Alt+L sign in | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
 recovery-credential-store | Ctrl+R retry | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
 recovery-model | Alt+M choose model | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
 recovery-offline | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
 recovery-rate-limit | Ctrl+R continue | F2 details | Esc keep editing | Alt+R review | Shift+Tab change mode | Ctrl+F find
 recovery-session-write | F2 details | Esc keep editing | Alt+R review | /new start fresh | /sessions browse | Shift+Tab change mode
-startup-auth | Alt+L connect | F2 details | Esc keep editing | Shift+Tab change mode | Ctrl+F find
+startup-auth | Alt+L sign in | F2 details | Esc keep editing | Shift+Tab change mode | Ctrl+F find
 startup-credential-store | Ctrl+R retry | F2 details | Esc keep editing | Shift+Tab change mode | Ctrl+F find
 startup-model | Alt+M choose model | F2 details | Esc keep editing | Shift+Tab change mode | Ctrl+F find
 startup-provider | F2 details | Esc keep editing | Shift+Tab change mode | Ctrl+F find | Alt+I inspect
