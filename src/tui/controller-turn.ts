@@ -180,7 +180,10 @@ export abstract class TurnLayer extends CompactionLayer {
         this.recovery.model = loaded.model;
         this.recovery.actions = ["continue", ...(this.recovery.details ? ["details" as const] : []), "keep-editing"];
         const entry = this.transcript.find(item => item.id === this.recovery?.entryId);
-        if (entry) entry.text = `Credential access restored. Continue the saved turn when ready.\nCtrl+R continue · ${this.recovery.details ? "F2 details · " : ""}Esc keep editing`;
+        if (entry) {
+          entry.text = `Credential access restored. Continue the saved turn when ready.\nCtrl+R continue · ${this.recovery.details ? "F2 details · " : ""}Esc keep editing`;
+          entry.keyHintLines = [1];
+        }
       } else {
         this.recovery = undefined;
         this.notice("Credential access restored. Your draft is ready to send when you press Enter.");
@@ -636,7 +639,10 @@ export abstract class TurnLayer extends CompactionLayer {
       if (recovery.accepted && (recovery.category === "auth" || recovery.category === "model")) {
         recovery.actions = ["continue", ...(recovery.details ? ["details" as const] : []), "keep-editing"];
         const entry = this.transcript.find(item => item.id === recovery.entryId);
-        if (entry) entry.text = `${recoveryMessage(recovery.category)}\nCtrl+R continue · ${recovery.details ? "F2 details · " : ""}Esc keep editing`;
+        if (entry) {
+          entry.text = `${recoveryMessage(recovery.category)}\nCtrl+R continue · ${recovery.details ? "F2 details · " : ""}Esc keep editing`;
+          entry.keyHintLines = [entry.text.split("\n").length - 1];
+        }
       }
       this.recoveryRepair = false;
     }
@@ -668,7 +674,7 @@ export abstract class TurnLayer extends CompactionLayer {
       "keep-editing",
     ];
     const controls = actions.map(action => RECOVERY_ACTION_LABELS[action]);
-    const entry: TuiTranscriptEntry = { id: this.nextId("err"), kind: markError ? "error" : "system", text: `${message}\n${controls.join(" · ")}` };
+    const entry: TuiTranscriptEntry = { id: this.nextId("err"), kind: markError ? "error" : "system", text: `${message}\n${controls.join(" · ")}`, keyHintLines: [message.split("\n").length] };
     if (!accepted && this.recovery && !this.recovery.accepted) {
       this.transcript = this.transcript.filter(item => item.id !== this.recovery!.entryId);
     }

@@ -298,10 +298,10 @@ export abstract class ControllerCore {
   protected discoveredCommands?: SkillDiscovery;
   protected commandDiscoveryGeneration = 0;
   protected contextIdentity(): string { return `${this.sessionId}/${this.session.activeBranchId}/${this.provider}/${this.modelId}`; }
-  /** Append a system line without touching session history. */
-  notice(text: string, details?: string): void {
+  /** Append primary text without touching session history; diagnostics default to first-line key offers. */
+  notice(text: string, details?: string, keyHintLines: readonly number[] = details ? [0] : []): void {
     if (details) this.retainNoticeDetails(details);
-    this.transcript.push(this.systemEntry(text));
+    this.transcript.push({ ...this.systemEntry(text), ...(keyHintLines.length ? { keyHintLines } : {}) });
   }
   protected retainNoticeDetails(details: string): void {
     if (this.disposed) return;
@@ -316,7 +316,7 @@ export abstract class ControllerCore {
     const details = this.currentNoticeDetails();
     if (details === undefined) return false;
     this.noticeDetails = undefined;
-    this.notice(`Details · Esc keep editing\n${details}`);
+    this.notice(`Details · Esc keep editing\n${details}`, undefined, [0]);
     return true;
   }
   /** Append an actionable error line and mark the status as error. */
@@ -327,6 +327,7 @@ export abstract class ControllerCore {
       id: this.nextId("err"),
       kind: "error",
       text,
+      ...(details ? { keyHintLines: [0] } : {}),
     });
     this.status = "error";
   }
