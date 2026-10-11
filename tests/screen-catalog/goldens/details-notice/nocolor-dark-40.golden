@@ -9,13 +9,13 @@ cursor 16 17 visible
  ⚡ schway  /project
 
  Choice used for this session
- F2 details
 
- Details · Esc keep editing
+ Details
  The choice could not be saved.
  The project settings file is read-
  only.
  ตรวจสอบสิทธิ์ของไฟล์ 🧪
+
 
 
 
@@ -37,25 +37,23 @@ cursor 16 17 visible
 02 0-1 #ffffff #0e1117 -
 02 1-29 #8b95a7 #0e1117 -
 02 29-40 #ffffff #0e1117 -
-03 0-1 #ffffff #0e1117 -
-03 1-11 #8b95a7 #0e1117 -
-03 11-40 #ffffff #0e1117 -
-04 0-40 #ffffff #0e1117 -
+03 0-40 #ffffff #0e1117 -
+04 0-1 #ffffff #0e1117 -
+04 1-8 #8b95a7 #0e1117 -
+04 8-40 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
-05 1-27 #8b95a7 #0e1117 -
-05 27-40 #ffffff #0e1117 -
+05 1-31 #8b95a7 #0e1117 -
+05 31-40 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
-06 1-31 #8b95a7 #0e1117 -
-06 31-40 #ffffff #0e1117 -
+06 1-35 #8b95a7 #0e1117 -
+06 35-40 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
-07 1-35 #8b95a7 #0e1117 -
-07 35-40 #ffffff #0e1117 -
+07 1-6 #8b95a7 #0e1117 -
+07 6-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
-08 1-6 #8b95a7 #0e1117 -
-08 6-40 #ffffff #0e1117 -
-09 0-1 #ffffff #0e1117 -
-09 1-20 #8b95a7 #0e1117 -
-09 20-40 #ffffff #0e1117 -
+08 1-20 #8b95a7 #0e1117 -
+08 20-40 #ffffff #0e1117 -
+09 0-40 #ffffff #0e1117 -
 10 0-40 #ffffff #0e1117 -
 11 0-40 #ffffff #0e1117 -
 12 0-40 #ffffff #0e1117 -

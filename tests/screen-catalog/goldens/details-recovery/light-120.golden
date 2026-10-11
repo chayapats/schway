@@ -13,7 +13,7 @@ cursor 17 27 visible
 
   ▌ ! Error
   ▌ Request failed · Inspect details before continuing
-  ▌ Ctrl+R continue · Esc keep editing
+  ▌ Ctrl+R continue
 
   ✗ Failed
   Failure details: Provider request failed after 3 transient attempts: Service unavailable
@@ -73,10 +73,8 @@ cursor 17 27 visible
 07 2-3 #a61f16 #edddd9 -
 07 3-4 #ffffff #edddd9 -
 07 4-10 #1d232c #c9cbd0 b
-07 10-22 #a61f16 #edddd9 -
-07 22-25 #1d232c #c9cbd0 b
-07 25-38 #a61f16 #edddd9 -
-07 38-117 #ffffff #edddd9 -
+07 10-19 #a61f16 #edddd9 -
+07 19-117 #ffffff #edddd9 -
 07 117-120 #ffffff #f7f7f4 -
 08 0-120 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -

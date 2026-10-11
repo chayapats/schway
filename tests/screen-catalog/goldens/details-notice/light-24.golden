@@ -7,9 +7,9 @@ size 24x8
 cursor 16 6 visible
 == text
  Details
- Esc keep editing
  The choice could not
  be saved.
+ The project settings
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › งานถัดไป 🧪
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
@@ -19,14 +19,14 @@ cursor 16 6 visible
 00 1-8 #545e6c #f7f7f4 -
 00 8-24 #ffffff #f7f7f4 -
 01 0-1 #ffffff #f7f7f4 -
-01 1-17 #545e6c #f7f7f4 -
-01 17-24 #ffffff #f7f7f4 -
+01 1-22 #545e6c #f7f7f4 -
+01 22-24 #ffffff #f7f7f4 -
 02 0-1 #ffffff #f7f7f4 -
-02 1-22 #545e6c #f7f7f4 -
-02 22-24 #ffffff #f7f7f4 -
+02 1-10 #545e6c #f7f7f4 -
+02 10-24 #ffffff #f7f7f4 -
 03 0-1 #ffffff #f7f7f4 -
-03 1-10 #545e6c #f7f7f4 -
-03 10-24 #ffffff #f7f7f4 -
+03 1-22 #545e6c #f7f7f4 -
+03 22-24 #ffffff #f7f7f4 -
 04 0-1 #ffffff #f7f7f4 -
 04 1-23 #ecedea #f7f7f4 -
 04 23-24 #ffffff #f7f7f4 -

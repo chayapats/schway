@@ -59,7 +59,8 @@ cursor 36 27 visible
 04 0-2 #ffffff #f7f7f4 -
 04 2-3 #a61f16 #edddd9 -
 04 3-4 #ffffff #edddd9 -
-04 4-14 #a61f16 #edddd9 -
+04 4-6 #1d232c #c9cbd0 b
+04 6-14 #a61f16 #edddd9 -
 04 14-77 #ffffff #edddd9 -
 04 77-80 #ffffff #f7f7f4 -
 05 0-80 #ffffff #f7f7f4 -

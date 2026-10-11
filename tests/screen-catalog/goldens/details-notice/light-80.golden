@@ -8,9 +8,9 @@ cursor 17 27 visible
 == text
  ⚡ schway  /project
 
-  Choice used for this session · F2 details
+  Choice used for this session
 
-  Details · Esc keep editing
+  Details
   The choice could not be saved.
   The project settings file is read-only.
   ตรวจสอบสิทธิ์ของไฟล์ 🧪
@@ -45,12 +45,12 @@ cursor 17 27 visible
 00 20-80 #ffffff #ecedea -
 01 0-80 #ffffff #f7f7f4 -
 02 0-2 #ffffff #f7f7f4 -
-02 2-43 #545e6c #f7f7f4 -
-02 43-80 #ffffff #f7f7f4 -
+02 2-30 #545e6c #f7f7f4 -
+02 30-80 #ffffff #f7f7f4 -
 03 0-80 #ffffff #f7f7f4 -
 04 0-2 #ffffff #f7f7f4 -
-04 2-28 #545e6c #f7f7f4 -
-04 28-80 #ffffff #f7f7f4 -
+04 2-9 #545e6c #f7f7f4 -
+04 9-80 #ffffff #f7f7f4 -
 05 0-2 #ffffff #f7f7f4 -
 05 2-32 #545e6c #f7f7f4 -
 05 32-80 #ffffff #f7f7f4 -

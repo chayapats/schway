@@ -63,7 +63,8 @@ cursor 1 1 hidden
 06 0-1 #ffffff #f7f7f4 -
 06 1-2 #a61f16 #edddd9 -
 06 2-3 #ffffff #edddd9 -
-06 3-13 #a61f16 #edddd9 -
+06 3-5 #1d232c #c9cbd0 b
+06 5-13 #a61f16 #edddd9 -
 06 13-48 #ffffff #edddd9 -
 06 48-50 #ffffff #f7f7f4 -
 07 0-50 #ffffff #f7f7f4 -
