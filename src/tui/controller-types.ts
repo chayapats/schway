@@ -61,6 +61,8 @@ export interface TuiTranscriptEntry {
   sessionRecordId?: string;
   kind: "user" | "assistant" | "tool" | "system" | "error";
   text: string;
+  /** Zero-based producer-owned action lines; copied model, path, diff and diagnostic bodies are excluded. */
+  keyHintLines?: readonly number[];
   toolName?: string;
   toolCallId?: string;
   toolStatus?: TuiToolStatus;

@@ -12,7 +12,7 @@ afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 
 const F2 = "\u001bOQ";
 const OFFERED = "Ctrl+R continue · F2 details · Esc keep editing";
-const OPEN = "Ctrl+R continue · Esc keep editing";
+const OPEN = "Ctrl+R continue";
 
 /** Render a real view over a turn that fails every retry, leaving a recovery that offers F2 details. */
 async function failedTurn() {
@@ -38,15 +38,17 @@ async function failedTurn() {
   /** The painted action line of the recovery's error row. */
   const actionRow = () => terminal.captureCharFrame().split("\n").map(line => line.replace(/^[\s▌]+/, "").trimEnd()).find(line => line.startsWith("Ctrl+R continue"));
   const press = async (key: string) => { if (key === "escape") terminal.mockInput.pressEscape(); else terminal.mockInput.pressKey(key); await settle(); };
-  return { controller, view, recovery, actionRow, press };
+  return { controller, view, recovery, actionRow, press, frame: () => terminal.captureCharFrame() };
 }
 
-test("open failure details drop F2 details from the error row and Esc restores it", async () => {
+test("open failure details hide F2 and keep-editing offers and Esc restores both", async () => {
   const ui = await failedTurn();
   expect(ui.actionRow()).toBe(OFFERED);
   await ui.press(F2);
   expect(ui.view.detailsKind()).toBe("recovery");
   expect(ui.actionRow()).toBe(OPEN);
+  expect(ui.frame()).not.toContain("Esc keep editing");
+  expect(ui.frame()).toContain("Esc back");
   // The view hides the dead key; the stored row keeps it for when details close.
   expect(ui.controller.snapshot().transcript.find(entry => entry.id === ui.recovery.entryId)?.text).toEndWith(OFFERED);
   // F2 is ignored while details are open, so the row would have offered a dead key.
@@ -58,12 +60,15 @@ test("open failure details drop F2 details from the error row and Esc restores i
   expect(ui.actionRow()).toBe(OFFERED);
 });
 
-test("open notice details also drop F2 details from the failed turn's error row", async () => {
+test("open notice details hide F2 and keep-editing offers on the recovery and notice rows", async () => {
   const ui = await failedTurn();
   ui.controller.notice("Saved locally · F2 details", "Local evidence");
   await ui.press(F2);
   expect(ui.view.detailsKind()).toBe("notice");
   expect(ui.actionRow()).toBe(OPEN);
+  expect(ui.frame()).not.toContain("F2 details");
+  expect(ui.frame()).not.toContain("Esc keep editing");
+  expect(ui.frame()).toContain("Esc back");
   await ui.press("escape");
   expect(ui.view.detailsKind()).toBeUndefined();
   expect(ui.actionRow()).toBe(OFFERED);

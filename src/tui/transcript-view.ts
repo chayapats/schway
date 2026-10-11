@@ -398,7 +398,7 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
       return animating;
     },
     update(entry, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines = DEFAULT_INLINE_DIFF_LINES, focusedTable) {
-      const next = JSON.stringify([entry.text, entry.toolSummary, entry.resultSummary, entry.shellOutcome, entry.diffRows, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines, focusedTable]);
+      const next = JSON.stringify([entry.text, entry.keyHintLines, entry.toolSummary, entry.resultSummary, entry.shellOutcome, entry.diffRows, entry.toolStatus, entry.incomplete, expanded, streaming, width, focusedCode, focusedTool, inlineDiffLines, focusedTable]);
       if (next === fingerprint) return;
       fingerprint = next;
       repaint = undefined;
@@ -482,14 +482,19 @@ export function createTranscriptItem(renderer: CliRenderer, initial: TuiTranscri
             label.content = entry.incomplete ? new StyledText([fg(ink.warning)("Incomplete response · not saved")]) : "";
           }
           const color = entry.kind === "error" ? ink.error : entry.kind === "system" ? ink.muted : ink.text;
-          // Recovery lines such as "Ctrl+R continue · Esc keep editing" get key chips inside error blocks.
-          // Notice and error lines wrap at ` · ` so a key never ends a row apart from its action; wrapped recovery rows keep their chips.
+          // Recovery action lines keep their chips; marked F2 offers get chips in notice and error headers.
+          // Notice and error lines wrap at ` · ` so a key never ends a row apart from its action.
           const columns = Math.max(1, width - (entry.kind === "error" ? 3 : 0));
           const errorLines = (line: string, index: number): TextChunk[] => {
             const chips = entry.kind === "error" && HINT_KEY.test(line) && line.includes(" ");
+            const colors = { key: theme.text, chip: mixColor(entry.kind === "error" ? errorBlock : background() ?? theme.background, theme.border, 0.9), action: color };
+            const chunks = (row: string) => chips ? keyHintChunks(row, colors)
+              : entry.keyHintLines?.includes(index) ? row.split(" · ").flatMap((segment, part) => [
+                ...(part ? [fg(color)(" · ")] : []), ...(segment === "F2 details" ? keyHintChunks(segment, colors) : [fg(color)(segment)]),
+              ]) : [fg(color)(row)];
             const rows = (entry.kind === "error" || entry.kind === "system") && line.includes(" · ") ? wrapHintSegments(line, columns) : [line];
             return rows.flatMap((row, rowIndex) => [...(index || rowIndex ? [fg(color)("\n")] : []),
-              ...(chips ? keyHintChunks(row, { key: theme.text, chip: mixColor(errorBlock, theme.border, 0.9), action: ink.error }) : [fg(color)(row)])]);
+              ...chunks(row)]);
           };
           if (body instanceof MarkdownRenderable && refill) {
             painters = painters.filter(painter => !painter.node.isDestroyed);

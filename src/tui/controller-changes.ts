@@ -112,7 +112,7 @@ export abstract class ChangesLayer extends BranchesLayer {
       ? [`${formatCount(status.totalFiles, "changed file")} · /changes diff inspect · F2 details`, ...(status.branch ? [`Branch: ${status.branch}`] : ["Detached HEAD"]), ...status.files.map(file => file.path)]
       : ["Not a Git workspace · Enter continue"];
     if (this.gitSnapshotError) primary.unshift("Snapshot unavailable · F2 details");
-    this.notice(redactSecrets(primary.join("\n"), this.secrets), lines.join("\n"));
+    this.notice(redactSecrets(primary.join("\n"), this.secrets), lines.join("\n"), this.gitSnapshotError && status.isGit ? [0, 1] : [0]);
     return true;
   }
 

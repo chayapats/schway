@@ -76,11 +76,12 @@ export function hasToggleableTools(entries: readonly TuiTranscriptEntry[], inlin
   return entries.some(entry => entry.kind === "tool" && !hasInlineDiff(entry, inlineDiffLines) && (entry.toolStatus !== "error" || rowToggles.has(entry.id)));
 }
 
-/** Drop F2 details from an error row's last (action) line, leaving its other keys and ` · ` separators intact. */
-function withoutDetailsKey(text: string): string {
-  const lines = text.split("\n");
-  lines[lines.length - 1] = lines.at(-1)!.split(" · ").filter(segment => segment !== RECOVERY_ACTION_LABELS.details).join(" · ");
-  return lines.join("\n");
+/** Hide keys taken by open details only on producer-owned action lines, preserving literal bodies. */
+function withoutDetailsKeys(entry: TuiTranscriptEntry): string {
+  if ((entry.kind !== "error" && entry.kind !== "system") || !entry.keyHintLines?.length) return entry.text;
+  return entry.text.split("\n").map((line, index) => entry.keyHintLines!.includes(index)
+    ? line.split(" · ").filter(segment => segment !== RECOVERY_ACTION_LABELS.details && segment !== RECOVERY_ACTION_LABELS["keep-editing"]).join(" · ")
+    : line).join("\n");
 }
 
 /** Build the conversation UI with stable messages, a multiline editor, and transient pickers. */
@@ -1294,8 +1295,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
       const updateRow = (row: TranscriptItemView, entry: TuiTranscriptEntry) => {
         // OpenTUI 0.5.11 caches finalized Markdown prefixes. A notice may follow an
         // active answer; finalizing that row early permanently splits later deltas.
-        // Open details ignore F2, so the failed turn's error row stops offering it until Esc closes them.
-        const text = detailsReturn && entry.id === snapshot.recovery?.entryId ? withoutDetailsKey(entry.text) : entry.text;
+        // Open details ignore F2 and take Esc; hide those offers without touching copied bodies.
+        const text = detailsReturn ? withoutDetailsKeys(entry) : entry.text;
         row.update({ ...entry, text: safe(text), toolName: entry.toolName ? safe(entry.toolName) : undefined, toolSummary: entry.toolSummary ? safe(entry.toolSummary) : undefined,
             resultSummary: entry.resultSummary ? safe(entry.resultSummary) : undefined, diffRows: entry.diffRows?.map(row => ({ ...row, text: safe(row.text) })),
           }, (allExpanded || entry.toolStatus === "error") !== expandedTools.has(entry.id), entry.id === snapshot.streamingAssistantId, width - 1,
