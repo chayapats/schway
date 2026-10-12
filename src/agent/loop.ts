@@ -4,7 +4,7 @@ import type { AssistantMessage, ToolCallContent } from "../conversation/types.ts
 import { DEFAULT_MAX_TURNS } from "../config/defaults.ts";
 import type { ContextManager, ContextSection, PreparedContext } from "../context/manager.ts";
 import type { HostedTool, Model, ModelCallOptions, ModelRequest, ModelTool } from "../model/model.ts";
-import { resolveHostedTools, type WebSearchSetting } from "../model/hosted-tools.ts";
+import { resolveHostedTools, type HostedToolAllowance, type WebSearchSetting } from "../model/hosted-tools.ts";
 import { isGrokModel } from "../model/loader.ts";
 import { promptCacheKey } from "../model/prompt-cache-key.ts";
 import type { Session } from "../session/session.ts";
@@ -46,14 +46,21 @@ export interface AgentLoopOptions {
   webSearch?: WebSearchSetting;
 }
 
+/** Internal protocol-fixture dependencies, separate from config and extension-visible options. */
+interface AgentLoopDependencies {
+  /** Fixture-only route admission; production callers use the static allowlist. */
+  hostedToolAllowlist?: readonly HostedToolAllowance[];
+}
+
 /** Stream context, model and tool events while persisting accepted outcomes and settling calls before cancellation finishes. */
 export async function* runAgentLoop(
   options: AgentLoopOptions,
+  dependencies: AgentLoopDependencies = {},
 ): AsyncGenerator<RuntimeEvent> {
   const release = options.session.acquireOperation();
   try {
     const publish = options.extensions?.eventPublisher();
-    for await (const event of runAgentLoopInternal(options)) {
+    for await (const event of runAgentLoopInternal(options, dependencies)) {
       publish?.(event);
       yield event;
     }
@@ -61,7 +68,7 @@ export async function* runAgentLoop(
 }
 
 /** Keep authoritative execution independent of extension notification delivery. */
-async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<RuntimeEvent> {
+async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: AgentLoopDependencies): AsyncGenerator<RuntimeEvent> {
   const user = options.session.items.findLast(item => item.type === "user");
   const undoTurn: UndoTurn | undefined = user ? { sessionId: options.session.rootId, turnId: user.id,
     turnNumber: options.session.items.filter(item => item.type === "user").length } : undefined;
@@ -217,7 +224,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions): AsyncGenerator<
         createActivateSkillTool(options.contextManager),
       ]);
     }
-    hostedTools = hostedToolsFor(options.model, options.webSearch, tools);
+    hostedTools = hostedToolsFor(options.model, options.webSearch, tools, dependencies.hostedToolAllowlist);
     if (hooks && user?.type === "user") {
       turnContext = await hooks.beginTurn(user, signal!);
     }
@@ -310,13 +317,14 @@ function toolCallsOf(message: AssistantMessage): ToolCallContent[] {
 }
 
 /** Decide hosted tools from the session's model, its route, config and the registered function tools; fixed for every round. */
-function hostedToolsFor(model: Model, webSearch: WebSearchSetting | undefined, registry: ToolRegistry | undefined): readonly HostedTool[] {
+function hostedToolsFor(model: Model, webSearch: WebSearchSetting | undefined, registry: ToolRegistry | undefined, allowlist?: readonly HostedToolAllowance[]): readonly HostedTool[] {
   return resolveHostedTools({
     provider: model.provider,
     route: model.provider === "xai" ? isGrokModel(model) ? "grok" : "api-key" : undefined,
     model: model.id,
     webSearch,
     functionToolNames: registry?.definitions().map(definition => definition.name) ?? [],
+    allowlist,
   });
 }
 

@@ -171,12 +171,16 @@ because of a probe result.
 
 ## Hosted web search check
 
-This operator procedure decides whether an xAI route may receive hosted
-[web search](configuration.md#web-search) and whether it accepts the hosted
-items Schway replays. It is a **paid/remote opt-in**: never a default
-`bun test` case, CI job or eval, and it runs only when an operator chooses to.
-Run it for the Grok subscription route, and for the xAI API-key route when a
-key is available. It reads `hostedSearchCalls`, `reportedHostedSearchCalls`,
+Record live [web search](configuration.md#web-search) and stateless replay
+support for each route and model before adding it to the production allowlist.
+Real-work dogfood (#161) supplies latency evidence and may record this support;
+a separate live probe is not required (#316). Ordinary release eval success
+does not establish hosted-search or replay support.
+
+This optional operator diagnostic checks hosted search and whether an xAI
+route accepts the hosted items Schway replays. It is a **paid/remote opt-in**:
+never a default `bun test` case, CI job or eval, and it runs only when an
+operator chooses to. It reads `hostedSearchCalls`, `reportedHostedSearchCalls`,
 `inputTokens` and `outputTokens` from the `ModelUsage` contract.
 
 ```sh
@@ -223,20 +227,23 @@ bun --no-env-file src/live/web-search-probe.ts --enable-live --route xai-api-key
   Exit code 0 means every call completed, 2 means skipped or incomplete, 1 a
   failure or usage error.
 
-Preserve the JSON with its date, revision, model and route, and record it in
-the PR that changes the allowlist (`HOSTED_TOOL_ALLOWLIST` in
-`src/model/hosted-tools.ts`) and in the table below. A `pass` admits the route
-and model. `replay_rejected` admits it with that route's
-`XAI_HOSTED_ITEM_REPLAY` switch turned off. `unsupported` is recorded here as
-unsupported. `bun test tests/web-search-probe.test.ts` checks the procedure with
-protocol fixtures only; that is not live evidence.
+Preserve live evidence with its date, revision, model and route, and record it
+in the PR that changes the allowlist (`HOSTED_TOOL_ALLOWLIST` in
+`src/model/hosted-tools.ts`) and in the table below. Include the returned hosted
+items and the outcome of stateless replay. If using this diagnostic, preserve
+its JSON: a `pass` admits the route and model. `replay_rejected` admits it with
+that route's `XAI_HOSTED_ITEM_REPLAY` switch turned off. `unsupported` is
+recorded here as unsupported. Documentation alone cannot admit a route.
+`bun test tests/web-search-probe.test.ts` checks the procedure with protocol
+fixtures only; that is not live evidence.
 
 | Route | Model | Status | Evidence |
 | --- | --- | --- | --- |
-| xAI API key | `grok-4.7` | **Allowed from documentation; live check not run** | xAI documents hosted web search on `/v1/responses` with `grok-4.7` ([web search](https://docs.x.ai/developers/tools/web-search), read 2026-10-08) and resending earlier output items for stateless conversations ([advanced usage](https://docs.x.ai/docs/guides/tools/advanced-usage)). Replay is on. |
-| Grok subscription | `grok-4.7` | **Off; live check not run** | No official xAI page covers server-side tools with a subscription login. |
+| xAI API key | `grok-4.7` | **Off; no recorded live evidence** | xAI documents hosted search and stateless conversations ([web search](https://docs.x.ai/developers/tools/web-search), [advanced usage](https://docs.x.ai/docs/guides/tools/advanced-usage), read 2026-10-08); route/model hosted-search and replay support has not been recorded live. |
+| Grok subscription | `grok-4.7` | **Off; no recorded live evidence** | Route/model hosted-search and replay support has not been recorded live. |
 
-**Recorded runs: none.** No operator has run this check.
+**Recorded hosted-search live evidence: none.** The production allowlist stays
+empty. No operator has run this diagnostic.
 
 ## Reasoning controls and deterministic verification
 

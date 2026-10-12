@@ -22,19 +22,11 @@ export interface HostedToolAllowance {
 
 /**
  * Routes and models that may receive hosted tools. Unknown routes, unknown models, compatible
- * endpoints, native OpenAI and the ChatGPT subscription never appear here. The Grok subscription
- * route stays off: no official xAI page covers server-side tools with a subscription login, and no
- * live check has passed for it.
+ * endpoints, native OpenAI and the ChatGPT subscription never appear here. An entry requires
+ * recorded route/model hosted-search and replay evidence; documentation alone does not admit it.
+ * No such live evidence is recorded, so both xAI API-key and Grok subscription routes stay off.
  */
-export const HOSTED_TOOL_ALLOWLIST: readonly HostedToolAllowance[] = [
-  {
-    provider: "xai",
-    route: "api-key",
-    model: "grok-4.7",
-    tool: "web_search",
-    evidence: "xAI documentation read 2026-10-08 (https://docs.x.ai/developers/tools/web-search); live check not yet run",
-  },
-];
+export const HOSTED_TOOL_ALLOWLIST: readonly HostedToolAllowance[] = [];
 
 /** Metadata key, inside one provider namespace of message-level `providerMetadata`, that holds kept hosted items. */
 export const HOSTED_ITEMS_KEY = "hosted_items";

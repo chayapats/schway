@@ -527,14 +527,15 @@ one model response instead of Schway fetching pages through tools.
 ```
 
 - `"auto"` (the default) sends hosted search only where Schway's allowlist
-  confirms the route and model. Today that is the xAI API-key route with
-  `grok-4.7`, which xAI documents
-  ([web search](https://docs.x.ai/developers/tools/web-search)).
+  records live hosted-search and replay evidence for the route and model.
+  The allowlist is empty today: both the xAI API-key and Grok subscription
+  routes stay off until that evidence is recorded. Documentation alone does
+  not admit a route.
 - `"off"` never sends it. Any other value fails with
   `Invalid webSearch · Use auto or off`.
 
-The Grok subscription route, native OpenAI, the ChatGPT subscription and
-OpenAI-compatible endpoints never get hosted search, whatever the setting. An
+Native OpenAI, the ChatGPT subscription and OpenAI-compatible endpoints never
+get hosted search, whatever the setting. An
 extension that registers its own tool named `web_search` keeps it, and hosted
 search stays off for that session.
 
@@ -560,8 +561,10 @@ search stays off for that session.
   ([usage fields](extensions.md#usage-and-timing-fields)).
 
 The decision is recorded in
-[ADR 0007](adr/0007-provider-hosted-lookups.md). An operator can check a route
-with the opt-in [hosted web search check](live-providers.md#hosted-web-search-check).
+[ADR 0007](adr/0007-provider-hosted-lookups.md). Record support during real-work
+dogfood; a separate live probe is not required. The opt-in
+[hosted web search check](live-providers.md#hosted-web-search-check) remains
+available for operator diagnostics.
 
 ## Undo retention
 

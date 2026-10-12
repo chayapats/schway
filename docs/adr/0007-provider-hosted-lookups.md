@@ -14,16 +14,16 @@ A provider-hosted, read-only lookup that finishes inside a single model response
 
 ## Routes
 
-Hosted search is sent only on routes and models in a static allowlist (`HOSTED_TOOL_ALLOWLIST` in `src/model/hosted-tools.ts`), and only while `webSearch` is `auto`.
+Hosted search is sent only on routes and models in a static allowlist (`HOSTED_TOOL_ALLOWLIST` in `src/model/hosted-tools.ts`), and only while `webSearch` is `auto`. Each entry requires recorded live evidence of hosted search and stateless replay on that route and model. The production allowlist is empty because no such evidence is recorded.
 
 | Route | Model | Hosted web search | Evidence |
 | --- | --- | --- | --- |
-| xAI API key | `grok-4.7` | On | xAI documents `{"type": "web_search"}` on `POST /v1/responses` with `grok-4.7` ([web search](https://docs.x.ai/developers/tools/web-search)), mixing it with function tools, and passing earlier output items back for stateless multi-turn use ([advanced usage](https://docs.x.ai/docs/guides/tools/advanced-usage)). Read 2026-10-08. The [live check](../live-providers.md#hosted-web-search-check) has not been run. |
-| Grok subscription | any | **Off** | No official xAI page covers server-side tools with a subscription login, and no live check has passed. |
-| xAI API key | other models | Off | Not documented for this use. |
+| xAI API key | `grok-4.7` | **Off** | xAI documents hosted search and stateless conversations ([web search](https://docs.x.ai/developers/tools/web-search), [advanced usage](https://docs.x.ai/docs/guides/tools/advanced-usage), read 2026-10-08), but no route/model hosted-search and replay live evidence is recorded. |
+| Grok subscription | any | **Off** | No route/model hosted-search and replay live evidence is recorded. |
+| xAI API key | other models | **Off** | No route/model hosted-search and replay live evidence is recorded. |
 | Native OpenAI, ChatGPT subscription, OpenAI-compatible | any | **Off** | Out of scope; these routes must stay off. |
 
-A route enters the allowlist with a recorded pass of the live check, or with an official xAI page that documents it, cited in the entry. A route the check rejects is recorded as unsupported. If xAI rejects replayed hosted items on `store: false`, that route turns off `XAI_HOSTED_ITEM_REPLAY`: the items stay stored and are left out of the request.
+A route and model enter the allowlist only with recorded live hosted-search and replay evidence, cited in the entry and in [live-provider guidance](../live-providers.md#hosted-web-search-check). Documentation, protocol fixtures and ordinary release evals do not establish this support. Real-work dogfood (#161) supplies latency evidence and may record this support; a separate live probe is not required (#316). The existing opt-in check remains an operator diagnostic. A route that rejects search is recorded as unsupported. If recorded live evidence shows xAI rejects replayed hosted items on `store: false` but accepts the follow-up without them, that route turns off `XAI_HOSTED_ITEM_REPLAY`: the items stay stored and are left out of the request.
 
 ## Consequences
 
