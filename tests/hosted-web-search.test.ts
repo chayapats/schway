@@ -10,7 +10,7 @@ import { SUMMARY_SYSTEM_PROMPT } from "../src/context/compaction.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import type { AssistantMessage, ConversationItem, UserMessage } from "../src/conversation/types.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
-import { HOSTED_ITEMS_KEY, HOSTED_TOOL_ALLOWLIST, hostedSearchCount, MAX_HOSTED_ITEM_BYTES, resolveHostedTools } from "../src/model/hosted-tools.ts";
+import { HOSTED_ITEMS_KEY, HOSTED_TOOL_ALLOWLIST, hostedSearchCount, MAX_HOSTED_ITEM_BYTES, resolveHostedTools, type HostedToolAllowance } from "../src/model/hosted-tools.ts";
 import { loadProviderModel } from "../src/model/loader.ts";
 import type { Model, ModelRequest, ModelStreamEvent } from "../src/model/model.ts";
 import { promptCacheKey } from "../src/model/prompt-cache-key.ts";
@@ -35,6 +35,9 @@ import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 
 const workspace = { root: "/tmp/project", launchCwd: "/tmp/project", extraRoots: [] as string[] };
 const SSE = { "Content-Type": "text/event-stream" };
+const FIXTURE_ALLOWLIST: readonly HostedToolAllowance[] = (["api-key", "grok"] as const).map(route => ({
+  provider: "xai", route, model: "grok-4.7", tool: "web_search", evidence: "protocol fixture, not live evidence",
+}));
 
 function user(text: string, id: string = crypto.randomUUID()): UserMessage {
   return { type: "user", id, content: [{ type: "text", text }] };
@@ -51,10 +54,22 @@ function capturingXai(options: { model?: string; events?: (call: number) => read
   return { model, bodies };
 }
 
+/** Grok subscription adapter on a fetch fixture that records each raw request body. */
+async function capturingGrok() {
+  const store = fakeCredentialStore();
+  await saveSubscriptionTokens(store, { accessToken: "grok-token", refreshToken: "refresh", obtainedAt: Date.now() });
+  const bodies: string[] = [];
+  const model = await loadProviderModel({ provider: "xai", model: "grok-4.7", xaiAuth: "grok", grokStore: store }, async (_url, init) => {
+    bodies.push(String(init!.body));
+    return new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: SSE });
+  });
+  return { model, bodies };
+}
+
 /** Run one agent turn and return the raw bodies sent, with the session's conversation key masked. */
-async function turnBodies(model: Model, bodies: string[], options: { webSearch?: "auto" | "off"; session?: Session; tools?: ReturnType<typeof createToolRegistry>; extensions?: Parameters<typeof runAgentLoop>[0]["extensions"] } = {}) {
+async function turnBodies(model: Model, bodies: string[], options: { webSearch?: "auto" | "off"; session?: Session; tools?: ReturnType<typeof createToolRegistry>; extensions?: Parameters<typeof runAgentLoop>[0]["extensions"]; allowlist?: readonly HostedToolAllowance[] } = {}) {
   const session = options.session ?? createSession([user("hello")]);
-  const events = await collect(runAgentLoop({ session, model, contextManager: createContextManager(workspace), webSearch: options.webSearch, tools: options.tools, extensions: options.extensions }));
+  const events = await collect(runAgentLoop({ session, model, contextManager: createContextManager(workspace), webSearch: options.webSearch, tools: options.tools, extensions: options.extensions }, { hostedToolAllowlist: options.allowlist }));
   const sent = bodies.splice(0).map(body => body.replaceAll(promptCacheKey(session), "KEY"));
   return { events, sent, session };
 }
@@ -63,14 +78,32 @@ function toolsOf(body: string): Array<{ type: string; name?: string }> {
   return (JSON.parse(body) as { tools?: Array<{ type: string; name?: string }> }).tools ?? [];
 }
 
+test("unverified production xAI and Grok auto requests equal disabled-search requests at the loop boundary", async () => {
+  for (const [route, build] of [["api-key", capturingXai], ["grok", capturingGrok]] as const) {
+    const { model, bodies } = await build();
+    const run = (webSearch?: "auto" | "off") => turnBodies(model, bodies, {
+      webSearch, tools: createToolRegistry([readTool]), session: createSession([user("hello", "u-fixed")]),
+    });
+    const off = await run("off");
+    const auto = await run("auto");
+    const unset = await run();
+    expect(auto.events.at(-1), route).toEqual({ type: "agent.finished", reason: "completed" });
+    expect(auto.sent, route).toHaveLength(1);
+    expect(auto.sent, route).toEqual(off.sent);
+    expect(auto.sent, route).toEqual(unset.sent);
+    expect(toolsOf(auto.sent[0]!), route).toEqual([expect.objectContaining({ type: "function", name: "read" })]);
+  }
+});
+
 test("the gate admits only allowlisted xAI routes and models with webSearch auto and no web_search function tool", () => {
-  const base = { provider: "xai", route: "api-key" as const, model: "grok-4.7", webSearch: "auto" as const, functionToolNames: ["read", "bash"] };
-  expect(HOSTED_TOOL_ALLOWLIST.map(entry => `${entry.provider}/${entry.route}/${entry.model}/${entry.tool}`)).toEqual(["xai/api-key/grok-4.7/web_search"]);
+  const base = { provider: "xai", route: "api-key" as const, model: "grok-4.7", webSearch: "auto" as const, functionToolNames: ["read", "bash"], allowlist: FIXTURE_ALLOWLIST };
+  expect(HOSTED_TOOL_ALLOWLIST).toEqual([]);
+  expect(resolveHostedTools({ ...base, allowlist: undefined })).toEqual([]);
   expect(resolveHostedTools(base)).toEqual(["web_search"]);
   expect(resolveHostedTools({ ...base, webSearch: undefined })).toEqual([]);
   expect(resolveHostedTools({ ...base, webSearch: "off" })).toEqual([]);
   expect(resolveHostedTools({ ...base, model: "grok-4.5" })).toEqual([]);
-  expect(resolveHostedTools({ ...base, route: "grok" })).toEqual([]);
+  expect(resolveHostedTools({ ...base, route: "grok" })).toEqual(["web_search"]);
   expect(resolveHostedTools({ ...base, route: undefined })).toEqual([]);
   expect(resolveHostedTools({ ...base, provider: "openai", route: undefined, model: "gpt-6-astra" })).toEqual([]);
   expect(resolveHostedTools({ ...base, provider: "openai-compatible", route: undefined })).toEqual([]);
@@ -81,12 +114,16 @@ test("the gate admits only allowlisted xAI routes and models with webSearch auto
   expect(resolveHostedTools({ ...base, allowlist })).toEqual([]);
 });
 
-test("an allowlisted API-key session sends the function tools then one web_search entry", async () => {
-  const { model, bodies } = capturingXai();
-  const { sent } = await turnBodies(model, bodies, { webSearch: "auto", tools: createToolRegistry([readTool]) });
-  expect(sent).toHaveLength(1);
-  expect(toolsOf(sent[0]!).map(tool => tool.name ?? tool.type)).toEqual(["read", "web_search"]);
-  expect(toolsOf(sent[0]!).at(-1)).toEqual({ type: "web_search" });
+test("explicitly allowlisted API-key and subscription sessions send the function tools then one web_search entry", async () => {
+  for (const build of [capturingXai, capturingGrok]) {
+    const { model, bodies } = await build();
+    const { sent } = await turnBodies(model, bodies, { webSearch: "auto", tools: createToolRegistry([readTool]), allowlist: FIXTURE_ALLOWLIST });
+    expect(sent).toHaveLength(1);
+    expect(toolsOf(sent[0]!).map(tool => tool.name ?? tool.type)).toEqual(["read", "web_search"]);
+    expect(toolsOf(sent[0]!).at(-1)).toEqual({ type: "web_search" });
+    const off = await turnBodies(model, bodies, { webSearch: "off", tools: createToolRegistry([readTool]), allowlist: FIXTURE_ALLOWLIST });
+    expect(toolsOf(off.sent[0]!).some(tool => tool.type === "web_search")).toBe(false);
+  }
 });
 
 test("every disallowed request sends a body byte-identical to one sent without the setting", async () => {
@@ -94,16 +131,7 @@ test("every disallowed request sends a body byte-identical to one sent without t
   const cases: Array<[string, () => Promise<{ model: Model; bodies: string[] }>, "auto" | "off"]> = [
     ["webSearch off", async () => capturingXai(), "off"],
     ["unknown model", async () => capturingXai({ model: "grok-4.5" }), "auto"],
-    ["unlisted Grok subscription route", async () => {
-      const store = fakeCredentialStore();
-      await saveSubscriptionTokens(store, { accessToken: "grok-token", refreshToken: "refresh", obtainedAt: Date.now() });
-      const bodies: string[] = [];
-      const model = await loadProviderModel({ provider: "xai", model: "grok-4.7", xaiAuth: "grok", grokStore: store }, async (_url, init) => {
-        bodies.push(String(init!.body));
-        return new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: SSE });
-      });
-      return { model, bodies };
-    }, "auto"],
+    ["unlisted Grok subscription route", capturingGrok, "auto"],
     ["native OpenAI", async () => {
       const bodies: string[] = [];
       const model = createOpenAIModel({ model: "gpt-6-astra", apiKey: "fixture", fetch: async (_url, init) => {
@@ -148,7 +176,7 @@ test("an extension function tool named web_search wins and the body matches toda
     try {
       const { model, bodies } = capturingXai();
       const plain = await turnBodies(model, bodies, { tools: setup.tools, extensions: setup.runtime, session: createSession([user("hello", "u-fixed")]) });
-      const auto = await turnBodies(model, bodies, { tools: setup.tools, extensions: setup.runtime, webSearch: "auto", session: createSession([user("hello", "u-fixed")]) });
+      const auto = await turnBodies(model, bodies, { tools: setup.tools, extensions: setup.runtime, webSearch: "auto", session: createSession([user("hello", "u-fixed")]), allowlist: FIXTURE_ALLOWLIST });
       expect(auto.sent).toEqual(plain.sent);
       expect(toolsOf(auto.sent[0]!).filter(tool => tool.type === "web_search")).toEqual([]);
       expect(toolsOf(auto.sent[0]!).filter(tool => tool.name === "web_search")).toHaveLength(1);
@@ -171,7 +199,7 @@ test("extension hooks cannot see, drop or set the Schway-chosen hosted entry", a
       const setup = await extensionFixture(dir, `export default ctx => { ${hook} };`);
       try {
         const { model, bodies } = capturingXai();
-        const { events, sent } = await turnBodies(model, bodies, { tools: setup.tools, extensions: setup.runtime, webSearch: "auto" });
+        const { events, sent } = await turnBodies(model, bodies, { tools: setup.tools, extensions: setup.runtime, webSearch: "auto", allowlist: FIXTURE_ALLOWLIST });
         expect(events.some(event => event.type === "error")).toBe(false);
         expect(sent).toHaveLength(1);
         expect(toolsOf(sent[0]!).at(-1)).toEqual({ type: "web_search" });
@@ -179,16 +207,18 @@ test("extension hooks cannot see, drop or set the Schway-chosen hosted entry", a
       } finally { setup.runtime.dispose(); }
     });
   }
-  await withTempDir(async dir => {
-    const setup = await extensionFixture(dir, `export default ctx => { ctx.beforeModel(request => ({ ...request, hostedTools: [] })); };`);
-    try {
-      const { model, bodies } = capturingXai();
-      const { events, sent } = await turnBodies(model, bodies, { tools: setup.tools, extensions: setup.runtime, webSearch: "auto" });
-      const error = events.find(event => event.type === "error");
-      expect(error?.type === "error" && error.message).toMatch(/^Extension ".*extension\.ts" beforeModel: unsupported field/);
-      expect(sent).toHaveLength(0);
-    } finally { setup.runtime.dispose(); }
-  });
+  for (const override of ["hostedTools: []", "hostedTools: ['web_search']", `hostedToolAllowlist: ${JSON.stringify(FIXTURE_ALLOWLIST)}`]) {
+    await withTempDir(async dir => {
+      const setup = await extensionFixture(dir, `export default ctx => { ctx.beforeModel(request => ({ ...request, ${override} })); };`);
+      try {
+        const { model, bodies } = capturingXai();
+        const { events, sent } = await turnBodies(model, bodies, { tools: setup.tools, extensions: setup.runtime, webSearch: "auto" });
+        const error = events.find(event => event.type === "error");
+        expect(error?.type === "error" && error.message).toMatch(/^Extension ".*extension\.ts" beforeModel: unsupported field/);
+        expect(sent).toHaveLength(0);
+      } finally { setup.runtime.dispose(); }
+    });
+  }
 });
 
 test("rounds and turns in one session send the same tools array; a model outside the allowlist drops the entry", async () => {
@@ -198,16 +228,16 @@ test("rounds and turns in one session send the same tools array; a model outside
     await Bun.write(join(dir, "note.txt"), "hello\n");
     const session = createSession([user("inspect")]);
     const tools = createToolRegistry([readTool, { ...readTool, name: "grep" }]);
-    await collect(runAgentLoop({ session, model, workspace: local, contextManager: createContextManager(local), tools, webSearch: "auto" }));
+    await collect(runAgentLoop({ session, model, workspace: local, contextManager: createContextManager(local), tools, webSearch: "auto" }, { hostedToolAllowlist: FIXTURE_ALLOWLIST }));
     session.append(user("again"));
-    await collect(runAgentLoop({ session, model, workspace: local, contextManager: createContextManager(local), tools, webSearch: "auto" }));
+    await collect(runAgentLoop({ session, model, workspace: local, contextManager: createContextManager(local), tools, webSearch: "auto" }, { hostedToolAllowlist: FIXTURE_ALLOWLIST }));
     expect(bodies).toHaveLength(3);
     const arrays = bodies.map(body => JSON.stringify(toolsOf(body)));
     expect(new Set(arrays).size).toBe(1);
     expect(toolsOf(bodies[0]!).at(-1)).toEqual({ type: "web_search" });
     const other = capturingXai({ model: "grok-4.5" });
     session.append(user("switch"));
-    await collect(runAgentLoop({ session, model: other.model, workspace: local, contextManager: createContextManager(local), tools, webSearch: "auto" }));
+    await collect(runAgentLoop({ session, model: other.model, workspace: local, contextManager: createContextManager(local), tools, webSearch: "auto" }, { hostedToolAllowlist: FIXTURE_ALLOWLIST }));
     expect(toolsOf(other.bodies[0]!).some(tool => tool.type === "web_search")).toBe(false);
     expect(JSON.stringify(toolsOf(other.bodies[0]!))).toBe(JSON.stringify(toolsOf(bodies[0]!).slice(0, -1)));
   });
@@ -223,7 +253,7 @@ test("a compaction summary request never carries hosted tools", async () => {
   const items: ConversationItem[] = [];
   for (let i = 0; i < 3; i++) items.push(user(`goal ${i}`), { type: "assistant", id: `a${i}`, content: [{ type: "text", text: `progress ${i}` }] });
   const session = createSession([...items, user("continue")]);
-  await collect(runAgentLoop({ session, model, contextManager: createContextManager(workspace, { contextWindow: 1, keepTurns: 1 }), webSearch: "auto" }));
+  await collect(runAgentLoop({ session, model, contextManager: createContextManager(workspace, { contextWindow: 1, keepTurns: 1 }), webSearch: "auto" }, { hostedToolAllowlist: FIXTURE_ALLOWLIST }));
   const summaries = requests.filter(request => request.systemPrompt === SUMMARY_SYSTEM_PROMPT);
   expect(summaries.length).toBeGreaterThan(0);
   expect(summaries.every(request => request.hostedTools === undefined && request.tools === undefined)).toBe(true);
@@ -317,7 +347,7 @@ test("usage carries the kept search count and the provider's own counter, and no
   // Through the loop the per-call record and the message telemetry carry the same count.
   const { model } = capturingXai({ events: () => webSearchEvents({ usage }) });
   const session = createSession([user("weather?")]);
-  const events = await collect(runAgentLoop({ session, model, contextManager: createContextManager(workspace), webSearch: "auto" }));
+  const events = await collect(runAgentLoop({ session, model, contextManager: createContextManager(workspace), webSearch: "auto" }, { hostedToolAllowlist: FIXTURE_ALLOWLIST }));
   expect(events.find(event => event.type === "model.usage")).toMatchObject({ phase: "turn", usage: { hostedSearchCalls: 1, reportedHostedSearchCalls: 1 } });
   const committed = session.items.findLast(item => item.type === "assistant") as AssistantMessage;
   expect(committed.telemetry?.usage).toMatchObject({ hostedSearchCalls: 1, reportedHostedSearchCalls: 1 });
@@ -371,27 +401,35 @@ test("webSearch accepts auto and off, defaults to auto and rejects other values 
   const invalid = parseConfigObject({ webSearch: "on" }, "/config.json");
   expect(invalid).toMatchObject({ diagnostics: [expect.objectContaining({ source: "/config.json", path: "webSearch", category: "enum" })] });
   expect(JSON.stringify(invalid)).toContain("auto");
+  const admissionOverride = parseConfigObject({ webSearch: "auto", hostedToolAllowlist: FIXTURE_ALLOWLIST }, "/config.json");
+  expect(admissionOverride).toMatchObject({ diagnostics: [expect.objectContaining({ category: "unknown-setting" })] });
 });
 
 test("a scripted model never fails because of hosted tools it cannot honor", async () => {
   const model = createScriptedModel({ provider: "xai", id: "grok-4.7", text: "done" });
-  const events = await collect(runAgentLoop({ session: createSession([user("hi")]), model, contextManager: createContextManager(workspace), webSearch: "auto" }));
+  const events = await collect(runAgentLoop({ session: createSession([user("hi")]), model, contextManager: createContextManager(workspace), webSearch: "auto" }, { hostedToolAllowlist: FIXTURE_ALLOWLIST }));
   expect(events.at(-1)).toEqual({ type: "agent.finished", reason: "completed" });
 });
 
-test("headless runs send hosted search with webSearch unset, none with webSearch off, and --json output gains no new event", async () => {
+test("headless production defaults and webSearch off send no hosted search, and --json output gains no new event", async () => {
   await withTempDir(async home => {
     const { model, bodies } = capturingXai();
     const lines: string[] = [];
     const run = (argv: string[]) => runCli(argv, { cwd: home, env: { HOME: home }, stdout: { write(chunk: string) { lines.push(chunk); } }, stderr: { write() {} }, model });
     expect(await run(["-p", "weather?", "--json"])).toBe(0);
-    expect(toolsOf(bodies[0]!).at(-1)).toEqual({ type: "web_search" });
+    expect(bodies[0]).not.toContain("web_search");
     const types = lines.join("").trim().split("\n").map(line => (JSON.parse(line) as { type: string }).type);
     expect(new Set(types)).toEqual(new Set(["session.ready", "agent.started", "model.started", "model.delta", "model.usage", "model.finished", "agent.finished"]));
     await mkdir(join(home, ".schway"), { recursive: true });
     await writeFile(join(home, ".schway", "config.json"), JSON.stringify({ webSearch: "off" }));
     expect(await run(["-p", "weather?"])).toBe(0);
     expect(bodies[1]).not.toContain("web_search");
+    const withoutKey = bodies.map(body => {
+      const parsed = JSON.parse(body) as Record<string, unknown>;
+      delete parsed.prompt_cache_key;
+      return parsed;
+    });
+    expect(withoutKey[1]).toEqual(withoutKey[0]!);
   });
 });
 

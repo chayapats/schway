@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep hosted web search off on both the xAI API-key and Grok subscription
+  routes until route/model hosted-search and replay live evidence is recorded.
+  The production allowlist is empty; `webSearch: "auto"` sends no hosted search
+  today, and `"off"` continues to send none. Hosted storage, replay and usage
+  remain supported. Documentation and ordinary release evals do not admit a
+  route (#391).
+
 ## [1.0.0-rc.2] - 2026-10-11
 
 ### Breaking
