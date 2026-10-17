@@ -34,6 +34,8 @@ The proposed package entry point is schway/host. Naming and exact TypeScript sig
 14. As a host application, I want usage completeness reported honestly so that absent counters are not presented as zero cost.
 15. As a host application, I want cancellation and disposal to settle accepted work without accepting late success.
 16. As a Schway maintainer, I want existing CLI, extensions and session compatibility preserved while adding the host contract.
+17. As a host application, I want to retire/delete only my managed native sessions so that corrected, forgotten or deleted context cannot silently return through replay or stale writers.
+18. As a host application, I want a supported coherent native snapshot and restore-validation path so that backups do not require private imports or rewriting native formats.
 
 ## Implementation Decisions
 
@@ -51,6 +53,10 @@ The host can create/open a session, start an accepted turn/run, inspect its nati
 Accepting input appends native conversation data before requesting inference. At most one run mutates a session at once. A second writer receives a typed busy/conflict outcome. Durable outcomes are referenced explicitly; runtime event streams remain transient observations.
 
 Closing/cancelling stops new work, cancels queued work, settles cooperative accepted calls and releases session ownership. The host contract must not promise preemption of arbitrary synchronous extension code. A terminal transport/model outcome is not an application-level task acceptance result.
+
+The managed-session lifecycle also supports retirement and deletion of validated opaque references owned by the configured host store. Active/unknown writers conflict before deletion; retired references cannot silently reopen, and stale writers cannot recreate successfully deleted artifacts. This is not a general filesystem API. Jit owns deletion authorization, source lineage, backup retention and external copies.
+
+For backup, expose a quiesced snapshot/export or supported closed-session copy lease with versioned native references, artifact inventory and integrity metadata. Restore validates native compatibility without running models/tools or rewriting formats in Jit. Missing/incomplete/incompatible artifacts remain blocked. Jit coordinates its application snapshot and current deletion ledger separately; a native lease does not provide a distributed transaction.
 
 ### Context policy
 
@@ -88,6 +94,8 @@ Expose needs-login/store-unavailable/rejected/ready-or-unverified states without
 - [ ] Terminal outcomes distinguish completed, failed, cancelled and limit exhaustion; transient deltas are not durable accepted answers.
 - [ ] Credential values are absent from events, returned diagnostics, prompts and exported host metadata.
 - [ ] Existing CLI/extension/session compatibility tests and public declaration checks pass.
+- [ ] Managed retirement/deletion rejects unowned/path-escape references, conflicts with active writers and prevents late recreation; partial cleanup remains visible.
+- [ ] A public consumer captures a coherent managed native snapshot, validates/restores it and reopens its ancestry; corrupt/incompatible sets remain inactive.
 
 ## Testing Decisions
 
@@ -103,6 +111,6 @@ Jit groups, memory, job queue, Telegram, Web, task acceptance, application DB tr
 
 ## Further Notes
 
-Requirements traced: Jit FR-02, FR-13–FR-17 and NFR-02–NFR-05/NFR-10. Jit must fence/reconcile its own app results; Schway session append is not atomic with Jit's application store.
+Requirements traced: Jit FR-02, FR-13–FR-18 and NFR-02–NFR-05/NFR-08/NFR-10/NFR-12. Jit must fence/reconcile its own app results; Schway session append is not atomic with Jit's application store. Managed retirement/delete/snapshot refine the lifecycle for the already-required Jit memory and recovery behavior; they do not add general host filesystem authority.
 
 This is a design parent for focused implementation tickets. It is not an instruction for one agent to implement the entire API at once. The product parent is [Jit MVP spec #1](https://github.com/chayapats/jit/issues/1); related host evidence is [Jit S01 #2](https://github.com/chayapats/jit/issues/2).
