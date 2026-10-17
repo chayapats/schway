@@ -149,8 +149,10 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       if (ownedSessions.has(key)) throw new HostError("busy");
       ownedSessions.add(key); opening++;
       try {
-        const native = await loadJsonlSession({ directory, id: selected.id, branchId: selected.branchId });
-        if (native.header.workspaceRoot !== root || native.metadata.extraRoots.length) throw new HostError("workspace-mismatch");
+        const native = await loadJsonlSession({ directory, id: selected.id, branchId: selected.branchId,
+          validateIdentity: (workspaceRoot, extraRoots) => {
+            if (workspaceRoot !== root || extraRoots.length) throw new HostError("workspace-mismatch");
+          } });
         return bind(native, key);
       } catch (error) {
         ownedSessions.delete(key);

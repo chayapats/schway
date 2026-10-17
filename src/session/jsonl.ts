@@ -161,6 +161,8 @@ export async function loadJsonlSession(options: {
   directory: string;
   id: string;
   branchId?: string;
+  /** Validate managed identity before any torn-tail repair or interrupted-call settlement writes. */
+  validateIdentity?: (workspaceRoot: string, extraRoots: readonly string[]) => void;
 }): Promise<JsonlSession> {
   let path: string;
   try { path = sessionFilePath(options.directory, options.id); }
@@ -176,6 +178,7 @@ export async function loadJsonlSession(options: {
   }
   const loaded = loadRecords(text);
   if (loaded.header.id !== options.id) throw new Error("Session header ID does not match the requested session");
+  options.validateIdentity?.(loaded.header.workspaceRoot, loaded.extraRoots);
   // Validate selection and settlement before repairing bytes or writing any durable operation.
   const staged: BranchOperation[] = [];
   const candidate = createSession([], loaded.extraRoots, { state: loaded.state, writeOperation: operation => staged.push(operation) });

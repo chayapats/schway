@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile, rename, symlink } from "node:fs/promises";
+import { appendFile, mkdir, readFile, rename, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createHost, hostCapabilities, HostError, type HostOptions, type HostSessionReference, type HostEntryReference } from "schway/host";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -148,3 +148,45 @@ test("failed and round-limited native runs return no final assistant reference",
     await host.close();
   });
 });
+
+for (const scenario of ["torn-tail", "interrupted-call", "attached-root"] as const) {
+  test(`wrong managed identity rejects before ${scenario} recovery can mutate native bytes`, async () => {
+    await withTempDir(async dir => {
+      const config = await options(join(dir, "owner"));
+      if (scenario === "interrupted-call") config.tools.definitions = [{ name: "interrupt_storage", description: "Fixture storage failure",
+        execution: "exclusive", effect: "mutating", inputSchema: { type: "object" },
+        async execute() { await rename(config.sessionDirectory, `${config.sessionDirectory}-offline`); return { content: "never committed" }; } }];
+      const host = await createHost(config), session = await host.createSession();
+      const run = await session.submit({ text: "fixture input" }, createScriptedModel(scenario === "interrupted-call"
+        ? { toolCalls: [{ id: "interrupted", name: "interrupt_storage", arguments: {} }] } : { text: "persisted" }));
+      if (scenario === "interrupted-call") {
+        expect(run.outcome).toBe("error");
+        await rename(`${config.sessionDirectory}-offline`, config.sessionDirectory);
+      }
+      const reference = session.reference;
+      await session.close();
+      const path = join(config.sessionDirectory, `${reference.id}.jsonl`);
+      if (scenario === "attached-root") {
+        // Deliberately malformed managed-store fixture; production hosts never rewrite JSONL.
+        const lines = (await readFile(path, "utf8")).split("\n");
+        lines[0] = JSON.stringify({ ...JSON.parse(lines[0]!), extraRoots: [config.homeDirectory] });
+        await Bun.write(path, lines.join("\n"));
+      }
+      if (scenario !== "interrupted-call") await appendFile(path, "{torn");
+      const before = await readFile(path);
+      const other = await options(join(dir, "other"));
+      const foreign = await createHost({ ...other, sessionDirectory: config.sessionDirectory,
+        ...(scenario === "attached-root" ? { workspaceRoot: config.workspaceRoot } : {}) });
+      await expect(foreign.openSession(reference)).rejects.toMatchObject({ code: "workspace-mismatch" });
+      expect(await readFile(path)).toEqual(before);
+      await foreign.close();
+      if (scenario !== "attached-root") {
+        const recovered = await host.openSession(reference);
+        if (run.outcome === "completed") expect(recovered.readResult(run.result)).toEqual(run.message);
+        else expect((await recovered.submit({ text: "after native recovery" }, createScriptedModel({ text: "recovered" }))).outcome).toBe("completed");
+        await recovered.close();
+      }
+      await host.close();
+    });
+  });
+}
