@@ -76,7 +76,7 @@ await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 await writeFile(join(out, marker), signature);
 const proc = Bun.spawn([
-  resolve(root, "node_modules/.bin/tsc"), "--ignoreConfig", "src/extensions/index.ts",
+  resolve(root, "node_modules/.bin/tsc"), "--ignoreConfig", "src/extensions/index.ts", "src/host/index.ts",
   "--declaration", "--emitDeclarationOnly", "--outDir", out, "--rootDir", "src",
   "--lib", "ESNext", "--target", "ESNext", "--module", "ESNext",
   "--moduleResolution", "bundler", "--strict", "--skipLibCheck",

@@ -5,11 +5,12 @@ import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const args = process.argv.slice(2);
-if (args.length && (args.length !== 1 || args[0] !== "--update")) {
-  console.error("Use bun scripts/extension-api-report.ts [--update].");
+if (new Set(args).size !== args.length || args.some(arg => !["--update", "--host"].includes(arg))) {
+  console.error("Use bun scripts/extension-api-report.ts [--host] [--update].");
   process.exit(1);
 }
-const update = args[0] === "--update";
+const update = args.includes("--update");
+const surface = args.includes("--host") ? "host" : "extensions";
 const temp = await mkdtemp(join(tmpdir(), "schway-extension-api-"));
 let exitCode = 1;
 try {
@@ -21,12 +22,12 @@ try {
     configObject: {
       projectFolder: root,
       newlineKind: "lf",
-      mainEntryPointFilePath: join(temp, "types/extensions/index.d.ts"),
+      mainEntryPointFilePath: join(temp, `types/${surface}/index.d.ts`),
       compiler: { overrideTsconfig: { compilerOptions: {
         lib: ["ESNext", "DOM"], types: ["bun"], typeRoots: [join(root, "node_modules/@types")],
         strict: true, skipLibCheck: true, module: "ESNext", moduleResolution: "Bundler",
       } } },
-      apiReport: { enabled: true, reportFileName: "extensions", reportFolder: join(root, "api"), reportTempFolder: join(temp, "report") },
+      apiReport: { enabled: true, reportFileName: surface, reportFolder: join(root, "api"), reportTempFolder: join(temp, "report") },
       docModel: { enabled: false },
       dtsRollup: { enabled: false },
       tsdocMetadata: { enabled: false },
@@ -41,12 +42,12 @@ try {
   const result = Extractor.invoke(config, { localBuild: update });
   exitCode = result.succeeded ? 0 : 1;
   if (!update && result.apiReportChanged) {
-    const expected = join(root, "api/extensions.api.md");
+    const expected = join(root, `api/${surface}.api.md`);
     const diff = Bun.spawn(["git", "diff", "--no-index", "--",
-      await Bun.file(expected).exists() ? expected : "/dev/null", join(temp, "report/extensions.api.md")],
+      await Bun.file(expected).exists() ? expected : "/dev/null", join(temp, `report/${surface}.api.md`)],
     { cwd: root, stdout: "inherit", stderr: "inherit" });
     await diff.exited;
-    console.error("Update the API report: bun scripts/extension-api-report.ts --update");
+    console.error(`Update the API report: bun scripts/extension-api-report.ts${surface === "host" ? " --host" : ""} --update`);
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

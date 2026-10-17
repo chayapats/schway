@@ -30,10 +30,12 @@ the deprecated-key list and replacement precedence.
 
 ## Extension API
 
-Semver applies to the extension API. Only exports of `schway/extensions`, defined
-by `src/extensions/index.ts`, are public. `./extensions` is the only key in
-`package.json` `exports`. Deep imports such as `schway/src/...` are private and
-may change in any release.
+Semver applies to the extension and [application host](host.md) APIs. Only exports
+of `schway/extensions` and `schway/host`, defined by their `src/*/index.ts` entries,
+are public. These are the only subpaths in `package.json` `exports`. Deep imports
+such as `schway/src/...` are private and may change in any release. Static host
+capabilities identify the supported contract/features; a base entry does not
+promise the later strict-policy, route or managed-lifecycle capabilities.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing

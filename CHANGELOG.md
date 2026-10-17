@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Added
+
+- Add the semver-governed `schway/host` base entry for trusted applications to
+  discover capabilities and run a supplied scripted model through native
+  loop/context/tool/session persistence. Public-only external consumer and import
+  sentinels cover durable result references and fresh reopen. Strict policies,
+  cross-process session fencing, provider routes and managed-data lifecycle remain
+  separate host tickets (#395).
+
 ### Fixed
 
 - Keep hosted web search off on both the xAI API-key and Grok subscription

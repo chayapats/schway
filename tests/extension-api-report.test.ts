@@ -130,10 +130,33 @@ test("public extension API report matches emitted declarations", async () => {
   expect(exitCode, stdout + stderr).toBe(0);
 }, 30_000);
 
-test("only the public extensions subpath is exported, with shipped declarations", async () => {
+test("public host API report matches emitted declarations", async () => {
+  const proc = Bun.spawn([process.execPath, "scripts/extension-api-report.ts", "--host"], {
+    cwd: root, stdout: "pipe", stderr: "pipe",
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+  ]);
+  expect(exitCode, stdout + stderr).toBe(0);
+}, 30_000);
+
+test("host API inventory covers every documented reachable export once", async () => {
+  const report = await source("api/host.api.md");
+  expect(report).not.toContain("ae-forgotten-export");
+  expect(report).not.toMatch(/\/\/[^\n]*\(undocumented\)\r?\nexport /);
+  expect(report).not.toMatch(/\b(?:NodeJS|Bun)\./);
+  const section = (await source("docs/host.md")).split("## Public API\n")[1]!.split("\n## ")[0]!;
+  const names = [...section.matchAll(/^\| `(\w+)` \| .+ \|$/gm)].map(match => match[1]!);
+  expect(names.length).toBe(new Set(names).size);
+  expect(names.sort()).toEqual(exportsIn(report).sort());
+});
+
+test("only the public extensions and host subpaths are exported, with shipped declarations", async () => {
   const pkg = JSON.parse(await source("package.json"));
   expect(pkg.exports).toEqual({ "./extensions": {
     types: "./dist/types/extensions/index.d.ts", default: "./src/extensions/index.ts",
+  }, "./host": {
+    types: "./dist/types/host/index.d.ts", default: "./src/host/index.ts",
   } });
   expect(pkg.scripts.prepack).toBe("bun scripts/build-extension-types.ts");
   expect(pkg.files).toContain("dist/types");
@@ -166,7 +189,7 @@ test("every example uses only the public Schway entry point", async () => {
     const code = await source(path);
     const specifiers = [...code.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?|require\s*\(\s*)["']([^"']+)["']/g)];
     for (const [, specifier] of specifiers) {
-      if (specifier === "schway" || specifier!.startsWith("schway/")) expect(specifier, path).toBe("schway/extensions");
+      if (specifier === "schway" || specifier!.startsWith("schway/")) expect(["schway/extensions", "schway/host"]).toContain(specifier!);
       if (specifier!.startsWith(".")) {
         const target = relative(resolve(root, "src"), resolve(root, dirname(path), specifier!));
         expect(target === "" || (!target.startsWith("../") && target !== ".."), `${path}: ${specifier}`).toBe(false);

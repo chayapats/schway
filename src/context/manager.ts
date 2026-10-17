@@ -67,6 +67,10 @@ export type CompactionOutcome = "completed" | "noop" | "failed" | "cancelled";
 
 /** Options for creating a context manager with explicit budget overrides. */
 export interface ContextManagerOptions {
+  /** Explicit trusted host prompt, replacing home/default system prompt assembly when provided. */
+  systemPrompt?: string;
+  /** Explicit trusted host sections included in native preparation and token budgeting. */
+  sections?: readonly ContextSection[];
   /** Explicit credential context for sanitized package-backed skill diagnostics. */
   diagnosticContext?: ConfigDiagnosticContext;
   /** Use the settings reader’s legacy keys during package-backed skill discovery. */
@@ -152,7 +156,7 @@ export function createContextManager(
 
   return {
     async prepare(session, model, prepareOptions = {}) {
-      const systemPrompt = await assembleSystemPrompt(options.home, { webLookupGuidance: options.webLookupGuidance });
+      const systemPrompt = options.systemPrompt ?? await assembleSystemPrompt(options.home, { webLookupGuidance: options.webLookupGuidance });
       // Last Schway-owned section: a date change alters only the bytes after the shared system and project prefix.
       const dateSection: ContextSection = { name: LOCAL_DATE_SECTION_NAME, content: turnDate?.content ?? captureDate() };
       const base: ContextSection[] = [
@@ -165,6 +169,7 @@ export function createContextManager(
             ...(workspace.extraRoots.length ? ["Relative tool paths and default bash cwd use the workspace root. Attachments supply context, not filesystem permissions."] : []),
           ].join("\n"),
         },
+        ...(options.sections ?? []).map(section => ({ ...section })),
       ];
       const instructions = await discoverAgentsInstructions({
         workspace,

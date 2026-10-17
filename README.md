@@ -50,6 +50,7 @@ billing. See [headless output and recovery](docs/headless.md#output-and-session-
 - [Add skills and extensions](https://github.com/chayapats/schway/blob/main/docs/extensions.md) · [Public extension API](docs/extensions.md#public-api)
 - [Diagnose local readiness](https://github.com/chayapats/schway/blob/main/docs/doctor.md)
 - [Run headless tasks](https://github.com/chayapats/schway/blob/main/docs/headless.md)
+- [Embed a native scripted turn](docs/host.md) · [Public host API](docs/host.md#public-api)
 - [Read tool output](https://github.com/chayapats/schway/blob/main/docs/tools.md)
 
 ## Development
