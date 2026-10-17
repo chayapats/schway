@@ -51,3 +51,7 @@ _Avoid_: Rollback, rewind, checkpoint.
 **Screen catalog**:
 The named set of TUI states captured as golden span snapshots, from which the design gallery is built.
 _Avoid_: Screenshots, visual tests.
+
+**Jit**:
+The planned personal companion application powered by Schway, maintained in a separate repository with its own project groups, memory and tasks.
+_Avoid_: Schway daemon, Schway core.
