@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { appendFile, mkdir, readFile, rename, symlink, unlink, link, chmod } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createHost, hostCapabilities, type HostOptions, type HostSessionReference, type Model } from "schway/host";
+import { createHost, hostCapabilities, HostError, type HostOptions, type HostSessionReference, type Model } from "schway/host";
 import { createJsonlSession } from "../src/session/jsonl.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
@@ -287,5 +287,63 @@ test.skipIf(process.getuid?.() === 0)("lease release I/O failure leaves host clo
     finally { await chmod(config.sessionDirectory, 0o700); }
     await host.close();
     const reopened = await createHost(config); await reopened.close();
+  });
+});
+
+for (const changed of ["file", "ownership"] as const) {
+  test(`explicit compaction preserves typed ${changed} conflicts raised after summary inference`, async () => {
+    await withTempDir(async dir => {
+      const config = await options(dir), host = await createHost(config), session = await host.createSession();
+      try {
+        for (let turn = 0; turn < 12; turn++) {
+          expect((await session.submit({ text: `retained ${turn}` }, createScriptedModel({ text: "retained output" }))).outcome).toBe("completed");
+        }
+        const path = join(config.sessionDirectory, `${session.reference.id}.jsonl`);
+        const before = await readFile(path, "utf8");
+        let calls = 0;
+        const model: Model = { provider: "scripted", id: "summary-conflict", async *stream() {
+          calls++;
+          if (changed === "file") await appendFile(path, "\n");
+          else {
+            const leasePath = join(config.sessionDirectory, `${session.reference.id}.host-lease`);
+            const owner = JSON.parse(await readFile(leasePath, "utf8"));
+            await Bun.write(leasePath, JSON.stringify({ ...owner, token: "replacement-owner" }));
+          }
+          yield { type: "message_complete", message: { type: "assistant", id: "uncommitted-summary",
+            content: [{ type: "text", text: "summary must not be committed" }] } };
+        } };
+        const pending = session.compact(model);
+        await expect(pending).rejects.toBeInstanceOf(HostError);
+        await expect(pending).rejects.toMatchObject({ code: "conflict" });
+        expect(calls).toBe(1);
+        expect(await readFile(path, "utf8")).toBe(before + (changed === "file" ? "\n" : ""));
+        await expect(session.submit({ text: "must remain fenced" }, createScriptedModel())).rejects.toMatchObject({ code: "conflict" });
+      } finally { await host.close(); }
+    });
+  });
+}
+
+test("malformed lease tokens stay busy even when their owner process is positively stopped", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir), host = await createHost(config), session = await host.createSession();
+    const reference = session.reference; await session.close();
+    const stopped = Bun.spawn([process.execPath, "-e", ""], { stdout: "ignore", stderr: "ignore" });
+    expect(await stopped.exited).toBe(0);
+    const owner = { version: 1, host: (await import("node:os")).hostname(), pid: stopped.pid };
+    const leasePath = join(config.sessionDirectory, `${reference.id}.host-lease`);
+    const path = join(config.sessionDirectory, `${reference.id}.jsonl`), before = await readFile(path, "utf8");
+    try {
+      for (const token of [undefined, null, false, 42, {}, [], "", " ", "not-a-uuid", "00000000-0000-0000-0000-000000000000"]) {
+        const saved = JSON.stringify({ ...owner, token });
+        await Bun.write(leasePath, saved);
+        await expect(host.openSession(reference)).rejects.toMatchObject({ code: "busy" });
+        expect(await readFile(leasePath, "utf8")).toBe(saved);
+        expect(await readFile(path, "utf8")).toBe(before);
+      }
+      await Bun.write(leasePath, JSON.stringify({ ...owner, token: crypto.randomUUID() }));
+      const reopened = await host.openSession(reference);
+      expect(reopened.reference).toEqual(reference);
+      await reopened.close();
+    } finally { await host.close(); }
   });
 });

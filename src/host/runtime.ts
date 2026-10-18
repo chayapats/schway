@@ -178,8 +178,13 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           if (conflict) throw new HostError("conflict");
           if (record) check();
           return record ? { outcome: "completed", result: ref(record.id) } : { outcome: failed ? "error" : signal?.aborted ? "cancelled" : "noop" };
-        } catch { if (conflict) throw new HostError("conflict"); return { outcome: signal?.aborted ? "cancelled" : "error" }; }
-        finally { busy = false; }
+        } catch (error) {
+          if (conflict || error instanceof SessionConflictError || error instanceof HostError && error.code === "conflict") {
+            conflict = true;
+            throw new HostError("conflict");
+          }
+          return { outcome: signal?.aborted ? "cancelled" : "error" };
+        } finally { busy = false; }
       },
       async close() {
         if (disposed) return;

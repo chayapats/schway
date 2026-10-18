@@ -21,7 +21,8 @@ export function acquireSessionLease(directory: string, id: string): SessionLease
       const saved = readFileSync(path, "utf8");
       let previous;
       try { previous = JSON.parse(saved); } catch { throw new HostError("busy"); }
-      if (!previous || previous.version !== 1 || previous.host !== owner.host || !Number.isSafeInteger(previous.pid) || previous.pid <= 0) throw new HostError("busy");
+      if (!previous || previous.version !== 1 || previous.host !== owner.host || !Number.isSafeInteger(previous.pid) || previous.pid <= 0 ||
+          typeof previous.token !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(previous.token)) throw new HostError("busy");
       try { process.kill(previous.pid, 0); throw new HostError("busy"); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw new HostError("busy"); }
       // All admissions hold this gate. ESRCH is positive local stopped-owner evidence,
