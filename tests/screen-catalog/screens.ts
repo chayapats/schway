@@ -46,7 +46,7 @@ export const STARTUP_RECOVERY_SCREENS: Readonly<Record<(typeof STARTUP_RECOVERY_
   "credential-store": "startup-credential-store", model: "startup-model", provider: "startup-provider" };
 /** A turn whose scripted runtime failure (harness `RECOVERY_FIXTURES`) leaves `category`'s recovery offered for the accepted task. */
 const recoveryScreen = (category: TuiRecovery["category"], title: string, description: string): Screen => ({ id: RECOVERY_SCREENS[category], title, description, noColorWidths: true,
-  drive: ui => enter(ui, "Summarize the changes"), ready: s => s.status === "error" && s.recovery?.category === category && s.recovery.accepted });
+  drive: ui => enter(ui, "Summarize the changes"), ready: (s, ui) => s.status === "error" && s.recovery?.category === category && s.recovery.accepted && !ui.controller.running && !s.activity });
 /** A saved conversation reopened while its model fails to load (harness `STARTUP_FIXTURES`), offering `category`'s recovery before any task is accepted. */
 const startupScreen = (category: keyof typeof STARTUP_RECOVERY_SCREENS, title: string, description: string): Screen => ({ id: STARTUP_RECOVERY_SCREENS[category], title, description, noColorWidths: true,
   drive: async () => {}, ready: s => s.status === "error" && s.recovery?.category === category && !s.recovery.accepted });

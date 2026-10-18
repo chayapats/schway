@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { COMPACTION_RESULTS, RECOVERY_SCREENS, SCREENS, STARTUP_RECOVERY_SCREENS, variantsFor } from "./screen-catalog/screens.ts";
 import { recoveryMessage, startupRecoveryMessage } from "../src/tui/controller-support.ts";
 import { RECOVERY_ACTION_LABELS, SESSION_BLOCKED_HINT } from "../src/tui/running-hints.ts";
-import { CATALOG_API_KEY, CATALOG_CALLBACK, catalogCaptures, panelCoverageGaps, renderScreen } from "./screen-catalog/harness.ts";
+import { CATALOG_API_KEY, CATALOG_CALLBACK, buildScreen, catalogCaptures, panelCoverageGaps, renderScreen } from "./screen-catalog/harness.ts";
 import { parseScreen, serializeScreen } from "./screen-catalog/format.ts";
 import { TUI_THEMES } from "../src/tui/theme.ts";
 import { buildGallery } from "./screen-catalog/gallery.ts";
@@ -262,6 +262,29 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
   const wanted = await readFile(path, "utf8");
   if (wanted !== actual) throw new Error(`Golden mismatch ${relative}. Run: bun run screens:update\n${diff(wanted, actual)}`);
 }, 15_000);
+
+test("recovery catalog waits for pending native evidence before recording the final screen", async () => {
+  const screen = SCREENS.find(screen => screen.id === "recovery-model")!;
+  const variant = variantsFor(screen).find(variant => variant.id === "nocolor-dark-120")!;
+  const ui = await buildScreen(screen, variant);
+  let release!: () => void, entered = false;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  // Hold the actual asynchronous result capture on this disposable controller, not a synthetic snapshot.
+  const controller = ui.controller as unknown as { captureTurnResult(signal: AbortSignal): Promise<unknown> };
+  const captureResult = controller.captureTurnResult.bind(controller);
+  controller.captureTurnResult = async signal => { entered = true; await gate; return captureResult(signal); };
+  const capture = () => serializeScreen(ui.captureSpans(), { screen: screen.id, title: screen.title, description: screen.description, variant: variant.id, cursor: ui.renderer.getCursorState() });
+  try {
+    const golden = await readFile(join(directory, screen.id, `${variant.id}.golden`), "utf8");
+    await screen.drive(ui);
+    await ui.waitFor(snapshot => entered && snapshot.status === "error" && !!snapshot.recovery?.accepted);
+    expect(screen.ready(ui.controller.snapshot(), ui)).toBe(false);
+    expect(capture()).not.toBe(golden);
+    release(); await ui.controller.waitForIdle(); ui.advance(); await ui.settle();
+    expect(screen.ready(ui.controller.snapshot(), ui)).toBe(true);
+    expect(capture()).toBe(golden);
+  } finally { release(); await ui.dispose(); }
+});
 
 test("catalog screen order and golden inventory are explicit", async () => {
   expect(SCREENS.map(s => s.id)).toEqual(["first-run", "disconnected-search", "auto-mode", "read-only-mode", "ask-mode", "approval-modes-help", "read-only-search-empty", "read-only-search-matches", "read-only-search-no-matches", "approval-command", "approval-edit", "approval-deny-reason", "approval-diff-overflow", "sign-in-chooser", "chatgpt-more-options", "grok-more-options", "api-key-entry", "api-key-entry-empty", "callback-entry", "endpoint-url-empty", "endpoint-url-error", "endpoint-url-prefilled", "endpoint-key-entry", "subscription-sign-in", "chatgpt-device-approval", "grok-browser-approval", "grok-device-approval", "sign-in-browser-not-opened", "sign-in-timeout", "grok-plan-error", "model-picker", "details-model", "model-picker-unconnected", "model-picker-loading", "model-picker-offline", "model-picker-failed", "model-picker-partial", "reasoning-chip-explicit", "reasoning-chip-provider-default", "reasoning-chip-advertised", "reasoning-chip-unavailable", "thinking-controls", "command-palette", "command-palette-groups", "command-palette-query", "command-palette-exact", "command-palette-inserted", "login-argument-choices", "help-palette-actions", "help-palette-disabled", "help-palette-guidance", "help-palette-no-matches", "thai-composer", "draft-restored", "draft-not-saved", "streaming-answer", "running-search", "running-empty", "running-draft", "parallel-tools", "completed-turn", "shell-long-failure", "shell-long-failure-expanded", "shell-outcomes", "web-fetch-rows", "web-search-line", "large-edit", "stopped-streaming", "stopped-tool", "failed-turn", "details-notice", "details-recovery", "details-unavailable", "retry-countdown", "retry-rate-limit", "retry-network", "recovery-auth", "recovery-credential-store", "recovery-model", "recovery-offline", "recovery-rate-limit", "recovery-session-write", "startup-auth", "startup-credential-store", "startup-model", "startup-provider", "review-panel", "details-review", "review-multi-turn", "review-staged-unstaged", "resumed-review", "resumed-review-details", "resumed-review-clean", "resumed-review-no-git", "resumed-review-off", "resumed-review-unavailable", "resumed-review-git-failed", "undo-preview", "undo-preview-no-git", "undo-shell-only", "undo-shell-only-review", "undo-older-target", "undo-detection-unavailable", "history-list", "history-detail", "history-stopped-turn", "history-undo-note", "history-missing-evidence", "history-truncation", "history-timing", "history-timing-cache-unreported", "history-timing-partial", "history-timing-details", "history-reasoning", "history-reasoning-details", "history-reasoning-legacy", "delete-session-busy", "session-picker", "session-picker-resume-failed", "session-picker-empty", "session-picker-no-matches", "branch-tree-continue", "branch-tree-fork", "recent-work-resume", "compaction", "compaction-completed", "compaction-cancelled", "compaction-failed", "compaction-noop", "compaction-in-turn", "no-color", "narrow-layout", "table-and-code", "inspection-unfocused", "inspection-code", "inspection-tool", "reader-code", "reader-code-wrapped", "reader-table", "reader-no-matches", "reader-approval"]);
