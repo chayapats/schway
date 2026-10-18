@@ -2196,6 +2196,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   refresh();
   return {
     refresh,
+    /** Report local collision/command acceptance still in flight, independently of model-turn ownership. */
+    submissionPending: (): boolean => pendingAcceptance,
     /** Report the panel mode shown in place of the conversation body, or "" when none is open. */
     panelMode: (): PanelMode | "" => panelMode,
     /** Report the transcript entry that open F2 details show, or undefined while details are closed. */

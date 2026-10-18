@@ -12,14 +12,14 @@ cursor 1 1 hidden
 
   Current working tree  │ Current changes details
   › clamp.ts   unstaged │ Previous turn details unavailable                  █
-    notes.md  untracked │ No live turn record is held. Schway keeps file-tool
-                        │ counts, snapshots, elapsed time and command exits
-                        │ only in memory for the latest turn of this run.
-                        │ After restart, resume or a session or branch switch
-                        │ it cannot show what an earlier turn changed, and it
-                        │ does not rebuild that from saved conversation text.
-                        │
-                        │ This review shows the current working tree instead.
+    notes.md  untracked │ No live turn record is held. Schway keeps file-tool█
+                        │ counts, snapshots, elapsed time and command exits  █
+                        │ only in memory for the latest turn of this run.    █
+                        │ After restart, resume or a session or branch switch█
+                        │ it cannot show what an earlier turn changed, and it█
+                        │ does not rebuild that from saved conversation text.█
+                        │                                                    █
+                        │ This review shows the current working tree instead.█
                         │
                         │ Workspace: ***/home/demo
                         │ Branch: main
@@ -66,44 +66,44 @@ cursor 1 1 hidden
 06 2-23 #1d232c #f7f7f4 -
 06 23-26 #c5c9cf #f7f7f4 -
 06 26-77 #1d232c #f7f7f4 -
-06 77-78 #ffffff #252527 -
+06 77-78 #9a9ea3 #252527 -
 06 78-80 #ffffff #f7f7f4 -
 07 0-23 #ffffff #f7f7f4 -
 07 23-26 #c5c9cf #f7f7f4 -
 07 26-76 #1d232c #f7f7f4 -
 07 76-77 #ffffff #f7f7f4 -
-07 77-78 #ffffff #252527 -
+07 77-78 #9a9ea3 #252527 -
 07 78-80 #ffffff #f7f7f4 -
 08 0-23 #ffffff #f7f7f4 -
 08 23-26 #c5c9cf #f7f7f4 -
 08 26-74 #1d232c #f7f7f4 -
 08 74-77 #ffffff #f7f7f4 -
-08 77-78 #ffffff #252527 -
+08 77-78 #9a9ea3 #252527 -
 08 78-80 #ffffff #f7f7f4 -
 09 0-23 #ffffff #f7f7f4 -
 09 23-26 #c5c9cf #f7f7f4 -
 09 26-77 #1d232c #f7f7f4 -
-09 77-78 #ffffff #252527 -
+09 77-78 #9a9ea3 #252527 -
 09 78-80 #ffffff #f7f7f4 -
 10 0-23 #ffffff #f7f7f4 -
 10 23-26 #c5c9cf #f7f7f4 -
 10 26-77 #1d232c #f7f7f4 -
-10 77-78 #ffffff #252527 -
+10 77-78 #9a9ea3 #252527 -
 10 78-80 #ffffff #f7f7f4 -
 11 0-23 #ffffff #f7f7f4 -
 11 23-26 #c5c9cf #f7f7f4 -
 11 26-77 #1d232c #f7f7f4 -
-11 77-78 #ffffff #252527 -
+11 77-78 #9a9ea3 #252527 -
 11 78-80 #ffffff #f7f7f4 -
 12 0-23 #ffffff #f7f7f4 -
 12 23-26 #c5c9cf #f7f7f4 -
 12 26-77 #ffffff #f7f7f4 -
-12 77-78 #ffffff #252527 -
+12 77-78 #9a9ea3 #252527 -
 12 78-80 #ffffff #f7f7f4 -
 13 0-23 #ffffff #f7f7f4 -
 13 23-26 #c5c9cf #f7f7f4 -
 13 26-77 #1d232c #f7f7f4 -
-13 77-78 #ffffff #252527 -
+13 77-78 #9a9ea3 #252527 -
 13 78-80 #ffffff #f7f7f4 -
 14 0-23 #ffffff #f7f7f4 -
 14 23-26 #c5c9cf #f7f7f4 -

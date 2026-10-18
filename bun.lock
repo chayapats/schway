@@ -19,6 +19,9 @@
       },
     },
   },
+  "patchedDependencies": {
+    "@opentui/core@0.5.11": "patches/@opentui%2Fcore@0.5.11.patch",
+  },
   "packages": {
     "@microsoft/api-extractor": ["@microsoft/api-extractor@7.59.3", "", { "dependencies": { "@microsoft/api-extractor-model": "7.33.14", "@microsoft/tsdoc": "~0.17.0", "@microsoft/tsdoc-config": "~0.18.2", "@rushstack/node-core-library": "5.25.0", "@rushstack/rig-package": "0.7.3", "@rushstack/terminal": "0.24.6", "@rushstack/ts-command-line": "5.3.16", "diff": "~8.0.2", "minimatch": "10.2.3", "resolve": "~1.22.1", "semver": "~7.7.4", "source-map": "~0.6.1", "typescript": "5.9.3" }, "bin": { "api-extractor": "bin/api-extractor" } }, "sha512-L1w0pe8/Af3PhjT7JDSsYZAtwFQ3l5pw7QjiNiNFpHA32nvvwYpvHWPedu8ulaJYiNWdKKq7We0FLSfZt0mbFA=="],
 

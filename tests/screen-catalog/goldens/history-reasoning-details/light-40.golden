@@ -10,8 +10,8 @@ cursor 1 1 hidden
 
  Turn 1 details
 
- Attempt 1: interactive               ▀
- /home/test/demo
+ Attempt 1: interactive               █
+ /home/test/demo                      ▀
  started 2026-01-15 09:28 UTC
  − Stopped · 31s
    Git snapshots captured before and
@@ -47,7 +47,7 @@ cursor 1 1 hidden
 05 0-1 #ffffff #f7f7f4 -
 05 1-16 #1d232c #f7f7f4 -
 05 16-38 #ffffff #f7f7f4 -
-05 38-39 #ffffff #252527 -
+05 38-39 #9a9ea3 #252527 -
 05 39-40 #ffffff #f7f7f4 -
 06 0-1 #ffffff #f7f7f4 -
 06 1-29 #1d232c #f7f7f4 -

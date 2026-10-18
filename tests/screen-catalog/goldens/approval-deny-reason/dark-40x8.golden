@@ -7,7 +7,7 @@ size 40x8
 cursor 6 6 visible
 == text
   Allow edit? · ask mode
-  clamp.ts  +1 −1                    ▀
+  clamp.ts  +1 −1                    █
   2 │-  return Math.max(lo, n);
   › Deny with reason…  (3 of 3)
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄

@@ -14,7 +14,7 @@ cursor 1 1 hidden
  › clamp.ts                       +1 −1
 
  Current diff · clamp.ts
- Unstaged · index → worktree          ▀
+ Unstaged · index → worktree          █
    1 - export function clamp(n: numbe
        r, lo: number, hi: number) {
    2 -   return Math.max(lo, n);

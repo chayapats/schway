@@ -15,7 +15,7 @@ cursor 1 1 hidden
    notes.md                   untracked
 
  Current diff · clamp.ts
- Unstaged · index → worktree          ▀
+ Unstaged · index → worktree          █
    1   export function clamp(n: numbe
        r, lo: number, hi: number) {
 

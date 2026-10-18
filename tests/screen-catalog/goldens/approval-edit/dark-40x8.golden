@@ -8,7 +8,7 @@ cursor 1 1 hidden
 == text
   Allow edit? · ask mode
   clamp.ts  +1 −1                    █
-  2 │-  return Math.max(lo, n);      █
+  2 │-  return Math.max(lo, n);      ▀
   2 │+  return Math.min(hi, Math.max(
   › Allow once
     Allow edit for this session
