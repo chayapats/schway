@@ -263,9 +263,9 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
   if (wanted !== actual) throw new Error(`Golden mismatch ${relative}. Run: bun run screens:update\n${diff(wanted, actual)}`);
 }, 15_000);
 
-test("recovery catalog waits for pending native evidence before recording the final screen", async () => {
-  const screen = SCREENS.find(screen => screen.id === "recovery-model")!;
-  const variant = variantsFor(screen).find(variant => variant.id === "nocolor-dark-120")!;
+for (const screenId of ["recovery-model", "failed-turn"]) test(`recovery catalog ${screenId} waits for pending native evidence before recording the final screen`, async () => {
+  const screen = SCREENS.find(screen => screen.id === screenId)!;
+  const variant = variantsFor(screen).find(variant => variant.id === (screenId === "failed-turn" ? "dark-80" : "nocolor-dark-120"))!;
   const ui = await buildScreen(screen, variant);
   let release!: () => void, entered = false;
   const gate = new Promise<void>(resolve => { release = resolve; });
