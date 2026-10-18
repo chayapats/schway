@@ -11,15 +11,15 @@ cursor 1 1 hidden
   Turn 1 details
 
   Attempt 1: interactive · /home/test/demo · started 2026-01-15 09:28 UTC    █
-  − Stopped · 31s                                                            █
-    Git snapshots captured before and after the attempt                      █
-    Timing and token details were not recorded for this attempt.             █
-    Reasoning: no level sent; the provider's default applied                 █
-  xai/grok-4.7 via Grok subscription                                         █
-  Attempt 2: interactive · /home/test/demo · started 2026-01-15 09:29 UTC    █
-  ✓ Done · 24s                                                               █
-    Git snapshots captured before and after the attempt                      █
-    Timing and token details were not recorded for this attempt.             ▀
+  − Stopped · 31s                                                            ▀
+    Git snapshots captured before and after the attempt
+    Timing and token details were not recorded for this attempt.
+    Reasoning: no level sent; the provider's default applied
+  xai/grok-4.7 via Grok subscription
+  Attempt 2: interactive · /home/test/demo · started 2026-01-15 09:29 UTC
+  ✓ Done · 24s
+    Git snapshots captured before and after the attempt
+    Timing and token details were not recorded for this attempt.
     Reasoning: low sent (explicit level) · xai/grok-4.7 via Grok subscription
   0 tool results; 0 failed tools.
   Commands: 0 exited 0, 0 nonzero, 0 without an observed exit.
@@ -62,42 +62,42 @@ cursor 1 1 hidden
 06 0-2 #ffffff #f7f7f4 -
 06 2-55 #1d232c #f7f7f4 -
 06 55-77 #ffffff #f7f7f4 -
-06 77-78 #9a9ea3 #252527 -
+06 77-78 #ffffff #252527 -
 06 78-80 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
 07 2-64 #1d232c #f7f7f4 -
 07 64-77 #ffffff #f7f7f4 -
-07 77-78 #9a9ea3 #252527 -
+07 77-78 #ffffff #252527 -
 07 78-80 #ffffff #f7f7f4 -
 08 0-2 #ffffff #f7f7f4 -
 08 2-60 #1d232c #f7f7f4 -
 08 60-77 #ffffff #f7f7f4 -
-08 77-78 #9a9ea3 #252527 -
+08 77-78 #ffffff #252527 -
 08 78-80 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
 09 2-36 #1d232c #f7f7f4 -
 09 36-77 #ffffff #f7f7f4 -
-09 77-78 #9a9ea3 #252527 -
+09 77-78 #ffffff #252527 -
 09 78-80 #ffffff #f7f7f4 -
 10 0-2 #ffffff #f7f7f4 -
 10 2-73 #1d232c #f7f7f4 -
 10 73-77 #ffffff #f7f7f4 -
-10 77-78 #9a9ea3 #252527 -
+10 77-78 #ffffff #252527 -
 10 78-80 #ffffff #f7f7f4 -
 11 0-2 #ffffff #f7f7f4 -
 11 2-14 #1d232c #f7f7f4 -
 11 14-77 #ffffff #f7f7f4 -
-11 77-78 #9a9ea3 #252527 -
+11 77-78 #ffffff #252527 -
 11 78-80 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
 12 2-55 #1d232c #f7f7f4 -
 12 55-77 #ffffff #f7f7f4 -
-12 77-78 #9a9ea3 #252527 -
+12 77-78 #ffffff #252527 -
 12 78-80 #ffffff #f7f7f4 -
 13 0-2 #ffffff #f7f7f4 -
 13 2-64 #1d232c #f7f7f4 -
 13 64-77 #ffffff #f7f7f4 -
-13 77-78 #9a9ea3 #252527 -
+13 77-78 #ffffff #252527 -
 13 78-80 #ffffff #f7f7f4 -
 14 0-2 #ffffff #f7f7f4 -
 14 2-77 #1d232c #f7f7f4 -

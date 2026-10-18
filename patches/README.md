@@ -1,7 +1,0 @@
-# OpenTUI 0.5.11 scroll-state synchronization
-
-The reviewed Bun dependency patch moves viewport-to-slider synchronization into `ScrollBarRenderable.updateSliderFromScrollState`, after the current range is assigned. Both Bun and Node bundles receive the same change; package version and public signatures stay unchanged. Bun applies the committed patch during frozen installation.
-
-Previously `viewportSize` assigned the slider viewport before updating its range, and a later content-size update never reapplied that viewport. The slider retained a value clamped against an earlier range (including `0.01` during initial layout). Identical final content/viewport geometry could therefore paint different thumbs permanently. This reproduced on the unchanged Schway base and candidate, and caused Travis builds 279012865/279012866 to disagree with approval-diff-overflow goldens or repeated renders.
-
-The correction derives the effective slider viewport from the stored requested viewport and current range on every scroll-state update. It preserves Slider's existing clamping semantics; no fixture scalar or rendered output is normalized. `tests/opentui-scrollbar.test.ts` checks vertical/horizontal order independence, growth/shrinkage and position clamping through public setters and actual rendered frames. Catalog goldens are regenerated for the corrected deterministic affordances. Remove this patch when an upstream version supplies equivalent behavior, after the same regressions and catalog pass.

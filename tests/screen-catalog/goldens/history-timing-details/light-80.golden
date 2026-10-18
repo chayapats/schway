@@ -11,15 +11,15 @@ cursor 1 1 hidden
   Turn 1 details
 
   Attempt 1: interactive · /home/test/demo · started 2026-01-15 09:26 UTC    █
-  ✓ Done · 3m 20s                                                            █
-    Git snapshots captured before and after the attempt                      █
-    Model: 4 calls · 1m 58s · first output 4.7s–31s · no retries             █
-    Tools: 3 timed calls · 1m 21s wall time                                  █
-    Tokens: input 160,000 · cached input 129,600 · output 6,000              █
-  reasoning 4,800                                                            █
-    Reasoning: no level sent; the provider's default applied                 █
-  xai/grok-4.7 via Grok subscription                                         █
-  3 tool results; 0 failed tools.                                            ▀
+  ✓ Done · 3m 20s
+    Git snapshots captured before and after the attempt
+    Model: 4 calls · 1m 58s · first output 4.7s–31s · no retries
+    Tools: 3 timed calls · 1m 21s wall time
+    Tokens: input 160,000 · cached input 129,600 · output 6,000
+  reasoning 4,800
+    Reasoning: no level sent; the provider's default applied
+  xai/grok-4.7 via Grok subscription
+  3 tool results; 0 failed tools.
   Commands: 3 exited 0, 0 nonzero, 0 without an observed exit.
   Token counts are what the provider reported, not billing. Cached input is
   part of input and reasoning is part of output.
@@ -57,47 +57,47 @@ cursor 1 1 hidden
 05 0-2 #ffffff #f7f7f4 -
 05 2-17 #1d232c #f7f7f4 -
 05 17-77 #ffffff #f7f7f4 -
-05 77-78 #9a9ea3 #252527 -
+05 77-78 #ffffff #252527 -
 05 78-80 #ffffff #f7f7f4 -
 06 0-2 #ffffff #f7f7f4 -
 06 2-55 #1d232c #f7f7f4 -
 06 55-77 #ffffff #f7f7f4 -
-06 77-78 #9a9ea3 #252527 -
+06 77-78 #ffffff #252527 -
 06 78-80 #ffffff #f7f7f4 -
 07 0-2 #ffffff #f7f7f4 -
 07 2-64 #1d232c #f7f7f4 -
 07 64-77 #ffffff #f7f7f4 -
-07 77-78 #9a9ea3 #252527 -
+07 77-78 #ffffff #252527 -
 07 78-80 #ffffff #f7f7f4 -
 08 0-2 #ffffff #f7f7f4 -
 08 2-43 #1d232c #f7f7f4 -
 08 43-77 #ffffff #f7f7f4 -
-08 77-78 #9a9ea3 #252527 -
+08 77-78 #ffffff #252527 -
 08 78-80 #ffffff #f7f7f4 -
 09 0-2 #ffffff #f7f7f4 -
 09 2-63 #1d232c #f7f7f4 -
 09 63-77 #ffffff #f7f7f4 -
-09 77-78 #9a9ea3 #252527 -
+09 77-78 #ffffff #252527 -
 09 78-80 #ffffff #f7f7f4 -
 10 0-2 #ffffff #f7f7f4 -
 10 2-17 #1d232c #f7f7f4 -
 10 17-77 #ffffff #f7f7f4 -
-10 77-78 #9a9ea3 #252527 -
+10 77-78 #ffffff #252527 -
 10 78-80 #ffffff #f7f7f4 -
 11 0-2 #ffffff #f7f7f4 -
 11 2-60 #1d232c #f7f7f4 -
 11 60-77 #ffffff #f7f7f4 -
-11 77-78 #9a9ea3 #252527 -
+11 77-78 #ffffff #252527 -
 11 78-80 #ffffff #f7f7f4 -
 12 0-2 #ffffff #f7f7f4 -
 12 2-36 #1d232c #f7f7f4 -
 12 36-77 #ffffff #f7f7f4 -
-12 77-78 #9a9ea3 #252527 -
+12 77-78 #ffffff #252527 -
 12 78-80 #ffffff #f7f7f4 -
 13 0-2 #ffffff #f7f7f4 -
 13 2-33 #1d232c #f7f7f4 -
 13 33-77 #ffffff #f7f7f4 -
-13 77-78 #9a9ea3 #252527 -
+13 77-78 #ffffff #252527 -
 13 78-80 #ffffff #f7f7f4 -
 14 0-2 #ffffff #f7f7f4 -
 14 2-62 #1d232c #f7f7f4 -

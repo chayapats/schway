@@ -2,13 +2,16 @@ import { expect, test } from "bun:test";
 import { ScrollBarRenderable } from "@opentui/core";
 import { createTestRenderer } from "@opentui/core/testing";
 import { serializeScreen } from "./screen-catalog/format.ts";
+import { synchronizeScrollThumbs } from "../src/tui/scrollbars.ts";
 
 for (const orientation of ["vertical", "horizontal"] as const) test(`scrollbar ${orientation} resize order preserves the same final thumb and scroll position`, async () => {
   const terminal = await createTestRenderer({ width: 40, height: 24 });
   const bar = new ScrollBarRenderable(terminal.renderer, { id: "resize-order", orientation, showArrows: false,
     width: orientation === "vertical" ? 1 : 20, height: orientation === "vertical" ? 20 : 1 });
   terminal.renderer.root.add(bar);
-  const capture = async () => { await terminal.renderOnce(); return serializeScreen(terminal.captureSpans(), {
+  const onFrame = () => synchronizeScrollThumbs([bar]);
+  terminal.renderer.on("frame", onFrame);
+  const capture = async () => { await terminal.flush(); return serializeScreen(terminal.captureSpans(), {
     screen: "resize-order", title: "Resize order", description: "Identical geometry has identical scroll affordances.", variant: orientation, cursor: terminal.renderer.getCursorState(),
   }); };
   try {
@@ -26,5 +29,5 @@ for (const orientation of ["vertical", "horizontal"] as const) test(`scrollbar $
       bar.scrollPosition = 1000;
       expect(bar.scrollPosition).toBe(11);
     }
-  } finally { terminal.renderer.destroy(); }
+  } finally { terminal.renderer.off("frame", onFrame); terminal.renderer.destroy(); }
 });

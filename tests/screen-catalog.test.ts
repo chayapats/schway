@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test";
-import { RGBA, type CapturedFrame } from "@opentui/core";
+import { RGBA, type CapturedFrame, type ScrollBoxRenderable } from "@opentui/core";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
@@ -262,6 +262,27 @@ for (const screen of SCREENS) for (const variant of variantsFor(screen)) test(`s
   const wanted = await readFile(path, "utf8");
   if (wanted !== actual) throw new Error(`Golden mismatch ${relative}. Run: bun run screens:update\n${diff(wanted, actual)}`);
 }, 15_000);
+
+test("approval catalog resynchronizes a stale resize thumb through the actual view frame lifecycle", async () => {
+  const screen = SCREENS.find(screen => screen.id === "approval-diff-overflow")!;
+  const variant = variantsFor(screen).find(variant => variant.id === "dark-80")!;
+  const ui = await buildScreen(screen, variant);
+  try {
+    await screen.drive(ui); await ui.waitFor(snapshot => screen.ready(snapshot, ui)); await ui.settle();
+    const scroll = ui.renderer.root.findDescendantById("tool-approval-scroll") as ScrollBoxRenderable;
+    const bar = scroll.verticalScrollBar, content = scroll.content.height, viewport = scroll.viewport.height;
+    expect(content).toBeGreaterThan(viewport);
+    // A normal layout can report the viewport while the native content range is still zero.
+    bar.viewportSize = 0; bar.scrollSize = 0; bar.viewportSize = viewport; bar.scrollSize = content;
+    await ui.settle();
+    const actual = serializeScreen(ui.captureSpans(), { screen: screen.id, title: screen.title, description: screen.description,
+      variant: variant.id, cursor: ui.renderer.getCursorState() });
+    expect(actual).toBe(await readFile(join(directory, screen.id, `${variant.id}.golden`), "utf8"));
+    await ui.settle();
+    expect(serializeScreen(ui.captureSpans(), { screen: screen.id, title: screen.title, description: screen.description,
+      variant: variant.id, cursor: ui.renderer.getCursorState() })).toBe(actual);
+  } finally { await ui.dispose(); }
+});
 
 for (const screenId of ["recovery-model", "failed-turn"]) test(`recovery catalog ${screenId} waits for pending native evidence before recording the final screen`, async () => {
   const screen = SCREENS.find(screen => screen.id === screenId)!;

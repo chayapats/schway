@@ -4,6 +4,12 @@ The catalog captures the real TUI as terminal text and cell styles, using script
 
 Run `bun test tests/screen-catalog.test.ts` to compare every screen against committed goldens. Plain `bun test` includes this runner. To focus on one screen, use `bun test tests/screen-catalog.test.ts -t "screen first-run"`.
 
+## Runtime frame and local-command boundaries
+
+Schway resynchronizes its owned scrollbar thumbs from public current geometry after each rendered layout (`src/tui/scrollbars.ts`). OpenTUI 0.5.11 can retain a viewport clamped against an earlier range during resize; a quiet frame alone does not repair that cache. The correction lives in shipped application source, so npm and Bun installations execute the same behavior without installer-specific dependency patches. Public-setter order-invariance tests and an actual approval-view lifecycle regression cover the correction; goldens retain the resulting deterministic thumbs.
+
+Hint probes also wait for the view's finite local-submission lifecycle before classifying an effect or reusing a state. `/session` collision checking can still be pending while the controller is idle and the frame is unchanged. Pending work itself never counts as success: exact-draft and observable-effect assertions still determine whether a key acted.
+
 ## Add or update a screen
 
 1. Edit the ordered `SCREENS` list in `tests/screen-catalog/screens.ts`. Supply a sentence-case title, one-sentence description, input-driven `drive` function and controller-state `ready` predicate. Update the explicit screen-order assertion in the runner when adding an ID.
