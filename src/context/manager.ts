@@ -44,11 +44,14 @@ import type { Model, ModelUsage } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
 import { resolveToolPath } from "../tools/path.ts";
 import type { Workspace } from "../workspace/workspace.ts";
+import { contextPolicySnapshot, sourceDocumentsText, WORKSPACE_CONTEXT_POLICY, type ContextSourceDocument, type ContextSourcePolicy } from "./policy.ts";
 
 /** Named block of volatile context sent with a model request. */
 export interface ContextSection {
   name: string;
   content: string;
+  /** Request provenance only; source/summary text cannot grant native execution or discovery authority. */
+  trust?: "operator" | "source" | "summary";
 }
 
 /** Fresh system prompt, dynamic context, and durable conversation items. */
@@ -67,6 +70,10 @@ export type CompactionOutcome = "completed" | "noop" | "failed" | "cancelled";
 
 /** Options for creating a context manager with explicit budget overrides. */
 export interface ContextManagerOptions {
+  /** Explicit source permissions apply to preparation, activation and every compaction request; omission preserves CLI defaults. */
+  policy?: ContextSourcePolicy;
+  /** Explicit untrusted evidence, separate from operator prompt/sections and durable history. */
+  sources?: readonly ContextSourceDocument[];
   /** Explicit trusted host prompt, replacing home/default system prompt assembly when provided. */
   systemPrompt?: string;
   /** Explicit trusted host sections included in native preparation and token budgeting. */
@@ -97,6 +104,8 @@ export interface CompactOptions {
 
 /** Prepare volatile model context and append compaction records while preserving original session history. */
 export interface ContextManager {
+  /** False prevents native automatic activation-tool registration as well as direct activation. */
+  readonly skillActivationAllowed?: boolean;
   /** Assemble system prompt and dynamic context; auto-compacts on pressure when a model is given. */
   prepare(
     session: Session,
@@ -126,6 +135,10 @@ export function createContextManager(
   workspace: Workspace,
   options: ContextManagerOptions = {},
 ): ContextManager {
+  const managed = options.policy !== undefined;
+  const policy = options.policy ? contextPolicySnapshot(options.policy) : WORKSPACE_CONTEXT_POLICY;
+  const sources = structuredClone(options.sources ?? []);
+  const sections = structuredClone(options.sections ?? []);
   const keepTurns = options.keepTurns ?? COMPACTION_KEEP_TURNS;
   let activeSkill: ActiveSkill | undefined;
   let activationScope = {};
@@ -152,54 +165,15 @@ export function createContextManager(
   const summarySections = (summary: string | undefined): ContextSection[] =>
     summary === undefined
       ? []
-      : [{ name: SUMMARY_SECTION_NAME, content: summary }];
+      : [{ name: SUMMARY_SECTION_NAME, content: summary, ...(managed ? { trust: "summary" as const } : {}) }];
 
   return {
+    get skillActivationAllowed() { return policy.skillActivation; },
     async prepare(session, model, prepareOptions = {}) {
-      const systemPrompt = options.systemPrompt ?? await assembleSystemPrompt(options.home, { webLookupGuidance: options.webLookupGuidance });
+      const systemPrompt = options.systemPrompt ?? await assembleSystemPrompt(managed ? undefined : options.home, { webLookupGuidance: options.webLookupGuidance });
       // Last Schway-owned section: a date change alters only the bytes after the shared system and project prefix.
       const dateSection: ContextSection = { name: LOCAL_DATE_SECTION_NAME, content: turnDate?.content ?? captureDate() };
-      const base: ContextSection[] = [
-        {
-          name: "environment",
-          content: [
-            `Workspace root: ${workspace.root}`,
-            `Launch directory: ${workspace.launchCwd}`,
-            ...workspace.extraRoots.map(root => `Attached root: ${root}`),
-            ...(workspace.extraRoots.length ? ["Relative tool paths and default bash cwd use the workspace root. Attachments supply context, not filesystem permissions."] : []),
-          ].join("\n"),
-        },
-        ...(options.sections ?? []).map(section => ({ ...section })),
-      ];
-      const instructions = await discoverAgentsInstructions({
-        workspace,
-        home: options.home,
-        targetPaths: targetPathsFrom(workspace, session.items),
-      });
-      if (instructions.length > 0) {
-        base.push({
-          name: "project-instructions",
-          content: formatAgentsInstructions(instructions),
-        });
-      }
-      const discovered = await discoverSkillsSafe(workspace, options.home, options.configDeprecations, options.diagnosticContext);
-      const modelSkills = discovered.filter((skill) => !skill.userOnly);
-      if (modelSkills.length > 0) {
-        base.push({
-          name: AVAILABLE_SKILLS_SECTION_NAME,
-          content: formatAvailableSkillsSection(modelSkills),
-        });
-      }
-      if (activeSkill) {
-        base.push({
-          name: ACTIVE_SKILL_SECTION_NAME,
-          content: formatActiveSkillSection({
-            name: activeSkill.name,
-            source: activeSkill.source,
-            body: activeSkill.body,
-          }),
-        });
-      }
+      const base = await baseSections(session);
 
       let summary = getEffectiveSummary(session.items);
       // Request-only: the estimate, overflow recovery, hooks and adapters all see these shortened items; the session keeps full results.
@@ -265,6 +239,7 @@ export function createContextManager(
 
     /** Attach the prepared user skill while invalidating pending model replacements. */
     setActiveSkill(skill: ActiveSkill): void {
+      if (!policy.skillActivation) throw new Error("Skill activation disabled by policy.");
       activationScope = {};
       activeSkill = skill;
     },
@@ -272,6 +247,7 @@ export function createContextManager(
     /** Validate model eligibility and replace the active body only if this activation scope remains current. */
     async activateSkill(name, activationOptions = {}) {
       activationOptions.signal?.throwIfAborted();
+      if (!policy.skillActivation) return { ok: false, error: "Skill activation disabled by policy." };
       const scope = activationScope;
       const invocation = await prepareSkillInvocation({
         diagnosticContext: options.diagnosticContext,
@@ -282,6 +258,7 @@ export function createContextManager(
         name,
         modelInvocation: true,
         signal: activationOptions.signal,
+        ...(!policy.packages ? { packages: [] } : {}),
       });
       activationOptions.signal?.throwIfAborted();
       if (activationScope !== scope) {
@@ -312,6 +289,55 @@ export function createContextManager(
       return summaryUsage.splice(0);
     },
   };
+
+  /** Assemble every source through the same captured policy, including requests made only for compaction. */
+  async function baseSections(session: Session): Promise<ContextSection[]> {
+    const base: ContextSection[] = [
+      {
+        name: "environment",
+        content: [
+          `Workspace root: ${workspace.root}`,
+          `Launch directory: ${workspace.launchCwd}`,
+          ...workspace.extraRoots.map(root => `Attached root: ${root}`),
+          ...(workspace.extraRoots.length ? ["Relative tool paths and default bash cwd use the workspace root. Attachments supply context, not filesystem permissions."] : []),
+        ].join("\n"),
+      },
+      ...sections.map(section => ({ ...section, ...(managed ? { trust: "operator" as const } : {}) })),
+      ...(sources.length ? [{ name: "host-source-documents", content: sourceDocumentsText(sources), trust: "source" as const }] : []),
+    ];
+    const instructions = policy.workspaceAgents || policy.homeAgents ? await discoverAgentsInstructions({
+      workspace,
+      home: policy.homeAgents ? options.home : undefined,
+      workspaceDiscovery: policy.workspaceAgents,
+      targetPaths: targetPathsFrom(workspace, session.items),
+    }) : [];
+    if (instructions.length > 0) {
+      base.push({
+        name: "project-instructions",
+        content: formatAgentsInstructions(instructions),
+      });
+    }
+    const discovered = policy.skills ? await discoverSkillsSafe(workspace, options.home, options.configDeprecations, options.diagnosticContext, policy.packages) : [];
+    const modelSkills = discovered.filter((skill) => !skill.userOnly);
+    if (modelSkills.length > 0) {
+      base.push({
+        name: AVAILABLE_SKILLS_SECTION_NAME,
+        content: formatAvailableSkillsSection(modelSkills),
+      });
+    }
+    if (activeSkill) {
+      base.push({
+        name: ACTIVE_SKILL_SECTION_NAME,
+        content: formatActiveSkillSection({
+          name: activeSkill.name,
+          source: activeSkill.source,
+          body: activeSkill.body,
+        }),
+      });
+    }
+
+    return base;
+  }
 
   /** Shared compaction worker used by pressure, manual, and overflow paths. */
   async function compactInternal(
@@ -352,11 +378,16 @@ export function createContextManager(
         compacted: pruned,
       });
       const tokensBefore = estimateSessionTokens(session.items);
+      const managedContext = managed ? {
+        systemPrompt: options.systemPrompt ? `${options.systemPrompt}\n\n${SUMMARY_SYSTEM_PROMPT}` : SUMMARY_SYSTEM_PROMPT,
+        context: await baseSections(session),
+      } : undefined;
       const summary = await summarizeWithModel(model, inputText, compactOptions.signal, (usage, complete) => {
         summaryUsage.push({ usage, complete });
         if (!complete) outcome = "failed";
-      });
+      }, managedContext);
       if (!summary || compactOptions.signal?.aborted) {
+        if (managed && !summary && !compactOptions.signal?.aborted) outcome = "failed";
         return null;
       }
       const record: CompactionRecord = {
@@ -386,9 +417,11 @@ async function discoverSkillsSafe(
   home: string | undefined,
   configDeprecations?: readonly ConfigDeprecation[],
   diagnosticContext?: ConfigDiagnosticContext,
+  packages = true,
 ): Promise<SkillMetadata[]> {
   try {
-    const discovered = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home, configDeprecations, diagnosticContext });
+    const discovered = await discoverSkills({ workspaceRoot: workspace.root, extraRoots: workspace.extraRoots, home, configDeprecations, diagnosticContext,
+      ...(!packages ? { packages: [] } : {}) });
     return discovered.skills;
   } catch {
     return [];
@@ -426,6 +459,7 @@ async function summarizeWithModel(
   inputText: string,
   signal?: AbortSignal,
   onUsage?: (usage: ModelUsage, complete: boolean) => void,
+  managedContext?: { systemPrompt: string; context: ContextSection[] },
 ): Promise<string | null> {
   if (signal?.aborted) {
     return null;
@@ -435,8 +469,8 @@ async function summarizeWithModel(
   try {
     let text = "";
     for await (const event of model.stream({
-      systemPrompt: SUMMARY_SYSTEM_PROMPT,
-      context: [],
+      systemPrompt: managedContext?.systemPrompt ?? SUMMARY_SYSTEM_PROMPT,
+      context: managedContext?.context ?? [],
       items: [
         {
           type: "user",

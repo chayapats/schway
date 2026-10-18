@@ -35,7 +35,9 @@ of `schway/extensions` and `schway/host`, defined by their `src/*/index.ts` entr
 are public. These are the only subpaths in `package.json` `exports`. Deep imports
 such as `schway/src/...` are private and may change in any release. Static host
 capabilities identify the supported contract/features; a base entry does not
-promise the later strict-policy, route or managed-lifecycle capabilities.
+promise later exact-registry, route or managed-lifecycle capabilities. The explicit
+context-policy contract advertises strict/controlled discovery and preserves
+CLI defaults; current restrictions also apply when opening older native history.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing

@@ -103,6 +103,7 @@ export interface ContextSection {
     content: string;
     // (undocumented)
     name: string;
+    trust?: "operator" | "source" | "summary";
 }
 
 // @public

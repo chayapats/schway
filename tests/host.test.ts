@@ -64,7 +64,7 @@ test("malformed options and unsupported requested restrictions fail before a ses
   await withTempDir(async dir => {
     const config = await options(dir);
     for (const altered of [
-      { ...config, context: { ...config.context, policy: "strict" } },
+      { ...config, context: { ...config.context, policy: "unsupported-profile" } },
       { ...config, tools: { ...config.tools, policy: "exact" } },
       { ...config, context: { ...config.context, skills: false } },
       { ...config, limits: { ...config.limits, maxTurns: Infinity } },

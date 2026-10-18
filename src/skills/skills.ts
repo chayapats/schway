@@ -324,6 +324,8 @@ export async function prepareSkillInvocation(options: {
   reservedNames?: readonly string[];
   modelInvocation?: boolean;
   signal?: AbortSignal;
+  /** Explicit package set; an empty set prevents configuration/package discovery during activation. */
+  packages?: readonly EnabledPackage[];
 }): Promise<{ ok: true; skill: SkillMetadata; body: string } | { ok: false; error: string }> {
   options.signal?.throwIfAborted();
   if (options.modelInvocation && !isSkillNameToken(options.name)) {

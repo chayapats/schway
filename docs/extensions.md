@@ -683,3 +683,5 @@ See [the runnable mixed package](../examples/packages/greeting/package.json) and
 Test coverage for this guide: [release verification](release-verification.md#extensions).
 
 See the [stability policy](stability.md) for compatibility promises.
+
+Context provenance: `ContextSection.trust` is optional request metadata (`operator`, `source`, `summary`), not an authorization grant. Existing extension sections/hooks remain source compatible. Strict host composition does not load repository extensions; its source policy cannot be weakened by model or retrieved text.

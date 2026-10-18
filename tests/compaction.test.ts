@@ -120,6 +120,23 @@ test("summary stream throwing after message_complete still reports an incomplete
   expect(manager.takeUsage()).toEqual([{ usage: { inputTokens: 3, outputTokens: 2 }, complete: false }]);
 });
 
+test("default CLI empty compaction retains noop compatibility and records the completed summary attempt", async () => {
+  const session = createSession(turns(12));
+  const manager = createContextManager(workspace);
+  const outcomes: string[] = [];
+  let calls = 0;
+  const model: Model = { provider: "scripted", id: "empty-cli-summary", async *stream() {
+    calls++;
+    yield { type: "usage", usage: { inputTokens: 3, outputTokens: 2 } };
+    yield { type: "message_complete", message: { type: "assistant", id: "empty-summary", content: [{ type: "text", text: " \n\t " }] } };
+  } };
+  expect(await manager.compact(session, model, { reason: "manual", onOutcome: outcome => outcomes.push(outcome) })).toBeNull();
+  expect(calls).toBe(1);
+  expect(outcomes).toEqual(["noop"]);
+  expect(manager.takeUsage()).toEqual([{ usage: { inputTokens: 3, outputTokens: 2 }, complete: true }]);
+  expect(session.items).toEqual(turns(12));
+});
+
 test("failed summarization leaves history intact without a misleading record", async () => {
   const session = createSession(turns(12));
   const before = session.items.length;

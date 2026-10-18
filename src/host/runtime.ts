@@ -2,6 +2,7 @@ import { mkdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
 import { createContextManager } from "../context/manager.ts";
+import { contextPolicySnapshot, STRICT_CONTEXT_POLICY, WORKSPACE_CONTEXT_POLICY, type ContextSourcePolicy } from "../context/policy.ts";
 import type { AssistantMessage } from "../conversation/types.ts";
 import { createJsonlSession, loadJsonlSession, type JsonlSession } from "../session/jsonl.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
@@ -17,12 +18,20 @@ function keys(value: unknown, allowed: readonly string[]): asserts value is Reco
   if (!record(value) || Object.keys(value).some(key => !allowed.includes(key))) throw new HostError("invalid-options");
 }
 
-function optionsSnapshot(input: HostOptions): HostOptions {
+function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: ContextSourcePolicy } {
   keys(input, ["workspaceRoot", "sessionDirectory", "homeDirectory", "context", "tools", "limits"]);
-  keys(input.context, ["policy", "systemPrompt", "sections"]);
+  keys(input.context, ["policy", "systemPrompt", "sections", "sources", "discovery"]);
   keys(input.tools, ["policy", "definitions"]);
   keys(input.limits, ["maxTurns", "maxConcurrentTools", "contextWindow", "maxInputChars"]);
-  if (input.context.policy !== "workspace-discovery" || input.tools.policy !== "include-skill-activation") throw new HostError("unsupported-policy");
+  if (!["workspace-discovery", "strict", "controlled"].includes(input.context.policy) || input.tools.policy !== "include-skill-activation") throw new HostError("unsupported-policy");
+  let sourcePolicy: ContextSourcePolicy;
+  if (input.context.policy === "controlled") {
+    if (!record(input.context.discovery)) throw new HostError("invalid-options");
+    try { sourcePolicy = contextPolicySnapshot(input.context.discovery); } catch { throw new HostError("unsupported-policy"); }
+  } else {
+    if (input.context.discovery !== undefined) throw new HostError("invalid-options");
+    sourcePolicy = input.context.policy === "strict" ? STRICT_CONTEXT_POLICY : WORKSPACE_CONTEXT_POLICY;
+  }
   if ([input.workspaceRoot, input.sessionDirectory, input.homeDirectory].some(path => typeof path !== "string" || !isAbsolute(path)) ||
       typeof input.context.systemPrompt !== "string" || !input.context.systemPrompt.trim() ||
       !Array.isArray(input.context.sections) || !Array.isArray(input.tools.definitions)) throw new HostError("invalid-options");
@@ -34,6 +43,18 @@ function optionsSnapshot(input: HostOptions): HostOptions {
     keys(section, ["name", "content"]);
     if (typeof section.name !== "string" || !section.name.trim() || typeof section.content !== "string") throw new HostError("invalid-options");
   }
+  const sources = input.context.sources === undefined ? [] : input.context.sources;
+  if (!Array.isArray(sources) || sources.length > 64 || input.context.sections.length > 64) throw new HostError("invalid-options");
+  const seen = new Set<string>();
+  let contextChars = input.context.systemPrompt.length;
+  for (const section of input.context.sections) contextChars += section.name.length + section.content.length;
+  for (const source of sources) {
+    keys(source, ["id", "revision", "content"]);
+    if (typeof source.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(source.id) || seen.has(source.id) ||
+        typeof source.revision !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(source.revision) || typeof source.content !== "string") throw new HostError("invalid-options");
+    seen.add(source.id); contextChars += source.id.length + source.revision.length + source.content.length;
+  }
+  if (contextChars > 1000000) throw new HostError("invalid-options");
   const definitions: ToolDefinition[] = input.tools.definitions.map(tool => {
     keys(tool, ["name", "description", "inputSchema", "execution", "effect", "execute"]);
     if (typeof tool.name !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(tool.name) || tool.name === "activate_skill" ||
@@ -41,8 +62,8 @@ function optionsSnapshot(input: HostOptions): HostOptions {
         typeof tool.execution !== "string" || !["parallel", "exclusive"].includes(tool.execution)) throw new HostError("invalid-options");
     return { ...tool as unknown as ToolDefinition, inputSchema: structuredClone(tool.inputSchema) };
   });
-  return { workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
-    context: { policy: input.context.policy, systemPrompt: input.context.systemPrompt, sections: structuredClone(input.context.sections) },
+  return { sourcePolicy, workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
+    context: { policy: input.context.policy, systemPrompt: input.context.systemPrompt, sections: structuredClone(input.context.sections), sources: structuredClone(sources) },
     tools: { policy: input.tools.policy, definitions }, limits: { ...input.limits } };
 }
 
@@ -54,7 +75,7 @@ function validateReference(reference: HostSessionReference): void {
 
 /** Compose only native engine services after validating this explicitly trusted base-host configuration. */
 export async function createHostRuntime(input: HostOptions): Promise<HostRuntime> {
-  let options: HostOptions;
+  let options: ReturnType<typeof optionsSnapshot>;
   try { options = optionsSnapshot(input); }
   catch (error) { if (error instanceof HostError) throw error; throw new HostError("invalid-options"); }
   let root: string, home: string, directory: string;
@@ -77,7 +98,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
     let disposed = false, busy = false;
     const reference = Object.freeze({ id: native.header.id, branchId: native.activeBranchId });
     const context = createContextManager(workspace, { home, contextWindow: options.limits.contextWindow,
-      systemPrompt: options.context.systemPrompt, sections: options.context.sections });
+      systemPrompt: options.context.systemPrompt, sections: options.context.sections, sources: options.context.sources, policy: options.sourcePolicy });
     const requireIdle = () => { requireOpen(); if (disposed) throw new HostError("closed"); if (busy) throw new HostError("busy"); };
     const ref = (entryId: string): HostEntryReference => Object.freeze({ session: reference, entryId });
     const handle: HostSession = {
@@ -117,6 +138,17 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         const message = native.items.find(item => item.id === result.entryId && item.type === "assistant");
         if (!message) throw new HostError("result-not-found");
         return structuredClone(message as AssistantMessage);
+      },
+      async compact(model, signal) {
+        requireIdle();
+        if (!model || typeof model.stream !== "function" || typeof model.provider !== "string" || !model.provider || typeof model.id !== "string" || !model.id) throw new HostError("invalid-input");
+        busy = true;
+        try {
+          let failed = false;
+          const record = await context.compact(native, model, { reason: "manual", signal, onOutcome: result => { if (result === "failed") failed = true; } });
+          return record ? { outcome: "completed", result: ref(record.id) } : { outcome: failed ? "error" : signal?.aborted ? "cancelled" : "noop" };
+        } catch { return { outcome: signal?.aborted ? "cancelled" : "error" }; }
+        finally { busy = false; }
       },
       async close() {
         if (disposed) return;
