@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir, readFile, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createHost, hostCapabilities, HostError, type ContextSourcePolicy, type HostOptions, type HostSessionReference, type ModelRequest, type Model } from "schway/host";
+import { createHost, hostCapabilities, HostError, type AssistantContent, type ContextSourcePolicy, type HostOptions, type HostSessionReference, type ModelRequest, type Model } from "schway/host";
 import { createContextManager } from "../src/context/manager.ts";
 import { STRICT_CONTEXT_POLICY } from "../src/context/policy.ts";
 import { createSession } from "../src/session/session.ts";
@@ -161,8 +161,16 @@ test("source evidence counts, identities and total context remain finite before 
 
 test("explicit native compaction reports noop/error/cancellation and keeps handle ownership while a summary is active", async () => withTempDir(async dir => {
   const f = await adversarial(dir), host = await createHost(f.options), session = await host.createSession();
-  expect(await session.compact(createScriptedModel({ responses: [] }))).toEqual({ outcome: "noop" });
+  let unexpectedCalls = 0;
+  const unusedModel: Model = { provider: "scripted", id: "unused", async *stream() { unexpectedCalls++; throw new Error("No summary boundary"); } };
+  expect(await session.compact(unusedModel)).toEqual({ outcome: "noop" }); expect(unexpectedCalls).toBe(0);
   for (let i = 0; i < 12; i++) await session.submit({ text: `retained ${i}` }, createScriptedModel({ text: "retained output" }));
+  const historyPath = join(f.options.sessionDirectory, `${session.reference.id}.jsonl`), before = await readFile(historyPath, "utf8");
+  for (const content of [[], [{ type: "text", text: " \n\t " }], [{ type: "tool_call", id: "invalid-summary-tool", name: "ignored", arguments: {} }]] satisfies AssistantContent[][]) {
+    let calls = 0;
+    const emptyModel: Model = { provider: "scripted", id: "empty-summary", async *stream() { calls++; yield { type: "message_complete", message: { type: "assistant", id: "empty-summary", content } }; } };
+    expect(await session.compact(emptyModel)).toEqual({ outcome: "error" }); expect(calls).toBe(1); expect(await readFile(historyPath, "utf8")).toBe(before);
+  }
   expect(await session.compact(createScriptedModel({ error: "private-summary-diagnostic", status: 400 }))).toEqual({ outcome: "error" });
   const abort = new AbortController(); abort.abort(); expect(await session.compact(createScriptedModel({ responses: [] }), abort.signal)).toEqual({ outcome: "cancelled" });
   let started!: () => void, release!: () => void; const began = new Promise<void>(r => { started = r; }), gate = new Promise<void>(r => { release = r; });

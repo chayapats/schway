@@ -387,6 +387,7 @@ export function createContextManager(
         if (!complete) outcome = "failed";
       }, managedContext);
       if (!summary || compactOptions.signal?.aborted) {
+        if (managed && !summary && !compactOptions.signal?.aborted) outcome = "failed";
         return null;
       }
       const record: CompactionRecord = {
