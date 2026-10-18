@@ -8,6 +8,10 @@
     "schway": "./bin/schway"
   },
   "exports": {
+    "./host": {
+      "types": "./dist/types/host/index.d.ts",
+      "default": "./src/host/index.ts"
+    },
     "./extensions": {
       "types": "./dist/types/extensions/index.d.ts",
       "default": "./src/extensions/index.ts"
@@ -26,6 +30,7 @@
     "docs/evals.md",
     "docs/extensions.md",
     "docs/headless.md",
+    "docs/host.md",
     "docs/tools.md",
     "docs/skills.md",
     "docs/sessions.md",

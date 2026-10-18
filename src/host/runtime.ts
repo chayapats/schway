@@ -1,0 +1,171 @@
+import { mkdir, realpath, stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
+import { runAgentLoop } from "../agent/loop.ts";
+import { createContextManager } from "../context/manager.ts";
+import type { AssistantMessage } from "../conversation/types.ts";
+import { createJsonlSession, loadJsonlSession, type JsonlSession } from "../session/jsonl.ts";
+import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
+import type { ToolDefinition } from "../tools/types.ts";
+import { HostError, hostCapabilities, type HostOptions, type HostRuntime, type HostSession, type HostSessionReference,
+  type HostEntryReference, type HostRunResult } from "./index.ts";
+
+// This base contract protects handles within one process; cross-process writer fencing is ENG04.
+const ownedSessions = new Set<string>();
+const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+function keys(value: unknown, allowed: readonly string[]): asserts value is Record<string, unknown> {
+  if (!record(value) || Object.keys(value).some(key => !allowed.includes(key))) throw new HostError("invalid-options");
+}
+
+function optionsSnapshot(input: HostOptions): HostOptions {
+  keys(input, ["workspaceRoot", "sessionDirectory", "homeDirectory", "context", "tools", "limits"]);
+  keys(input.context, ["policy", "systemPrompt", "sections"]);
+  keys(input.tools, ["policy", "definitions"]);
+  keys(input.limits, ["maxTurns", "maxConcurrentTools", "contextWindow", "maxInputChars"]);
+  if (input.context.policy !== "workspace-discovery" || input.tools.policy !== "include-skill-activation") throw new HostError("unsupported-policy");
+  if ([input.workspaceRoot, input.sessionDirectory, input.homeDirectory].some(path => typeof path !== "string" || !isAbsolute(path)) ||
+      typeof input.context.systemPrompt !== "string" || !input.context.systemPrompt.trim() ||
+      !Array.isArray(input.context.sections) || !Array.isArray(input.tools.definitions)) throw new HostError("invalid-options");
+  for (const [key, max] of [["maxTurns", 100], ["maxConcurrentTools", 32], ["contextWindow", 2000000], ["maxInputChars", 1000000]] as const) {
+    const n = input.limits[key];
+    if (!Number.isSafeInteger(n) || n < 1 || n > max) throw new HostError("invalid-options");
+  }
+  for (const section of input.context.sections) {
+    keys(section, ["name", "content"]);
+    if (typeof section.name !== "string" || !section.name.trim() || typeof section.content !== "string") throw new HostError("invalid-options");
+  }
+  const definitions: ToolDefinition[] = input.tools.definitions.map(tool => {
+    keys(tool, ["name", "description", "inputSchema", "execution", "effect", "execute"]);
+    if (typeof tool.name !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(tool.name) || tool.name === "activate_skill" ||
+        typeof tool.description !== "string" || typeof tool.execute !== "function" || !record(tool.inputSchema) ||
+        typeof tool.execution !== "string" || !["parallel", "exclusive"].includes(tool.execution)) throw new HostError("invalid-options");
+    return { ...tool as unknown as ToolDefinition, inputSchema: structuredClone(tool.inputSchema) };
+  });
+  return { workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
+    context: { policy: input.context.policy, systemPrompt: input.context.systemPrompt, sections: structuredClone(input.context.sections) },
+    tools: { policy: input.tools.policy, definitions }, limits: { ...input.limits } };
+}
+
+function validateReference(reference: HostSessionReference): void {
+  if (!record(reference) || Object.keys(reference).some(key => !["id", "branchId"].includes(key)) ||
+      typeof reference.id !== "string" || !/^[a-f0-9]{8}-[a-f0-9-]{27}$/.test(reference.id) ||
+      typeof reference.branchId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(reference.branchId)) throw new HostError("invalid-reference");
+}
+
+/** Compose only native engine services after validating this explicitly trusted base-host configuration. */
+export async function createHostRuntime(input: HostOptions): Promise<HostRuntime> {
+  let options: HostOptions;
+  try { options = optionsSnapshot(input); }
+  catch (error) { if (error instanceof HostError) throw error; throw new HostError("invalid-options"); }
+  let root: string, home: string, directory: string;
+  try {
+    root = await realpath(options.workspaceRoot);
+    home = await realpath(options.homeDirectory);
+    if (!(await stat(root)).isDirectory() || !(await stat(home)).isDirectory()) throw new Error();
+    await mkdir(options.sessionDirectory, { recursive: true, mode: 0o700 });
+    directory = await realpath(options.sessionDirectory);
+  } catch { throw new HostError("storage"); }
+  const workspace = { root, launchCwd: root, extraRoots: [] };
+  let tools: ToolRegistry;
+  try { tools = createToolRegistry(options.tools.definitions); }
+  catch { throw new HostError("invalid-options"); }
+  let closed = false, opening = 0;
+  const handles = new Map<HostSession, () => boolean>();
+  const requireOpen = () => { if (closed) throw new HostError("closed"); };
+
+  function bind(native: JsonlSession, key: string): HostSession {
+    let disposed = false, busy = false;
+    const reference = Object.freeze({ id: native.header.id, branchId: native.activeBranchId });
+    const context = createContextManager(workspace, { home, contextWindow: options.limits.contextWindow,
+      systemPrompt: options.context.systemPrompt, sections: options.context.sections });
+    const requireIdle = () => { requireOpen(); if (disposed) throw new HostError("closed"); if (busy) throw new HostError("busy"); };
+    const ref = (entryId: string): HostEntryReference => Object.freeze({ session: reference, entryId });
+    const handle: HostSession = {
+      reference,
+      async submit(input, model, signal) {
+        requireIdle();
+        if (!record(input) || Object.keys(input).some(key => key !== "text") || typeof input.text !== "string" ||
+            !input.text.trim() || input.text.length > options.limits.maxInputChars || !model ||
+            typeof model.stream !== "function" || typeof model.provider !== "string" || !model.provider ||
+            typeof model.id !== "string" || !model.id) throw new HostError("invalid-input");
+        if (signal?.aborted) throw new HostError("invalid-input");
+        busy = true;
+        try {
+          const id = crypto.randomUUID();
+          try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }] }); }
+          catch { throw new HostError("storage"); }
+          const inputReference = ref(id);
+          let outcome: HostRunResult["outcome"] = "error";
+          for await (const event of runAgentLoop({ session: native, model, contextManager: context, tools, workspace,
+            maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, signal, webSearch: "off" })) {
+            if (event.type === "agent.finished") outcome = event.reason;
+          }
+          if (outcome === "completed") {
+            const message = native.items.findLast(item => item.type === "assistant");
+            if (!message || message.type !== "assistant") throw new HostError("storage");
+            return { outcome, input: inputReference, result: ref(message.id), message: structuredClone(message) };
+          }
+          return { outcome, input: inputReference };
+        } finally { busy = false; }
+      },
+      readResult(result) {
+        requireIdle();
+        if (!record(result) || Object.keys(result).some(key => !["session", "entryId"].includes(key))) throw new HostError("invalid-reference");
+        validateReference(result.session);
+        if (result.session.id !== reference.id || result.session.branchId !== reference.branchId ||
+            typeof result.entryId !== "string") throw new HostError("invalid-reference");
+        const message = native.items.find(item => item.id === result.entryId && item.type === "assistant");
+        if (!message) throw new HostError("result-not-found");
+        return structuredClone(message as AssistantMessage);
+      },
+      async close() {
+        if (disposed) return;
+        requireIdle();
+        disposed = true;
+        ownedSessions.delete(key);
+        handles.delete(handle);
+      },
+    };
+    handles.set(handle, () => busy);
+    return Object.freeze(handle);
+  }
+
+  return Object.freeze({
+    capabilities: hostCapabilities(),
+    async createSession() {
+      requireOpen(); opening++;
+      try {
+        const native = await createJsonlSession({ directory, workspace });
+        const key = `${directory}/${native.header.id}`;
+        ownedSessions.add(key);
+        return bind(native, key);
+      } catch (error) { if (error instanceof HostError) throw error; throw new HostError("storage"); }
+      finally { opening--; }
+    },
+    async openSession(reference: HostSessionReference) {
+      requireOpen(); validateReference(reference);
+      const selected = { ...reference };
+      const key = `${directory}/${selected.id}`;
+      if (ownedSessions.has(key)) throw new HostError("busy");
+      ownedSessions.add(key); opening++;
+      try {
+        const native = await loadJsonlSession({ directory, id: selected.id, branchId: selected.branchId,
+          validateIdentity: (workspaceRoot, extraRoots) => {
+            if (workspaceRoot !== root || extraRoots.length) throw new HostError("workspace-mismatch");
+          } });
+        return bind(native, key);
+      } catch (error) {
+        ownedSessions.delete(key);
+        if (error instanceof HostError) throw error;
+        throw new HostError("storage");
+      } finally { opening--; }
+    },
+    async close() {
+      if (closed) return;
+      if (opening || [...handles.values()].some(isBusy => isBusy())) throw new HostError("busy");
+      const pending = [...handles.keys()].map(handle => handle.close());
+      closed = true;
+      await Promise.all(pending);
+    },
+  });
+}

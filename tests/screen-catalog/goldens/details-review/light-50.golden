@@ -14,11 +14,11 @@ cursor 1 1 hidden
  › clamp.ts                                 +1 −1
 
  Turn 1 details
- ✓ Done                                         ▀
- 3 tool results; 0 failed tools.
- Commands: 1 exit 0 / 0 nonzero / 0 unknown (
- entire turn).
- Command results (latest 50; exit codes, not a
+ ✓ Done                                         █
+ 3 tool results; 0 failed tools.                █
+ Commands: 1 exit 0 / 0 nonzero / 0 unknown (   █
+ entire turn).                                  █
+ Command results (latest 50; exit codes, not a  ▀
  test-suite guarantee):
  printf 'ok\n' → exit 0
 
@@ -67,22 +67,22 @@ cursor 1 1 hidden
 09 0-1 #ffffff #f7f7f4 -
 09 1-32 #1d232c #f7f7f4 -
 09 32-48 #ffffff #f7f7f4 -
-09 48-49 #ffffff #252527 -
+09 48-49 #9a9ea3 #252527 -
 09 49-50 #ffffff #f7f7f4 -
 10 0-1 #ffffff #f7f7f4 -
 10 1-45 #1d232c #f7f7f4 -
 10 45-48 #ffffff #f7f7f4 -
-10 48-49 #ffffff #252527 -
+10 48-49 #9a9ea3 #252527 -
 10 49-50 #ffffff #f7f7f4 -
 11 0-1 #ffffff #f7f7f4 -
 11 1-14 #1d232c #f7f7f4 -
 11 14-48 #ffffff #f7f7f4 -
-11 48-49 #ffffff #252527 -
+11 48-49 #9a9ea3 #252527 -
 11 49-50 #ffffff #f7f7f4 -
 12 0-1 #ffffff #f7f7f4 -
 12 1-47 #1d232c #f7f7f4 -
 12 47-48 #ffffff #f7f7f4 -
-12 48-49 #ffffff #252527 -
+12 48-49 #9a9ea3 #252527 -
 12 49-50 #ffffff #f7f7f4 -
 13 0-1 #ffffff #f7f7f4 -
 13 1-23 #1d232c #f7f7f4 -

@@ -37,7 +37,8 @@ export default defineExtension((extension) => {
 
 ## Public API
 
-Only exports from `schway/extensions` are public and semver-versioned. All other
+Extension exports from `schway/extensions` are public and semver-versioned; the
+separate [application host](host.md) entry is `schway/host`. All other
 imports are private. The package ships emitted `.d.ts` declarations; consumers
 need no `allowImportingTsExtensions` setting or ambient Node/Bun type package.
 The standard TypeScript `ESNext` and `DOM` libraries supply the required types,

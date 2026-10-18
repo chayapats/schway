@@ -129,7 +129,7 @@ test("search is limited truthfully at 20000 results without changing the copy so
   expect(new ReaderSnapshot(target, "x ".repeat(20_000)).search("x").limited).toBe(false);
 });
 
-test("source cap is grapheme-safe, explicit for search and copy, and excludes partial CRLF", () => {
+test("source cap is grapheme-safe and explicit for search and copy", () => {
   const source = "x".repeat(READER_SOURCE_LIMIT - 1) + "🧪tail";
   const reader = new ReaderSnapshot(target, source);
   expect(reader.source.length).toBe(READER_SOURCE_LIMIT - 1);
@@ -137,8 +137,14 @@ test("source cap is grapheme-safe, explicit for search and copy, and excludes pa
   expect(reader.copy()).toEqual({ text: "x".repeat(READER_SOURCE_LIMIT - 1), complete: false });
   expect(reader.search("missing").limited).toBe(true);
   expect(reader.view({ offset: 0, horizontal: 0 }, viewport).sourceTruncated).toBe(true);
+});
+
+test("source cap excludes partial CRLF", () => {
   const crlf = new ReaderSnapshot(target, "x".repeat(READER_SOURCE_LIMIT - 1) + "\r\nmore");
   expect(crlf.source.endsWith("\r")).toBe(false);
+});
+
+test("a source exactly at the cap is complete", () => {
   expect(new ReaderSnapshot(target, "x".repeat(READER_SOURCE_LIMIT)).truncated).toBe(false);
 });
 

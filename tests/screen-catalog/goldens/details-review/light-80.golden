@@ -11,13 +11,13 @@ cursor 1 1 hidden
   Review · turn 1
 
   Files from turn 1    │ Turn 1 details
-  › clamp.ts     +1 −1 │ ✓ Done                                              ▀
-                       │ 3 tool results; 0 failed tools.
-                       │ Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire
-                       │ turn).
-                       │ Command results (latest 50; exit codes, not a test-
-                       │ suite guarantee):
-                       │ printf 'ok\n' → exit 0
+  › clamp.ts     +1 −1 │ ✓ Done                                              █
+                       │ 3 tool results; 0 failed tools.                     █
+                       │ Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire  █
+                       │ turn).                                              █
+                       │ Command results (latest 50; exit codes, not a test- █
+                       │ suite guarantee):                                   █
+                       │ printf 'ok\n' → exit 0                              ▀
                        │
                        │ Current working-tree content is unattributed;
                        │ external edits may be included.
@@ -66,37 +66,37 @@ cursor 1 1 hidden
 06 22-25 #c5c9cf #f7f7f4 -
 06 25-56 #1d232c #f7f7f4 -
 06 56-77 #ffffff #f7f7f4 -
-06 77-78 #ffffff #252527 -
+06 77-78 #9a9ea3 #252527 -
 06 78-80 #ffffff #f7f7f4 -
 07 0-22 #ffffff #f7f7f4 -
 07 22-25 #c5c9cf #f7f7f4 -
 07 25-76 #1d232c #f7f7f4 -
 07 76-77 #ffffff #f7f7f4 -
-07 77-78 #ffffff #252527 -
+07 77-78 #9a9ea3 #252527 -
 07 78-80 #ffffff #f7f7f4 -
 08 0-22 #ffffff #f7f7f4 -
 08 22-25 #c5c9cf #f7f7f4 -
 08 25-31 #1d232c #f7f7f4 -
 08 31-77 #ffffff #f7f7f4 -
-08 77-78 #ffffff #252527 -
+08 77-78 #9a9ea3 #252527 -
 08 78-80 #ffffff #f7f7f4 -
 09 0-22 #ffffff #f7f7f4 -
 09 22-25 #c5c9cf #f7f7f4 -
 09 25-76 #1d232c #f7f7f4 -
 09 76-77 #ffffff #f7f7f4 -
-09 77-78 #ffffff #252527 -
+09 77-78 #9a9ea3 #252527 -
 09 78-80 #ffffff #f7f7f4 -
 10 0-22 #ffffff #f7f7f4 -
 10 22-25 #c5c9cf #f7f7f4 -
 10 25-42 #1d232c #f7f7f4 -
 10 42-77 #ffffff #f7f7f4 -
-10 77-78 #ffffff #252527 -
+10 77-78 #9a9ea3 #252527 -
 10 78-80 #ffffff #f7f7f4 -
 11 0-22 #ffffff #f7f7f4 -
 11 22-25 #c5c9cf #f7f7f4 -
 11 25-47 #1d232c #f7f7f4 -
 11 47-77 #ffffff #f7f7f4 -
-11 77-78 #ffffff #252527 -
+11 77-78 #9a9ea3 #252527 -
 11 78-80 #ffffff #f7f7f4 -
 12 0-22 #ffffff #f7f7f4 -
 12 22-25 #c5c9cf #f7f7f4 -

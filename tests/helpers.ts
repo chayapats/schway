@@ -1,9 +1,10 @@
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 
+/** Allocate and remove a canonical fixture root so runtime identity checks agree across OS temp aliases. */
 export async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await mkdtemp(join(tmpdir(), "schway-"));
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-")));
   try {
     await fn(dir);
   } finally {
@@ -51,7 +52,7 @@ export interface IsolatedCliDirs {
 export async function withIsolatedCliDirs(
   fn: (dirs: IsolatedCliDirs) => Promise<void>,
 ): Promise<void> {
-  const root = await mkdtemp(join(tmpdir(), "schway-cli-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "schway-cli-")));
   try {
     const home = join(root, "home");
     const work = join(root, "work");
@@ -82,6 +83,8 @@ export function buildIsolatedCliEnv(
     delete env[key];
   }
   env.HOME = home;
+  // Compare application state without Bun's OS-specific transpiler-cache writes in the fixture home.
+  env.BUN_RUNTIME_TRANSPILER_CACHE_PATH = "0";
   // Decorative TUI motion keeps renderer fixtures from ever reaching visual idle; animation has dedicated tests.
   env.SCHWAY_MOTION = "off";
   for (const [key, value] of Object.entries(overrides)) {

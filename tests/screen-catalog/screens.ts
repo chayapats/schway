@@ -17,7 +17,7 @@ const grokLogin = async (ui: ScreenHarness, device = false) => {
   if (device) { ui.mockInput.pressTab(); await ui.settle(); }
   ui.mockInput.pressEnter();
 };
-const failed = (s: TuiSnapshot) => !!s.recovery;
+const failed = (s: TuiSnapshot) => !!s.recovery && !s.activity;
 const completed = (s: TuiSnapshot) => s.status === "idle" && !!s.outcome;
 const stopped = (s: TuiSnapshot) => s.status === "idle" && s.outcome?.reason === "cancelled" && s.recovery?.actions.includes("continue") === true;
 const stopWork = async (ui: ScreenHarness, tool: boolean) => {
@@ -46,7 +46,7 @@ export const STARTUP_RECOVERY_SCREENS: Readonly<Record<(typeof STARTUP_RECOVERY_
   "credential-store": "startup-credential-store", model: "startup-model", provider: "startup-provider" };
 /** A turn whose scripted runtime failure (harness `RECOVERY_FIXTURES`) leaves `category`'s recovery offered for the accepted task. */
 const recoveryScreen = (category: TuiRecovery["category"], title: string, description: string): Screen => ({ id: RECOVERY_SCREENS[category], title, description, noColorWidths: true,
-  drive: ui => enter(ui, "Summarize the changes"), ready: s => s.status === "error" && s.recovery?.category === category && s.recovery.accepted });
+  drive: ui => enter(ui, "Summarize the changes"), ready: (s, ui) => s.status === "error" && s.recovery?.category === category && s.recovery.accepted && !ui.controller.running && !s.activity });
 /** A saved conversation reopened while its model fails to load (harness `STARTUP_FIXTURES`), offering `category`'s recovery before any task is accepted. */
 const startupScreen = (category: keyof typeof STARTUP_RECOVERY_SCREENS, title: string, description: string): Screen => ({ id: STARTUP_RECOVERY_SCREENS[category], title, description, noColorWidths: true,
   drive: async () => {}, ready: s => s.status === "error" && s.recovery?.category === category && !s.recovery.accepted });
@@ -327,7 +327,7 @@ export const SCREENS: readonly Screen[] = [
   { id: "large-edit", title: "Large edit", description: "An edit above the inline limit keeps its summary and disclosure marker.", noColor: true, drive: ui => enter(ui, "Update the clamp implementation"), ready: completed },
   { id: "stopped-streaming", title: "Stopped streaming", description: "A requested stop retains incomplete output and an unsent Thai draft with a neutral continuation notice.", noColorWidths: true, drive: ui => stopWork(ui, false), ready: stopped },
   { id: "stopped-tool", title: "Stopped command", description: "A stopped shell keeps the completed file write and offers explicit continuation without sending the next draft.", noColorWidths: true, drive: ui => stopWork(ui, true), ready: stopped },
-  { id: "failed-turn", title: "Failed turn", description: "An unavailable service offers recovery after retries.", noColorWidths: true, drive: ui => enter(ui, "Summarize the changes"), ready: failed },
+  { id: "failed-turn", title: "Failed turn", description: "An unavailable service offers recovery after retries.", noColorWidths: true, drive: ui => enter(ui, "Summarize the changes"), ready: (s, ui) => failed(s) && !ui.controller.running },
   { id: "details-notice", title: "Notice details", description: "A retained notice opens local diagnostic evidence while preserving the Thai draft.", noColorWidths: true, drive: async ui => {
     ui.controller.notice("Choice used for this session · F2 details", "The choice could not be saved.\nThe project settings file is read-only.\nตรวจสอบสิทธิ์ของไฟล์ 🧪");
     await ui.mockInput.pasteBracketedText("งานถัดไป 🧪"); await ui.settle(); openDetails(ui);

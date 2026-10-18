@@ -3,6 +3,7 @@ import { preferenceLines, preferenceHint, preferenceEscape } from "./preferences
 import type { ExitDraftCheckpoint } from "../drafts/exit.ts";
 import { isOrdinaryDraft, openDraftStore, type DraftStore } from "../drafts/store.ts";
 import { BoxRenderable, TextBufferRenderable, TextRenderable, TextareaRenderable, ScrollBoxRenderable, StyledText, fg, bg, bold, getLinkId, type CliRenderer, type KeyEvent, type PasteEvent, type Selection, type TextChunk } from "@opentui/core";
+import { synchronizeScrollThumbs } from "./scrollbars.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import { bindCredentialInput } from "./credential-input.ts";
 import { credentialCaretCell, credentialEntryEscape, credentialEntryPanel, fitCredentialEntry } from "./credential-entry.ts";
@@ -2121,7 +2122,12 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
     const targetTop = transcript.scrollTop + target.y - transcript.viewport.y;
     transcript.scrollTo(targetTop + visualLine - Math.floor(transcript.viewport.height / 2));
   };
+  const ownedScrollBars = [transcript, tree, preferencePanel, reviewFiles, reviewDiff, toolApprovalScroll]
+    .flatMap(scroll => [scroll.verticalScrollBar, scroll.horizontalScrollBar]);
   const onFrame = () => {
+    // OpenTUI 0.5.11 can clamp a viewport against an earlier range during resize.
+    // The completed layout supplies current public geometry; a changed thumb requests its next frame.
+    synchronizeScrollThumbs(ownedScrollBars);
     if (accentPending) { accentPending = false; accentStartedAt = now(); ticker.ensure(); }
     if (reviewRestoreScroll !== undefined) { reviewDiff.scrollTo(reviewRestoreScroll); reviewRestoreScroll = undefined; }
     if (scrollToDetails && detailsReturn) {
@@ -2196,6 +2202,8 @@ export function createConversationView(renderer: CliRenderer, options: Conversat
   refresh();
   return {
     refresh,
+    /** Report local collision/command acceptance still in flight, independently of model-turn ownership. */
+    submissionPending: (): boolean => pendingAcceptance,
     /** Report the panel mode shown in place of the conversation body, or "" when none is open. */
     panelMode: (): PanelMode | "" => panelMode,
     /** Report the transcript entry that open F2 details show, or undefined while details are closed. */

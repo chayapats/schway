@@ -101,9 +101,11 @@ function newNotice(before: Observation, after: Observation): string | undefined 
 /** Same observation twice across a few renders: background work (Git reads, lazy panels) has finished before a press. */
 async function quiet(reached: Reached): Promise<Observation> {
   const same = (a: Observation, b: Observation) => a.screen === b.screen && !snapshotChanged(a.state, b.state) && a.editor === b.editor && a.cursor === b.cursor;
+  await reached.ui.waitFor(() => !reached.ui.view.submissionPending());
   let previous = observe(reached);
   for (const start = performance.now(); performance.now() - start < 2000;) {
     await reached.ui.settle(); await Bun.sleep(5); await reached.ui.settle();
+    await reached.ui.waitFor(() => !reached.ui.view.submissionPending());
     const current = observe(reached);
     if (same(previous, current)) return current;
     previous = current;
@@ -133,17 +135,20 @@ const expectationFor = (labels: readonly string[]): Expectation =>
  * writes, `openUrl` calls and reload requests act at once. A submit call or an editor change acts once the frame shows
  * more than a failure notice; a press whose only visible effect is a failure notice does not act.
  */
-async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding, expectation: Expectation, before: Observation, draft = ""): Promise<{ verdict: "live" | "dead" | "notice"; detail: string }> {
+async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding, expectation: Expectation, before: Observation, draft = "", now = () => performance.now()): Promise<{ verdict: "live" | "dead" | "notice"; detail: string }> {
   const { ui } = reached;
   ui.renderer.stdin.emit("data", Buffer.from(bytes));
   // A lone legacy ESC resolves only after the decoder's 20 ms timeout.
   if (encoding === "legacy" && bytes === "\x1b") await Bun.sleep(30);
-  const start = performance.now();
+  const start = now();
   let notice = "", pending: string[] = [];
   // A redraw or snapshot change acts only if it survives settling: re-reading the same diff flickers a loading state and returns.
   const lasting = async () => { const settled = await quiet(reached); return settled.screen !== before.screen || snapshotChanged(before.state, settled.state) || settled.editor !== before.editor || settled.cursor !== before.cursor; };
-  while (performance.now() - start < EFFECT_WINDOW_MS) {
+  while (now() - start < EFFECT_WINDOW_MS) {
     await ui.settle();
+    // A stable frame is not completion of an asynchronous /session or /theme acceptance.
+    // This wait grants no liveness verdict: the unchanged whole-draft/effect checks below still decide.
+    await ui.waitFor(() => !ui.view.submissionPending());
     const after = observe(reached);
     if (expectation === "reload") {
       if (after.spies.reloads > before.spies.reloads) return { verdict: "live", detail: "requested a reload" };
@@ -177,6 +182,37 @@ async function pressOnce(reached: Reached, bytes: string, encoding: ChipEncoding
   if (pending.length) return { verdict: "live", detail: pending.join(", ") };
   return { verdict: "dead", detail: expectation === "send" ? `the draft ${JSON.stringify(draft)} was not dispatched whole` : expectation === "reload" ? "requested no reload" : "nothing changed" };
 }
+
+for (const encoding of CHIP_ENCODINGS) test(`local command acceptance outlasts the probe window without losing ${encoding} Enter or Esc evidence`, async () => {
+  const screen = SCREENS.find(screen => screen.id === "command-palette-exact")!;
+  const reached = await reachOnce(screen, probedVariant(screen), encoding), { ui } = reached;
+  const gate = Promise.withResolvers<void>(), entered = Promise.withResolvers<void>();
+  const collision = ui.controller.commandCollision.bind(ui.controller);
+  ui.controller.commandCollision = async (...args) => { const result = await collision(...args); entered.resolve(); await gate.promise; return result; };
+  let task: ReturnType<typeof pressOnce> | undefined, finished = false, clock = 0;
+  try {
+    const before = await quiet(reached);
+    task = pressOnce(reached, chipPresses("Enter", encoding)[0]!.bytes, encoding, "send", before, "/session", () => clock);
+    void task.then(() => { finished = true; }, () => { finished = true; });
+    await entered.promise;
+    expect(ui.view.submissionPending()).toBe(true);
+    clock = EFFECT_WINDOW_MS + 1;
+    await ui.settle(); await ui.settle();
+    expect(finished).toBe(false);
+    expect(ui.editor.plainText).toBe("/session");
+    gate.resolve();
+    expect((await task).verdict).toBe("live");
+    expect(ui.view.submissionPending()).toBe(false);
+    expect(ui.editor.plainText).toBe("");
+    // The next key starts from its own complete palette, rather than reusing the consumed Enter state.
+    await ui.mockInput.typeText("/session"); await ui.waitFor(snapshot => screen.ready(snapshot, ui)); await ui.settle();
+    expect((await pressOnce(reached, chipPresses("Esc", encoding)[0]!.bytes, encoding, "any", await quiet(reached))).verdict).toBe("live");
+  } finally {
+    gate.resolve();
+    try { await task; }
+    finally { try { await ui.waitFor(_snapshot => !ui.view.submissionPending()); } finally { await ui.dispose(); } }
+  }
+});
 
 /**
  * Discover every chip (or only the `only` label) on the screen's ready state in one encoding and press each from a

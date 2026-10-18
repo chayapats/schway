@@ -12,14 +12,14 @@ cursor 1 1 hidden
 
   Files from turn 1    │ Turn 1 details
   › clamp.ts     +1 −1 │ ✓ Done                                                                                      █
-                       │ 3 tool results; 0 failed tools.
-                       │ Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire turn).
-                       │ Command results (latest 50; exit codes, not a test-suite guarantee):
-                       │ printf 'ok\n' → exit 0
-                       │
-                       │ Current working-tree content is unattributed; external edits may be included.
-                       │ Snapshots show changes observed during the turn, not exclusive Schway authorship. Current
-                       │ diffs may include later edits.
+                       │ 3 tool results; 0 failed tools.                                                             █
+                       │ Commands: 1 exit 0 / 0 nonzero / 0 unknown (entire turn).                                   █
+                       │ Command results (latest 50; exit codes, not a test-suite guarantee):                        █
+                       │ printf 'ok\n' → exit 0                                                                      █
+                       │                                                                                             █
+                       │ Current working-tree content is unattributed; external edits may be included.               █
+                       │ Snapshots show changes observed during the turn, not exclusive Schway authorship. Current   █
+                       │ diffs may include later edits.                                                              █
                        │ Review is read-only. Files remain changed after failure/cancellation; conversation branching
                        │ does not restore files.
                        │
@@ -66,48 +66,48 @@ cursor 1 1 hidden
 06 22-25 #c5c9cf #f7f7f4 -
 06 25-56 #1d232c #f7f7f4 -
 06 56-117 #ffffff #f7f7f4 -
-06 117-118 #ffffff #252527 -
+06 117-118 #9a9ea3 #252527 -
 06 118-120 #ffffff #f7f7f4 -
 07 0-22 #ffffff #f7f7f4 -
 07 22-25 #c5c9cf #f7f7f4 -
 07 25-82 #1d232c #f7f7f4 -
 07 82-117 #ffffff #f7f7f4 -
-07 117-118 #ffffff #252527 -
+07 117-118 #9a9ea3 #252527 -
 07 118-120 #ffffff #f7f7f4 -
 08 0-22 #ffffff #f7f7f4 -
 08 22-25 #c5c9cf #f7f7f4 -
 08 25-93 #1d232c #f7f7f4 -
 08 93-117 #ffffff #f7f7f4 -
-08 117-118 #ffffff #252527 -
+08 117-118 #9a9ea3 #252527 -
 08 118-120 #ffffff #f7f7f4 -
 09 0-22 #ffffff #f7f7f4 -
 09 22-25 #c5c9cf #f7f7f4 -
 09 25-47 #1d232c #f7f7f4 -
 09 47-117 #ffffff #f7f7f4 -
-09 117-118 #ffffff #252527 -
+09 117-118 #9a9ea3 #252527 -
 09 118-120 #ffffff #f7f7f4 -
 10 0-22 #ffffff #f7f7f4 -
 10 22-25 #c5c9cf #f7f7f4 -
 10 25-117 #ffffff #f7f7f4 -
-10 117-118 #ffffff #252527 -
+10 117-118 #9a9ea3 #252527 -
 10 118-120 #ffffff #f7f7f4 -
 11 0-22 #ffffff #f7f7f4 -
 11 22-25 #c5c9cf #f7f7f4 -
 11 25-102 #1d232c #f7f7f4 -
 11 102-117 #ffffff #f7f7f4 -
-11 117-118 #ffffff #252527 -
+11 117-118 #9a9ea3 #252527 -
 11 118-120 #ffffff #f7f7f4 -
 12 0-22 #ffffff #f7f7f4 -
 12 22-25 #c5c9cf #f7f7f4 -
 12 25-115 #1d232c #f7f7f4 -
 12 115-117 #ffffff #f7f7f4 -
-12 117-118 #ffffff #252527 -
+12 117-118 #9a9ea3 #252527 -
 12 118-120 #ffffff #f7f7f4 -
 13 0-22 #ffffff #f7f7f4 -
 13 22-25 #c5c9cf #f7f7f4 -
 13 25-55 #1d232c #f7f7f4 -
 13 55-117 #ffffff #f7f7f4 -
-13 117-118 #ffffff #252527 -
+13 117-118 #9a9ea3 #252527 -
 13 118-120 #ffffff #f7f7f4 -
 14 0-22 #ffffff #f7f7f4 -
 14 22-25 #c5c9cf #f7f7f4 -

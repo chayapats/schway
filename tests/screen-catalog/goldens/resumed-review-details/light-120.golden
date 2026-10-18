@@ -17,9 +17,9 @@ cursor 1 1 hidden
                         │ session or branch switch it cannot show what an earlier turn changed, and it does not      █
                         │ rebuild that from saved conversation text.                                                 █
                         │                                                                                            █
-                        │ This review shows the current working tree instead.
-                        │
-                        │ Workspace: ***/home/demo
+                        │ This review shows the current working tree instead.                                        █
+                        │                                                                                            █
+                        │ Workspace: ***/home/demo                                                                   █
                         │ Branch: main
                         │
                         │ Review scope:
@@ -96,18 +96,18 @@ cursor 1 1 hidden
 11 23-26 #c5c9cf #f7f7f4 -
 11 26-77 #1d232c #f7f7f4 -
 11 77-117 #ffffff #f7f7f4 -
-11 117-118 #ffffff #252527 -
+11 117-118 #9a9ea3 #252527 -
 11 118-120 #ffffff #f7f7f4 -
 12 0-23 #ffffff #f7f7f4 -
 12 23-26 #c5c9cf #f7f7f4 -
 12 26-117 #ffffff #f7f7f4 -
-12 117-118 #ffffff #252527 -
+12 117-118 #9a9ea3 #252527 -
 12 118-120 #ffffff #f7f7f4 -
 13 0-23 #ffffff #f7f7f4 -
 13 23-26 #c5c9cf #f7f7f4 -
 13 26-50 #1d232c #f7f7f4 -
 13 50-117 #ffffff #f7f7f4 -
-13 117-118 #ffffff #252527 -
+13 117-118 #9a9ea3 #252527 -
 13 118-120 #ffffff #f7f7f4 -
 14 0-23 #ffffff #f7f7f4 -
 14 23-26 #c5c9cf #f7f7f4 -
