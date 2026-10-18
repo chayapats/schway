@@ -28,6 +28,8 @@ export async function discoverAgentsInstructions(options: {
   workspace: Workspace;
   home?: string;
   targetPaths: readonly string[];
+  /** Disable workspace/attached-root instructions while independently retaining an explicitly supplied home. */
+  workspaceDiscovery?: boolean;
 }): Promise<AgentsInstruction[]> {
   const primaryRoot = await canonicalPath(options.workspace.root);
   const roots = [...new Set(await Promise.all([primaryRoot, ...options.workspace.extraRoots].map(canonicalPath)))];
@@ -36,7 +38,7 @@ export async function discoverAgentsInstructions(options: {
     const dir = await canonicalPath(join(options.home, ".schway"));
     dirs.set(dir, { depth: GLOBAL_SCOPE_DEPTH, root: dir, global: true });
   }
-  for (const root of roots) {
+  for (const root of options.workspaceDiscovery === false ? [] : roots) {
     for (const target of options.targetPaths) {
       for (const dir of await ancestorDirsWithinRoot(target, root)) {
         if (!dirs.has(dir)) dirs.set(dir, { depth: dir.split(sep).filter(Boolean).length, root, global: false });

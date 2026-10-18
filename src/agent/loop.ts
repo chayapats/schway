@@ -218,7 +218,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
 
   try {
     yield { type: "agent.started" };
-    if (options.workspace) {
+    if (options.workspace && options.contextManager.skillActivationAllowed !== false) {
       tools = createToolRegistry([
         ...(options.tools?.definitions() ?? []),
         createActivateSkillTool(options.contextManager),

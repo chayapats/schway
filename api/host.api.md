@@ -37,6 +37,32 @@ export interface ContextSection {
     content: string;
     // (undocumented)
     name: string;
+    trust?: "operator" | "source" | "summary";
+}
+
+// @public
+export interface ContextSourceDocument {
+    // (undocumented)
+    readonly content: string;
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly revision: string;
+}
+
+// @public
+export interface ContextSourcePolicy {
+    readonly extensions: false;
+    // (undocumented)
+    readonly homeAgents: boolean;
+    // (undocumented)
+    readonly packages: boolean;
+    // (undocumented)
+    readonly skillActivation: boolean;
+    // (undocumented)
+    readonly skills: boolean;
+    // (undocumented)
+    readonly workspaceAgents: boolean;
 }
 
 // @public
@@ -48,11 +74,15 @@ export function createHost(options: HostOptions): Promise<HostRuntime>;
 // @public
 export interface HostCapabilities {
     // (undocumented)
-    readonly contextPolicies: readonly ["workspace-discovery"];
+    readonly contextContract: "schway.host.context-policy/v1";
+    // (undocumented)
+    readonly contextPolicies: readonly ["workspace-discovery", "strict", "controlled"];
     // (undocumented)
     readonly contract: "schway.host.base/v1";
     // (undocumented)
-    readonly features: readonly ["host-supplied-model", "native-result-reference"];
+    readonly extensionDiscovery: "disabled-only";
+    // (undocumented)
+    readonly features: readonly ["host-supplied-model", "native-result-reference", "explicit-compaction"];
     // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
@@ -61,6 +91,14 @@ export interface HostCapabilities {
 
 // @public
 export function hostCapabilities(): HostCapabilities;
+
+// @public
+export type HostCompactionResult = {
+    outcome: "completed";
+    result: HostEntryReference;
+} | {
+    outcome: "noop" | "error" | "cancelled";
+};
 
 // @public
 export type HostedTool = "web_search";
@@ -102,9 +140,11 @@ export interface HostLimits {
 export interface HostOptions {
     // (undocumented)
     context: {
-        policy: "workspace-discovery";
+        policy: "workspace-discovery" | "strict" | "controlled";
         systemPrompt: string;
         sections: readonly ContextSection[];
+        discovery?: ContextSourcePolicy;
+        sources?: readonly ContextSourceDocument[];
     };
     // (undocumented)
     homeDirectory: string;
@@ -144,6 +184,7 @@ export interface HostRuntime {
 // @public
 export interface HostSession {
     close(): Promise<void>;
+    compact(model: Model, signal?: AbortSignal): Promise<HostCompactionResult>;
     readResult(reference: HostEntryReference): AssistantMessage;
     // (undocumented)
     readonly reference: HostSessionReference;

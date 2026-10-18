@@ -14,6 +14,8 @@ export type {
 } from "../model/model.ts";
 /** Named host-supplied context sent separately from durable conversation messages. */
 export type { ContextSection } from "../context/manager.ts";
+/** Complete discovery controls and explicitly versioned untrusted evidence for host-managed context. */
+export type { ContextSourcePolicy, ContextSourceDocument } from "../context/policy.ts";
 /** Native tool declarations whose execution remains owned by Schway's scheduler. */
 export type {
   JsonSchema, ToolContext, ToolDefinition, ToolEffect, ToolExecutionMode, ToolExecutionResult, ToolOutputChunk,
@@ -24,8 +26,10 @@ export type { Workspace } from "../workspace/workspace.ts";
 /** Static API support only; capability discovery never probes accounts or inference. */
 export interface HostCapabilities {
   readonly contract: "schway.host.base/v1";
-  readonly features: readonly ["host-supplied-model", "native-result-reference"];
-  readonly contextPolicies: readonly ["workspace-discovery"];
+  readonly features: readonly ["host-supplied-model", "native-result-reference", "explicit-compaction"];
+  readonly contextPolicies: readonly ["workspace-discovery", "strict", "controlled"];
+  readonly contextContract: "schway.host.context-policy/v1";
+  readonly extensionDiscovery: "disabled-only";
   readonly toolPolicies: readonly ["include-skill-activation"];
   readonly observedInference: "not-checked";
 }
@@ -38,12 +42,14 @@ export interface HostLimits {
   maxInputChars: number;
 }
 
-/** Trusted host composition; strict/exact policies are rejected until their capability slices ship. */
+/** Trusted host composition with explicit context sources; exact registry enforcement is a later capability. */
 export interface HostOptions {
   workspaceRoot: string;
   sessionDirectory: string;
   homeDirectory: string;
-  context: { policy: "workspace-discovery"; systemPrompt: string; sections: readonly ContextSection[] };
+  context: { policy: "workspace-discovery" | "strict" | "controlled"; systemPrompt: string; sections: readonly ContextSection[];
+    discovery?: import("../context/policy.ts").ContextSourcePolicy;
+    sources?: readonly import("../context/policy.ts").ContextSourceDocument[] };
   tools: { policy: "include-skill-activation"; definitions: readonly ToolDefinition[] };
   limits: HostLimits;
 }
@@ -62,11 +68,17 @@ export type HostRunResult =
   | { outcome: "completed"; input: HostEntryReference; result: HostEntryReference; message: AssistantMessage }
   | { outcome: "error" | "cancelled" | "max_turns"; input: HostEntryReference };
 
+/** Native explicit compaction distinguishes a persisted summary reference from an unchanged or unsuccessful attempt. */
+export type HostCompactionResult = { outcome: "completed"; result: HostEntryReference }
+  | { outcome: "noop" | "error" | "cancelled" };
+
 /** A process-owned native session handle; close is idle-only in the base contract. */
 export interface HostSession {
   readonly reference: HostSessionReference;
   /** Persist input, run the native loop and return a durable reference only for committed completion. */
   submit(input: HostInput, model: Model, signal?: AbortSignal): Promise<HostRunResult>;
+  /** Compact native history under the same current host policy without discovering an alternative instruction source. */
+  compact(model: Model, signal?: AbortSignal): Promise<HostCompactionResult>;
   /** Read one assistant entry from this exact native ancestry without calling models or tools. */
   readResult(reference: HostEntryReference): AssistantMessage;
   /** Release this idle handle; busy handles reject until their submitted run settles. */
@@ -95,8 +107,10 @@ export class HostError extends Error {
 
 const capabilities: HostCapabilities = Object.freeze({
   contract: "schway.host.base/v1",
-  features: Object.freeze(["host-supplied-model", "native-result-reference"] as const),
-  contextPolicies: Object.freeze(["workspace-discovery"] as const),
+  features: Object.freeze(["host-supplied-model", "native-result-reference", "explicit-compaction"] as const),
+  contextPolicies: Object.freeze(["workspace-discovery", "strict", "controlled"] as const),
+  contextContract: "schway.host.context-policy/v1",
+  extensionDiscovery: "disabled-only",
   toolPolicies: Object.freeze(["include-skill-activation"] as const),
   observedInference: "not-checked",
 });

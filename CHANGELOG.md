@@ -4,6 +4,13 @@
 
 ### Added
 
+- Add explicit strict/controlled host context-source policies, separated operator
+  instructions and source documents, native compaction with the same permissions,
+  and activation admission that cannot rediscover disabled sources. Current host
+  policy also applies to replay of weaker historical sessions. CLI defaults and
+  the native format remain unchanged; exact registry enforcement stays separate
+  (#396).
+
 - Add the semver-governed `schway/host` base entry for trusted applications to
   discover capabilities and run a supplied scripted model through native
   loop/context/tool/session persistence. Public-only external consumer and import
