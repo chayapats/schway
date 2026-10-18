@@ -4,13 +4,15 @@ import { runAgentLoop } from "../agent/loop.ts";
 import { createContextManager } from "../context/manager.ts";
 import { contextPolicySnapshot, STRICT_CONTEXT_POLICY, WORKSPACE_CONTEXT_POLICY, type ContextSourcePolicy } from "../context/policy.ts";
 import type { AssistantMessage } from "../conversation/types.ts";
-import { createJsonlSession, loadJsonlSession, type JsonlSession } from "../session/jsonl.ts";
+import { createJsonlSession, loadJsonlSession, SessionConflictError, type JsonlSession } from "../session/jsonl.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import type { ToolDefinition } from "../tools/types.ts";
 import { HostError, hostCapabilities, type HostOptions, type HostRuntime, type HostSession, type HostSessionReference,
   type HostEntryReference, type HostRunResult } from "./index.ts";
+import { acquireSessionLease, type SessionLease } from "./lease.ts";
+import type { Model, ModelRequest } from "../model/model.ts";
 
-// This base contract protects handles within one process; cross-process writer fencing is ENG04.
+// Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -91,10 +93,29 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
   try { tools = createToolRegistry(options.tools.definitions); }
   catch { throw new HostError("invalid-options"); }
   let closed = false, opening = 0;
+  let closing: Promise<void> | undefined;
   const handles = new Map<HostSession, () => boolean>();
   const requireOpen = () => { if (closed) throw new HostError("closed"); };
 
-  function bind(native: JsonlSession, key: string): HostSession {
+  function bind(native: JsonlSession, key: string, lease: SessionLease): HostSession {
+    let conflict = false;
+    const check = () => {
+      if (conflict) throw new HostError("conflict");
+      try { lease.assertOwned(); native.assertCurrent(); }
+      catch (error) { if (error instanceof SessionConflictError || error instanceof HostError && error.code === "conflict") { conflict = true; throw new HostError("conflict"); } throw new HostError("storage"); }
+      if (native.activeBranchId !== reference.branchId) { conflict = true; throw new HostError("conflict"); }
+    };
+    // Capture route identity and method once; trusted adapters retain their own private receiver.
+    const snapshotModel = (model: Model): Model => {
+      const provider = model.provider, id = model.id, stream = model.stream.bind(model);
+      return Object.freeze({ provider, id, async *stream(request, call) {
+        check();
+        for await (const event of stream(structuredCloneRequest(request), call)) yield structuredClone(event);
+      } } as Model);
+    };
+    const runTools = createToolRegistry(tools.definitions().map(tool => ({ ...tool,
+      execute(input, context) { check(); return tool.execute(input, context); },
+    })));
     let disposed = false, busy = false;
     const reference = Object.freeze({ id: native.header.id, branchId: native.activeBranchId });
     const context = createContextManager(workspace, { home, contextWindow: options.limits.contextWindow,
@@ -110,27 +131,33 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             typeof model.stream !== "function" || typeof model.provider !== "string" || !model.provider ||
             typeof model.id !== "string" || !model.id) throw new HostError("invalid-input");
         if (signal?.aborted) throw new HostError("invalid-input");
+        check();
+        const route = snapshotModel(model);
         busy = true;
+        const release = native.acquireOperation();
         try {
           const id = crypto.randomUUID();
           try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }] }); }
-          catch { throw new HostError("storage"); }
+          catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
           const inputReference = ref(id);
           let outcome: HostRunResult["outcome"] = "error";
-          for await (const event of runAgentLoop({ session: native, model, contextManager: context, tools, workspace,
+          for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
             maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, signal, webSearch: "off" })) {
             if (event.type === "agent.finished") outcome = event.reason;
           }
+          try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
+          if (conflict) throw new HostError("conflict");
           if (outcome === "completed") {
+            check();
             const message = native.items.findLast(item => item.type === "assistant");
             if (!message || message.type !== "assistant") throw new HostError("storage");
             return { outcome, input: inputReference, result: ref(message.id), message: structuredClone(message) };
           }
           return { outcome, input: inputReference };
-        } finally { busy = false; }
+        } finally { release(); busy = false; }
       },
       readResult(result) {
-        requireIdle();
+        requireIdle(); check();
         if (!record(result) || Object.keys(result).some(key => !["session", "entryId"].includes(key))) throw new HostError("invalid-reference");
         validateReference(result.session);
         if (result.session.id !== reference.id || result.session.branchId !== reference.branchId ||
@@ -142,17 +169,26 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       async compact(model, signal) {
         requireIdle();
         if (!model || typeof model.stream !== "function" || typeof model.provider !== "string" || !model.provider || typeof model.id !== "string" || !model.id) throw new HostError("invalid-input");
+        check();
+        const route = snapshotModel(model);
         busy = true;
         try {
           let failed = false;
-          const record = await context.compact(native, model, { reason: "manual", signal, onOutcome: result => { if (result === "failed") failed = true; } });
+          const record = await context.compact(native, route, { reason: "manual", signal, onOutcome: result => { if (result === "failed") failed = true; } });
+          check();
           return record ? { outcome: "completed", result: ref(record.id) } : { outcome: failed ? "error" : signal?.aborted ? "cancelled" : "noop" };
-        } catch { return { outcome: signal?.aborted ? "cancelled" : "error" }; }
-        finally { busy = false; }
+        } catch (error) {
+          if (conflict || error instanceof SessionConflictError || error instanceof HostError && error.code === "conflict") {
+            conflict = true;
+            throw new HostError("conflict");
+          }
+          return { outcome: signal?.aborted ? "cancelled" : "error" };
+        } finally { busy = false; }
       },
       async close() {
         if (disposed) return;
         requireIdle();
+        lease.release();
         disposed = true;
         ownedSessions.delete(key);
         handles.delete(handle);
@@ -167,10 +203,13 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
     async createSession() {
       requireOpen(); opening++;
       try {
-        const native = await createJsonlSession({ directory, workspace });
-        const key = `${directory}/${native.header.id}`;
-        ownedSessions.add(key);
-        return bind(native, key);
+        const id = crypto.randomUUID(), key = `${directory}/${id}`;
+        const lease = acquireSessionLease(directory, id);
+        try {
+          const native = await createJsonlSession({ directory, workspace, id, managed: { assertOwnership: lease.assertOwned } });
+          ownedSessions.add(key);
+          return bind(native, key, lease);
+        } catch (error) { ownedSessions.delete(key); lease.release(); throw error; }
       } catch (error) { if (error instanceof HostError) throw error; throw new HostError("storage"); }
       finally { opening--; }
     },
@@ -180,24 +219,37 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       const key = `${directory}/${selected.id}`;
       if (ownedSessions.has(key)) throw new HostError("busy");
       ownedSessions.add(key); opening++;
+      let lease: SessionLease | undefined;
       try {
-        const native = await loadJsonlSession({ directory, id: selected.id, branchId: selected.branchId,
+        lease = acquireSessionLease(directory, selected.id);
+        const native = await loadJsonlSession({ directory, id: selected.id, branchId: selected.branchId, managed: { assertOwnership: lease.assertOwned },
           validateIdentity: (workspaceRoot, extraRoots) => {
             if (workspaceRoot !== root || extraRoots.length) throw new HostError("workspace-mismatch");
           } });
-        return bind(native, key);
+        return bind(native, key, lease);
       } catch (error) {
         ownedSessions.delete(key);
+        lease?.release();
         if (error instanceof HostError) throw error;
+        if (error instanceof SessionConflictError) throw new HostError("conflict");
         throw new HostError("storage");
       } finally { opening--; }
     },
     async close() {
+      if (closing) return closing;
       if (closed) return;
       if (opening || [...handles.values()].some(isBusy => isBusy())) throw new HostError("busy");
       const pending = [...handles.keys()].map(handle => handle.close());
       closed = true;
-      await Promise.all(pending);
+      closing = Promise.all(pending).then(() => undefined).catch(error => { closed = false; throw error; })
+        .finally(() => { closing = undefined; });
+      return closing;
     },
   });
+}
+
+/** Detach mutable request data so a supplied adapter cannot alter the committed ancestry or host policy. */
+function structuredCloneRequest(request: ModelRequest): ModelRequest {
+  const { signal, ...data } = request;
+  return { ...structuredClone(data), ...(signal ? { signal } : {}) };
 }

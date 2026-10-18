@@ -28,6 +28,8 @@ export interface HostCapabilities {
   readonly contract: "schway.host.base/v1";
   readonly features: readonly ["host-supplied-model", "native-result-reference", "explicit-compaction"];
   readonly contextPolicies: readonly ["workspace-discovery", "strict", "controlled"];
+  readonly sessionContract: "schway.host.durable-sessions/v1";
+  readonly sessionOwnership: "exclusive-local-process-lease";
   readonly contextContract: "schway.host.context-policy/v1";
   readonly extensionDiscovery: "disabled-only";
   readonly toolPolicies: readonly ["include-skill-activation"];
@@ -99,7 +101,7 @@ export interface HostRuntime {
 /** Safe typed host rejection; underlying storage/provider diagnostics remain outside this base surface. */
 export class HostError extends Error {
   constructor(readonly code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" |
-    "busy" | "closed" | "storage" | "workspace-mismatch" | "result-not-found") {
+    "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found") {
     super(`Host ${code}`);
     this.name = "HostError";
   }
@@ -109,6 +111,8 @@ const capabilities: HostCapabilities = Object.freeze({
   contract: "schway.host.base/v1",
   features: Object.freeze(["host-supplied-model", "native-result-reference", "explicit-compaction"] as const),
   contextPolicies: Object.freeze(["workspace-discovery", "strict", "controlled"] as const),
+  sessionContract: "schway.host.durable-sessions/v1",
+  sessionOwnership: "exclusive-local-process-lease",
   contextContract: "schway.host.context-policy/v1",
   extensionDiscovery: "disabled-only",
   toolPolicies: Object.freeze(["include-skill-activation"] as const),
