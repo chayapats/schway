@@ -38,6 +38,12 @@ capabilities identify the supported contract/features; a base entry does not
 promise later exact-registry, route or managed-lifecycle capabilities. The explicit
 context-policy contract advertises strict/controlled discovery and preserves
 CLI defaults; current restrictions also apply when opening older native history.
+The durable-sessions contract adds exclusive local-process ownership per canonical
+session, flush-before-publication and exact saved-branch/result references. Its
+leases fail closed for uncertain owners; native reopen owns interrupted-call
+settlement without replaying tool effects. The ownership boundary and recovery
+conditions are documented in [host contracts](host.md). It introduces no JSONL
+format change or distributed transaction with an embedding application's store.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing

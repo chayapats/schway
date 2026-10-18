@@ -1,9 +1,9 @@
-import { appendFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSync, closeSync } from "node:fs";
+import { appendFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSync, closeSync, readFileSync, lstatSync, fsyncSync, writeSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { openDraftStore } from "../drafts/store.ts";
 import { deleteUndoSession } from "../undo/store.ts";
 import { deleteHistorySession } from "../history/store.ts";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type {
   AssistantContent,
   AssistantTelemetry,
@@ -34,6 +34,8 @@ export interface SessionHeader {
 /** Session with a persisted header whose appends synchronously write JSONL before updating in-memory history. */
 export interface JsonlSession extends Session {
   readonly header: SessionHeader;
+  /** Reject an altered managed artifact or lost ownership before another request or write. */
+  assertCurrent(): void;
   /** Materialize a deferred header for a completed draft checkpoint without adding conversation. */
   ensurePersisted(): void;
   /** Whether a resume target exists on disk. */
@@ -42,17 +44,28 @@ export interface JsonlSession extends Session {
   deferredCheckpoint(): { path: string; header: SessionHeader } | undefined;
 }
 
+/** Managed persistence fences external changes and flushes accepted records before publication. */
+export interface ManagedSessionStorage { assertOwnership(): void }
+
+/** An external writer changed a managed artifact; reopen under exclusive ownership before continuing. */
+export class SessionConflictError extends Error {
+  constructor() { super("Session writer changed"); this.name = "SessionConflictError"; }
+}
+
 /** Create a workspace-bound session, optionally deferring its JSONL header until the first durable mutation. */
 export async function createJsonlSession(options: {
   directory: string;
   workspace: Workspace;
+  /** Preallocated managed identity whose writer lease is already held. */
+  id?: string;
   /** Keep an untouched interactive conversation in memory until its first durable mutation. */
   deferred?: boolean;
+  managed?: ManagedSessionStorage;
 }): Promise<JsonlSession> {
   const header: SessionHeader = {
     type: "session",
     version: SESSION_FORMAT_VERSION,
-    id: crypto.randomUUID(),
+    id: options.id ?? crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     workspaceRoot: options.workspace.root,
     launchCwd: options.workspace.launchCwd,
@@ -60,8 +73,14 @@ export async function createJsonlSession(options: {
   };
   await mkdir(options.directory, { recursive: true });
   const path = sessionFilePath(options.directory, header.id);
-  if (!options.deferred) await writeFile(path, `${JSON.stringify(header)}\n`, "utf8");
-  return openPersisted(path, header, emptyBranchState(header.id), header.extraRoots, header.version, options.deferred);
+  if (!options.deferred && !options.managed) await writeFile(path, `${JSON.stringify(header)}\n`, "utf8");
+  else if (!options.deferred) {
+    const file = await open(path, "wx", 0o600);
+    try { await file.writeFile(`${JSON.stringify(header)}\n`, "utf8"); if (options.managed) await file.sync(); }
+    finally { await file.close(); }
+    if (options.managed) { const dir = openSync(options.directory, "r"); try { fsyncSync(dir); } finally { closeSync(dir); } }
+  }
+  return openPersisted(path, header, emptyBranchState(header.id), header.extraRoots, header.version, options.deferred, options.managed);
 }
 
 /** Join the supplied home directory with `.schway/sessions` without accessing the filesystem. */
@@ -163,12 +182,14 @@ export async function loadJsonlSession(options: {
   branchId?: string;
   /** Validate managed identity before any torn-tail repair or interrupted-call settlement writes. */
   validateIdentity?: (workspaceRoot: string, extraRoots: readonly string[]) => void;
+  managed?: ManagedSessionStorage;
 }): Promise<JsonlSession> {
   let path: string;
   try { path = sessionFilePath(options.directory, options.id); }
   catch (error) { throw new SessionLoadError("invalid-id", error instanceof Error ? error.message : String(error)); }
   let text: string;
   try {
+    if (options.managed) { options.managed.assertOwnership(); managedFileIdentity(path); }
     text = await readFile(path, "utf8");
   } catch (error) {
     if (isNotFound(error)) {
@@ -176,6 +197,7 @@ export async function loadJsonlSession(options: {
     }
     throw error;
   }
+  options.managed?.assertOwnership();
   const loaded = loadRecords(text);
   if (loaded.header.id !== options.id) throw new Error("Session header ID does not match the requested session");
   options.validateIdentity?.(loaded.header.workspaceRoot, loaded.extraRoots);
@@ -184,10 +206,11 @@ export async function loadJsonlSession(options: {
   const candidate = createSession([], loaded.extraRoots, { state: loaded.state, writeOperation: operation => staged.push(operation) });
   candidate.selectBranch(options.branchId ?? candidate.activeBranchId);
   if (loaded.text !== text) {
-    try { await replaceFile(path, loaded.text); }
+    try { await replaceFile(path, loaded.text, options.managed); }
     catch (error) { throw new SessionLoadError("repair-failed", error instanceof Error ? error.message : String(error), { cause: error }); }
   }
-  const session = openPersisted(path, loaded.header, loaded.state, loaded.extraRoots, loaded.version);
+  const session = openPersisted(path, loaded.header, loaded.state, loaded.extraRoots, loaded.version, false, options.managed, loaded.text);
+  session.assertCurrent();
   // Recompute fresh settlement IDs only after validation and any safe trailing repair succeed.
   if (staged.length) session.selectBranch(options.branchId ?? session.activeBranchId);
   return session;
@@ -201,9 +224,28 @@ function sessionFilePath(directory: string, id: string): string {
   return join(directory, `${id}.jsonl`);
 }
 
+/** Refuse file aliases so separate managed stores cannot lease the same underlying conversation. */
+function managedFileIdentity(path: string) {
+  const info = lstatSync(path);
+  if (!info.isFile() || info.nlink !== 1) throw new SessionConflictError();
+  return info;
+}
+
 /** Bind atomic branch operations and separate workspace metadata to append-only version upgrades. */
-function openPersisted(path: string, header: SessionHeader, state: BranchState, extraRoots: readonly string[], version: number, deferred = false): JsonlSession {
+function openPersisted(path: string, header: SessionHeader, state: BranchState, extraRoots: readonly string[], version: number, deferred = false, managed?: ManagedSessionStorage, expectedText?: string): JsonlSession {
   let failed = false;
+  let failure: unknown;
+  let expected = managed && !deferred ? expectedText === undefined ? readFileSync(path) : Buffer.from(expectedText) : undefined;
+  let identity = managed && !deferred ? managedFileIdentity(path) : undefined;
+  const assertCurrent = () => {
+    if (!managed) return;
+    if (failed) throw failure;
+    managed.assertOwnership();
+    if (expected) {
+      const current = readFileSync(path), info = managedFileIdentity(path);
+      if (identity!.dev !== info.dev || identity!.ino !== info.ino || !expected.equals(current)) throw new SessionConflictError();
+    }
+  };
   let discovery: { activityAt?: string; title?: string } = {};
   try {
     const fd = openSync(`${path}.meta`, "r");
@@ -221,9 +263,32 @@ function openPersisted(path: string, header: SessionHeader, state: BranchState, 
   const write = (text: string): void => {
     if (failed) throw new Error("Session storage previously failed; reload the session before writing again");
     try {
-      if (deferred) { writeFileSync(path, `${JSON.stringify(header)}\n${text}`, { encoding: "utf8", flag: "wx", mode: 0o600 }); deferred = false; }
-      else appendFileSync(path, text, "utf8");
-    } catch (error) { failed = true; throw error; }
+      assertCurrent();
+      if (deferred) {
+        writeFileSync(path, `${JSON.stringify(header)}\n${text}`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+        if (managed) {
+          const fd = openSync(path, "r+");
+          try { fsyncSync(fd); } finally { closeSync(fd); }
+          const directory = openSync(dirname(path), "r");
+          try { fsyncSync(directory); } finally { closeSync(directory); }
+        }
+        deferred = false;
+      }
+      else if (managed) {
+        const fd = openSync(path, "a");
+        try {
+          const bytes = Buffer.from(text);
+          let offset = 0;
+          while (offset < bytes.length) offset += writeSync(fd, bytes, offset, bytes.length - offset);
+          fsyncSync(fd);
+        } finally { closeSync(fd); }
+      } else appendFileSync(path, text, "utf8");
+      if (managed) {
+        expected = expected ? Buffer.concat([expected, Buffer.from(text)]) : Buffer.from(`${JSON.stringify(header)}\n${text}`);
+        identity ??= managedFileIdentity(path);
+        assertCurrent();
+      }
+    } catch (error) { failed = true; failure = error; throw error; }
   };
   const session = createSession([], extraRoots, {
     state,
@@ -260,7 +325,7 @@ function openPersisted(path: string, header: SessionHeader, state: BranchState, 
       if (version === 1) version = 2;
     },
   });
-  return Object.defineProperties(Object.assign(session, { header, deferredCheckpoint() { return deferred ? { path, header } : undefined; }, ensurePersisted() { if (deferred) write(""); } }), { persisted: { get: () => !deferred } }) as JsonlSession;
+  return Object.defineProperties(Object.assign(session, { header, assertCurrent, deferredCheckpoint() { return deferred ? { path, header } : undefined; }, ensurePersisted() { if (deferred) write(""); } }), { persisted: { get: () => !deferred } }) as JsonlSession;
 }
 
 /** Replay version-specific records without normalizing valid bytes or repairing semantic corruption. */
@@ -514,11 +579,17 @@ function malformedRecord(): Error {
 }
 
 /** Replace `path` via a same-directory temp file so a crash cannot wipe valid history. */
-async function replaceFile(path: string, text: string): Promise<void> {
+async function replaceFile(path: string, text: string, managed?: ManagedSessionStorage): Promise<void> {
   const tempPath = `${path}.${crypto.randomUUID()}.tmp`;
   try {
-    await writeFile(tempPath, text, "utf8");
+    if (managed) {
+      const file = await open(tempPath, "wx", 0o600);
+      try { await file.writeFile(text, "utf8"); await file.sync(); }
+      finally { await file.close(); }
+      managed.assertOwnership();
+    } else await writeFile(tempPath, text, "utf8");
     await rename(tempPath, path);
+    if (managed) { const directory = openSync(dirname(path), "r"); try { fsyncSync(directory); } finally { closeSync(directory); } }
   } catch (error) {
     await unlink(tempPath).catch(() => undefined);
     throw error;

@@ -86,6 +86,10 @@ export interface HostCapabilities {
     // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
+    readonly sessionContract: "schway.host.durable-sessions/v1";
+    // (undocumented)
+    readonly sessionOwnership: "exclusive-local-process-lease";
+    // (undocumented)
     readonly toolPolicies: readonly ["include-skill-activation"];
 }
 
@@ -113,9 +117,9 @@ export interface HostEntryReference {
 
 // @public
 export class HostError extends Error {
-    constructor(code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" | "busy" | "closed" | "storage" | "workspace-mismatch" | "result-not-found");
+    constructor(code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" | "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found");
     // (undocumented)
-    readonly code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" | "busy" | "closed" | "storage" | "workspace-mismatch" | "result-not-found";
+    readonly code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" | "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found";
 }
 
 // @public
