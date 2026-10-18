@@ -291,36 +291,41 @@ test.skipIf(process.getuid?.() === 0)("lease release I/O failure leaves host clo
 });
 
 for (const changed of ["file", "ownership"] as const) {
-  test(`explicit compaction preserves typed ${changed} conflicts raised after summary inference`, async () => {
-    await withTempDir(async dir => {
-      const config = await options(dir), host = await createHost(config), session = await host.createSession();
-      try {
-        for (let turn = 0; turn < 12; turn++) {
-          expect((await session.submit({ text: `retained ${turn}` }, createScriptedModel({ text: "retained output" }))).outcome).toBe("completed");
-        }
-        const path = join(config.sessionDirectory, `${session.reference.id}.jsonl`);
-        const before = await readFile(path, "utf8");
-        let calls = 0;
-        const model: Model = { provider: "scripted", id: "summary-conflict", async *stream() {
-          calls++;
-          if (changed === "file") await appendFile(path, "\n");
-          else {
-            const leasePath = join(config.sessionDirectory, `${session.reference.id}.host-lease`);
-            const owner = JSON.parse(await readFile(leasePath, "utf8"));
-            await Bun.write(leasePath, JSON.stringify({ ...owner, token: "replacement-owner" }));
+  for (const summaryOutcome of ["summary", "provider-error", "empty", "cancelled"] as const) {
+    test(`explicit compaction preserves typed ${changed} conflicts after ${summaryOutcome} inference`, async () => {
+      await withTempDir(async dir => {
+        const config = await options(dir), host = await createHost(config), session = await host.createSession();
+        try {
+          for (let turn = 0; turn < 12; turn++) {
+            expect((await session.submit({ text: `retained ${turn}` }, createScriptedModel({ text: "retained output" }))).outcome).toBe("completed");
           }
-          yield { type: "message_complete", message: { type: "assistant", id: "uncommitted-summary",
-            content: [{ type: "text", text: "summary must not be committed" }] } };
-        } };
-        const pending = session.compact(model);
-        await expect(pending).rejects.toBeInstanceOf(HostError);
-        await expect(pending).rejects.toMatchObject({ code: "conflict" });
-        expect(calls).toBe(1);
-        expect(await readFile(path, "utf8")).toBe(before + (changed === "file" ? "\n" : ""));
-        await expect(session.submit({ text: "must remain fenced" }, createScriptedModel())).rejects.toMatchObject({ code: "conflict" });
-      } finally { await host.close(); }
+          const path = join(config.sessionDirectory, `${session.reference.id}.jsonl`);
+          const before = await readFile(path, "utf8");
+          let calls = 0;
+          const abort = new AbortController();
+          const model: Model = { provider: "scripted", id: "summary-conflict", async *stream() {
+            calls++;
+            if (changed === "file") await appendFile(path, "\n");
+            else {
+              const leasePath = join(config.sessionDirectory, `${session.reference.id}.host-lease`);
+              const owner = JSON.parse(await readFile(leasePath, "utf8"));
+              await Bun.write(leasePath, JSON.stringify({ ...owner, token: crypto.randomUUID() }));
+            }
+            if (summaryOutcome === "provider-error") throw new Error("Fixture summary inference failed");
+            if (summaryOutcome === "cancelled") abort.abort();
+            yield { type: "message_complete", message: { type: "assistant", id: "uncommitted-summary",
+              content: [{ type: "text", text: summaryOutcome === "empty" ? "" : "summary must not be committed" }] } };
+          } };
+          const pending = session.compact(model, abort.signal);
+          await expect(pending).rejects.toBeInstanceOf(HostError);
+          await expect(pending).rejects.toMatchObject({ code: "conflict" });
+          expect(calls).toBe(1);
+          expect(await readFile(path, "utf8")).toBe(before + (changed === "file" ? "\n" : ""));
+          await expect(session.submit({ text: "must remain fenced" }, createScriptedModel())).rejects.toMatchObject({ code: "conflict" });
+        } finally { await host.close(); }
+      });
     });
-  });
+  }
 }
 
 test("malformed lease tokens stay busy even when their owner process is positively stopped", async () => {

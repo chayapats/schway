@@ -175,8 +175,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         try {
           let failed = false;
           const record = await context.compact(native, route, { reason: "manual", signal, onOutcome: result => { if (result === "failed") failed = true; } });
-          if (conflict) throw new HostError("conflict");
-          if (record) check();
+          check();
           return record ? { outcome: "completed", result: ref(record.id) } : { outcome: failed ? "error" : signal?.aborted ? "cancelled" : "noop" };
         } catch (error) {
           if (conflict || error instanceof SessionConflictError || error instanceof HostError && error.code === "conflict") {
