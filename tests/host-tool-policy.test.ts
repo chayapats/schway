@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir, realpath, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createHost, hostCapabilities, HostError, type HostOptions } from "schway/host";
+import { createHost, hostCapabilities, type HostOptions } from "schway/host";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { createSession } from "../src/session/session.ts";
@@ -52,7 +52,6 @@ test("empty registry advertises zero tools and denies forbidden built-ins withou
   await withTempDir(async dir => {
     const config = await options(dir);
     const host = await createHost(config), session = await host.createSession();
-    let executions = 0;
     const result = await session.submit({ text: "try forbidden" }, createScriptedModel({ responses: [
       request => {
         expect(request.tools ?? []).toEqual([]);
@@ -70,7 +69,6 @@ test("empty registry advertises zero tools and denies forbidden built-ins withou
           expect(item).toMatchObject({ type: "tool_result", isError: true });
           expect((item as { content: string }).content).toContain("Unknown tool");
         }
-        expect(executions).toBe(0);
         return { text: "held" };
       },
     ] }));
@@ -103,14 +101,14 @@ test("narrow registry exposes only admitted defs; unknown rejected and duplicate
     expect(result.outcome).toBe("completed");
     await session.close(); await host.close();
     const duplicate = { ...admitted };
-    await expect(createHost({ ...config, tools: { policy: "exact", hostedLookup: "off", definitions: [admitted, duplicate] } })).rejects.toBeInstanceOf(HostError);
+    await expect(createHost({ ...config, tools: { policy: "exact", hostedLookup: "off", definitions: [admitted, duplicate] } })).rejects.toMatchObject({ code: "invalid-options" });
     await expect(createHost({ ...config, tools: { policy: "exact", hostedLookup: "off", definitions: [{
       name: "bad", description: "bad", execution: "parallel" as const, effect: "read-only" as const,
-      inputSchema: { type: "not-an-object" } as unknown as Record<string, unknown>, async execute() { return { content: "x" }; } }] } })).rejects.toBeInstanceOf(HostError);
+      inputSchema: { type: "not-an-object" } as unknown as Record<string, unknown>, async execute() { return { content: "x" }; } }] } })).rejects.toMatchObject({ code: "invalid-options" });
     for (const tools of [{ policy: "include-skill-activation", hostedLookup: "off", definitions: [] },
       { policy: "exact", hostedLookup: "auto" as unknown as "off", definitions: [] },
       { policy: "exact", definitions: [] }] as unknown as HostOptions["tools"][]) {
-      await expect(createHost({ ...config, tools })).rejects.toBeInstanceOf(HostError);
+      await expect(createHost({ ...config, tools })).rejects.toMatchObject({ code: "unsupported-policy" });
     }
   });
 });
