@@ -250,12 +250,38 @@ export async function loadSubscriptionTokens(
   return parseSubscriptionTokens(raw);
 }
 
+/** Route-scoped renewal lifecycle shared across refresher instances for one store. */
+type CodexLifecycle = {
+  generation: number;
+  writes: Promise<void>;
+  refresh?: { generation: number; promise: Promise<CodexTokens> };
+};
+const codexLifecycles = new WeakMap<CredentialStore, CodexLifecycle>();
+function codexLifecycle(store: CredentialStore): CodexLifecycle {
+  let state = codexLifecycles.get(store);
+  if (!state) { state = { generation: 0, writes: Promise.resolve() }; codexLifecycles.set(store, state); }
+  return state;
+}
+function serializeCodexWrite<T>(state: CodexLifecycle, operation: () => Promise<T>): Promise<T> {
+  const next = state.writes.then(operation);
+  state.writes = next.then(() => {}, () => {});
+  return next;
+}
+async function writeCodexTokens(store: CredentialStore, tokens: CodexTokens): Promise<void> {
+  try { await store.set(codexSubscriptionIdentity(), JSON.stringify(serializeSubscriptionTokens(tokens))); }
+  catch { throw new Error(credentialStoreError("save")); }
+}
+
 /** Persist the subscription tokens at exactly the subscription identity. */
 export async function saveSubscriptionTokens(
   store: CredentialStore,
   tokens: CodexTokens,
 ): Promise<void> {
-  await store.set(codexSubscriptionIdentity(), JSON.stringify(serializeSubscriptionTokens(tokens)));
+  const state = codexLifecycle(store);
+  // Bump only after the serialized write lands: a throwing store must not
+  // invalidate a concurrent refresh, which would then misreport as revoked.
+  await serializeCodexWrite(state, () => writeCodexTokens(store, tokens));
+  state.generation++;
 }
 
 /** Persist a completed sign-in, reporting the write-start boundary and successful secure-store commit. */
@@ -273,7 +299,14 @@ async function commitInteractiveLogin(store: CredentialStore, tokens: CodexToken
 export async function clearSubscriptionTokens(
   store: CredentialStore,
 ): Promise<boolean> {
-  return store.delete(codexSubscriptionIdentity());
+  const state = codexLifecycle(store);
+  // Bump only after the serialized delete lands, matching saveSubscriptionTokens.
+  const existed = await serializeCodexWrite(state, async () => {
+    try { return await store.delete(codexSubscriptionIdentity()); }
+    catch { throw new Error(credentialStoreError("delete")); }
+  });
+  state.generation++;
+  return existed;
 }
 
 /** Parse stored subscription tokens, rejecting malformed or secretless payloads. */
@@ -431,10 +464,17 @@ export function createSubscriptionTokenRefresher(input: {
   /** Return a valid access token, refreshing once before expiry with racing callers sharing the renewal. */
   getValidAccessToken(signal?: AbortSignal): Promise<{ accessToken: string; accountId?: string }>;
 } {
-  let inFlight: Promise<CodexTokens> | undefined;
   return {
     async getValidAccessToken(signal?: AbortSignal): Promise<{ accessToken: string; accountId?: string }> {
       throwIfAborted(signal);
+      const state = codexLifecycle(input.store);
+      const pendingWrites = state.writes;
+      await pendingWrites;
+      throwIfAborted(signal);
+      if (pendingWrites !== state.writes) {
+        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal);
+      }
+      const generation = state.generation;
       let stored: CodexTokens | null;
       try {
         stored = await loadSubscriptionTokens(input.store);
@@ -442,6 +482,9 @@ export function createSubscriptionTokenRefresher(input: {
         throw new Error(codexRevokedSessionError());
       }
       throwIfAborted(signal);
+      if (generation !== state.generation) {
+        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal);
+      }
       if (!stored) {
         throw new Error(codexMissingLoginError());
       }
@@ -451,10 +494,11 @@ export function createSubscriptionTokenRefresher(input: {
       if (!stored.refreshToken) {
         throw new Error(codexExpiredSessionError());
       }
-      if (!inFlight) {
+      let refresh = state.refresh;
+      if (!refresh || refresh.generation !== generation) {
         const refreshToken = stored.refreshToken;
         const refreshSignal = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS);
-        inFlight = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal: refreshSignal })
+        const promise = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal: refreshSignal })
           .catch((error: unknown) => {
             if (refreshSignal.aborted) {
               throw new Error(
@@ -469,14 +513,24 @@ export function createSubscriptionTokenRefresher(input: {
               ...renewed,
               refreshToken: renewed.refreshToken ?? refreshToken,
             };
-            await saveSubscriptionTokens(input.store, merged);
+            await serializeCodexWrite(state, async () => {
+              refreshSignal.throwIfAborted();
+              if (state.generation !== generation) throw new Error(codexRevokedSessionError());
+              await writeCodexTokens(input.store, merged);
+              if (state.generation !== generation) throw new Error(codexRevokedSessionError());
+              state.generation++;
+            });
             return merged;
           })
           .finally(() => {
-            inFlight = undefined;
+            if (state.refresh?.promise === promise) state.refresh = undefined;
           });
+        // Cancellation can happen before a caller begins awaiting this shared promise.
+        void promise.catch(() => {});
+        refresh = { generation, promise };
+        state.refresh = refresh;
       }
-      const renewed = await raceWithAbort(inFlight, signal);
+      const renewed = await raceWithAbort(refresh.promise, signal);
       return { accessToken: renewed.accessToken, accountId: renewed.accountId ?? accountIdFromAccessToken(renewed.accessToken) };
     },
   };

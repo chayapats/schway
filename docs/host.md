@@ -2,7 +2,7 @@
 
 `schway/host` is the semver-governed application-host entry. It composes Schway's existing loop, context preparation, tool scheduler, retries and native JSONL persistence. It does not import the CLI or construct a provider. Discovery and scripted tests need no account or paid request.
 
-This implements `schway.host.base/v1` from [ENG01 #395](https://github.com/chayapats/schway/issues/395), `schway.host.context-policy/v1` from [ENG02 #396](https://github.com/chayapats/schway/issues/396), `schway.host.durable-sessions/v1` from [ENG04 #397](https://github.com/chayapats/schway/issues/397), and `schway.host.tool-policy/v1` from [ENG03 #399](https://github.com/chayapats/schway/issues/399), slices of [S02 #393](https://github.com/chayapats/schway/issues/393). Strict context discovery, exclusive durable sessions and exact tool registries are supported; provider routes and the production bridge remain later capabilities. Unsupported policies/fields fail before input acceptance or inference. CLI context defaults are unchanged.
+This implements `schway.host.base/v1` from [ENG01 #395](https://github.com/chayapats/schway/issues/395), `schway.host.context-policy/v1` from [ENG02 #396](https://github.com/chayapats/schway/issues/396), `schway.host.durable-sessions/v1` from [ENG04 #397](https://github.com/chayapats/schway/issues/397), `schway.host.tool-policy/v1` from [ENG03 #399](https://github.com/chayapats/schway/issues/399), and `schway.host.auth-routes/v1` from [ENG05 #398](https://github.com/chayapats/schway/issues/398), slices of [S02 #393](https://github.com/chayapats/schway/issues/393). Strict context discovery, exclusive durable sessions, exact tool registries and explicit Grok/Codex route lifecycles are supported; the production bridge remains a later capability. Unsupported policies/fields fail before input acceptance or inference. CLI context defaults are unchanged.
 
 ```ts
 import { createHost, hostCapabilities, type Model } from "schway/host";
@@ -60,7 +60,7 @@ Each accepted run captures its selected branch, model identity/method, host cont
 
 Native managed appends flush before in-memory publication; creation and torn-tail repair also flush file/directory state. A failed input append rejects storage without a model request or accepted reference. After accepted provider/tool progress, unsuccessful appends return `error` with the input reference and no final result. An uncertain write can leave bytes on disk: close and reopen to let Schway validate/repair/settle them before continuing. An executed tool whose result was not committed is settled as interrupted, never rerun; this records uncertainty rather than proving that its effect did or did not happen. Only committed native entry IDs identify inputs/results, independent of provisional stream events. A foreign session/branch result reference is rejected.
 
-Reopen selects the exact requested saved ancestry, preserves opaque provider metadata and retains sibling branches. Native corruption checks, torn-tail recovery, interrupted-call settlement and forward-only migrations remain Schway-owned; applications do not parse or rewrite JSONL. The native format stays at version 4. No distributed transaction or automatic acceptance/retry reconciliation with the application's database is introduced. Managed retirement/deletion and snapshot/restore are ENG07/08. Supplied models/tools are trusted executable code, not a sandbox. No auth-route construction, credential lifecycle or route availability is certified here; those are ENG05 and opt-in Jit S01 evidence.
+Reopen selects the exact requested saved ancestry, preserves opaque provider metadata and retains sibling branches. Native corruption checks, torn-tail recovery, interrupted-call settlement and forward-only migrations remain Schway-owned; applications do not parse or rewrite JSONL. The native format stays at version 4. No distributed transaction or automatic acceptance/retry reconciliation with the application's database is introduced. Managed retirement/deletion and snapshot/restore are ENG07/08. Supplied models/tools are trusted executable code, not a sandbox.
 
 Schway completion/persistence is not Jit task acceptance, verified project completion or an atomic commit with Jit's app database. The application owns authorization, job fencing, task decisions and cross-store reconciliation.
 
@@ -101,6 +101,14 @@ Reopen constructs context from the current host options, including stricter opti
 
 `tools.policy` is `"exact"` with `hostedLookup: "off"`. Any other policy, a missing `hostedLookup`, or malformed/duplicate/unsupported definitions fail at `createHost` before any session or model call. Unknown tools called by a model settle as `isError` tool results (`Unknown tool: <name>`) without execution; the scheduler never runs unadmitted code. Before-model hooks may only select an unchanged subset of admitted tools (`validateTools`); attempts to add tools or set `hostedTools` fail the turn before inference. Before-tool hooks may replace arguments, but replacements are revalidated and approval (`read-only`/`ask`) applies to the effective post-hook arguments. `activate_skill` is never injected; admit it explicitly to bind per-session activation to the current context manager, where the same discovery policy still governs direct and restored activation. Requested restrictions that cannot be honored fail before inference. See ADR0012 and `tests/host-tool-policy.test.ts`.
 
+## Auth routes and shared credential lifecycle
+
+`auth` binds one exact model with the `codex` (ChatGPT subscription) or `grok` (Grok subscription) route. The selection carries only the route, model, an opaque credential reference (`account`/`label`), an optional isolated store, an optional environment map and an optional protocol-fixture fetch. It never accepts raw tokens, API keys or stored credential bodies; extra construction fields fail as `invalid-options` and unknown routes fail as `unsupported-policy`. Environment API keys (`OPENAI_API_KEY`, `XAI_API_KEY`) are ignored for subscription routes and never switch billing, credential source or plaintext storage. Grok and Codex endpoint, credential-store and refresher identities stay isolated; auth, quota or model failures never change the selected provider, model or credential source.
+
+`hostCapabilities()` advertises `schway.host.auth-routes/v1` with `authRoutes: ["codex", "grok"]` and keeps `observedInference: "not-checked"`. `describeAuthRoute()` reports the static supported route and opaque credential without store, network or adapter loading. `checkAuthReadiness()` reads only the selected store identity locally and returns `configured-unverified` (static configuration without live proof), `needs-login`, `store-unavailable`, `invalid-store` or live failure categories with safe next-action guidance and `observedInference: "not-checked"`. `submitWithRoute()` appends input durably, reuses the existing route-scoped single-flight renewal and generation fencing, and returns `completed` with `observedInference: "observed"` only after a committed assistant entry. Auth, quota, model and integration failures return the same stable categories without native secret errors, token payloads/headers or stored credential bodies in returned metadata, prompts or diagnostics. Only the selected adapter loads dynamically when the route is actually used; import and capability enumeration never initialize Grok, Codex, native API adapters or the TUI. SDK automatic retries stay disabled; existing transport refresh and Schway's bounded core retry policy stay authoritative. Independent runs may deliberately choose different routes.
+
+Supported service-store expectations follow [credentials](credentials.md#platform-requirements-and-recovery): the OS secure store must be unlocked and, on Linux, a Secret Service such as GNOME Keyring or KWallet must be reachable in the desktop/D-Bus session. A locked or unavailable store reports `store-unavailable` with recovery guidance. This contract does not claim Linux unattended availability before S01 evidence and does not select a new secret backend, change billing or import foreign-CLI credentials. See ADR0013 and `tests/host-auth-routes.test.ts`.
+
 ## Public API
 
 The checked API report is `api/host.api.md`. Only this inventory and `schway/extensions` are semver-governed; private source/deep imports remain unsupported. Native types below are shared with the extension surface instead of introducing provider wire or TUI contracts.
@@ -114,10 +122,26 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `ContextSourceDocument` | Explicit versioned untrusted evidence, separate from operator instructions. |
 | `ContextSourcePolicy` | Complete discovery and activation permissions, captured before inference. |
 | `ConversationItem` | Provider-independent user, assistant or tool-result record. |
+| `checkAuthReadiness` | Check selected-route store readiness without network or inference. |
+| `classifyAuthError` | Map a route-bound failure to a safe status without secrets. |
+| `containsNoSecrets` | Test helper confirming sentinels are absent from returned data. |
+| `createAuthRouteModel` | Create only the selected subscription adapter lazily. |
 | `createHost` | Validate and lazily compose an explicit host. |
+| `credentialReferenceForRoute` | Return the opaque credential address for a route. |
+| `describeAuthRoute` | Describe the static supported route without store or network. |
+| `HostAuthBinding` | Route-bound host composition with readiness and lazy model. |
+| `HostAuthDescription` | Static supported route with opaque credential. |
+| `HostAuthFetch` | Protocol-fixture fetch override for deterministic tests. |
+| `HostAuthReadiness` | Selected-route status with safe next action. |
+| `HostAuthRoute` | Selected subscription route (`codex` or `grok`). |
+| `HostAuthRunResult` | Route-bound terminal outcome with safe auth detail. |
+| `HostAuthSelection` | Explicit route/model binding without raw tokens. |
+| `HostAuthStatusCode` | Stable safe categories for readiness and failures. |
 | `HostCapabilities` | Static API features with no inference observation. |
 | `HostCompactionResult` | Durable native summary reference or explicit noop/error/cancelled result. |
 | `hostCapabilities` | Discover support without loading runtime or accounts. |
+| `HostCredentialReference` | Opaque credential account and label. |
+| `HostCredentialStore` | Secure-store boundary for a selected route. |
 | `HostedTool` | Native closed hosted-lookup union; host sends none. |
 | `HostEntryReference` | Exact native entry in a selected session branch. |
 | `HostError` | Safe typed startup/lifecycle/reference rejection. |
@@ -154,7 +178,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 
 ## Validation
 
-`bun test tests/host.test.ts` exercises a disposable external consumer that imports only `schway/host`, executes a scripted native tool round and reopens/continues in a fresh process. `bun test tests/host-tool-policy.test.ts` proves empty/narrow registries stay authoritative across retry/overflow/reopen, hook-mutated calls pass approval on effective arguments, and selected-provider bodies carry no hosted search even where an allowlist would admit it. Preload sentinels reject provider/TUI initialization and runtime loading during static discovery. Other fixtures cover unsupported policies/options, durable input before inference, write failures, busy handles, cancellation, detached result reads and native terminal outcomes.
+`bun test tests/host.test.ts` exercises a disposable external consumer that imports only `schway/host`, executes a scripted native tool round and reopens/continues in a fresh process. `bun test tests/host-tool-policy.test.ts` proves empty/narrow registries stay authoritative across retry/overflow/reopen, hook-mutated calls pass approval on effective arguments, and selected-provider bodies carry no hosted search even where an allowlist would admit it. `bun test tests/host-auth-routes.test.ts` proves explicit Grok/Codex route binding with opaque credential references, safe readiness and failure categories, shared single-flight renewal with cancellation/logout fencing, route isolation with API-key bait, lazy selected-adapter loading and disabled SDK retries, all with protocol fixtures and fake stores. Preload sentinels reject provider/TUI initialization and runtime loading during static discovery, and only the selected adapter loads for route-bound runs. Other fixtures cover unsupported policies/options, durable input before inference, write failures, busy handles, cancellation, detached result reads and native terminal outcomes.
 
 Run `bun run typecheck` and full `bun test`. The declaration builder emits both entries; `bun scripts/extension-api-report.ts` checks unchanged extension declarations and `bun scripts/extension-api-report.ts --host` checks the host report. Intentional host API changes use `--host --update`, followed by inventory/declaration tests. No live provider call or human credential setup belongs in these deterministic checks.
 

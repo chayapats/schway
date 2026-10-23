@@ -12,6 +12,11 @@ export type {
 export type {
   HostedTool, Model, ModelCallOptions, ModelRequest, ModelStreamEvent, ModelTool, ModelUsage, ThinkingLevel,
 } from "../model/model.ts";
+/** Explicit Grok/Codex route lifecycle with opaque credential references and safe readiness. */
+export type {
+  HostAuthDescription, HostAuthFetch, HostAuthReadiness, HostAuthRoute, HostAuthRunResult, HostAuthSelection, HostAuthStatusCode, HostCredentialReference, HostCredentialStore,
+} from "./auth-routes.ts";
+export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute } from "./auth-routes.ts";
 /** Named host-supplied context sent separately from durable conversation messages. */
 export type { ContextSection } from "../context/manager.ts";
 /** Complete discovery controls and explicitly versioned untrusted evidence for host-managed context. */
@@ -36,6 +41,8 @@ export interface HostCapabilities {
   readonly toolPolicies: readonly ["exact"];
   readonly hostedLookup: "disabled-only";
   readonly observedInference: "not-checked";
+  readonly authContract: "schway.host.auth-routes/v1";
+  readonly authRoutes: readonly ["codex", "grok"];
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -56,6 +63,7 @@ export interface HostOptions {
     sources?: readonly import("../context/policy.ts").ContextSourceDocument[] };
   tools: { policy: "exact"; definitions: readonly ToolDefinition[]; hostedLookup: "off" };
   limits: HostLimits;
+  auth?: import("./auth-routes.ts").HostAuthSelection;
 }
 
 /** A native session and exact selected conversation branch within this host's managed directory. */
@@ -81,6 +89,8 @@ export interface HostSession {
   readonly reference: HostSessionReference;
   /** Persist input, run the native loop and return a durable reference only for committed completion. */
   submit(input: HostInput, model: Model, signal?: AbortSignal): Promise<HostRunResult>;
+  /** Run the bound Grok/Codex route without caller-supplied credentials; auth failures carry safe status. */
+  submitWithRoute(input: HostInput, signal?: AbortSignal): Promise<import("./auth-routes.ts").HostAuthRunResult>;
   /** Compact native history under the same current host policy without discovering an alternative instruction source. */
   compact(model: Model, signal?: AbortSignal): Promise<HostCompactionResult>;
   /** Read one assistant entry from this exact native ancestry without calling models or tools. */
@@ -89,9 +99,21 @@ export interface HostSession {
   close(): Promise<void>;
 }
 
+/** Route-bound host composition; the selected Grok/Codex identity is fixed at creation. */
+export interface HostAuthBinding {
+  readonly route: import("./auth-routes.ts").HostAuthRoute;
+  readonly model: string;
+  readonly credential: import("./auth-routes.ts").HostCredentialReference;
+  /** Check local store readiness without network or inference; only the selected identity is read. */
+  checkReadiness(): Promise<import("./auth-routes.ts").HostAuthReadiness>;
+  /** Create only the selected subscription adapter; the unselected route and TUI never load. */
+  createModel(): Promise<Model>;
+}
+
 /** Headless composition of native loop, context and persistence without CLI or provider construction. */
 export interface HostRuntime {
   readonly capabilities: HostCapabilities;
+  readonly auth?: HostAuthBinding;
   /** Create one native session in the configured managed directory. */
   createSession(): Promise<HostSession>;
   /** Reopen the exact saved native branch within this configured workspace and store. */
@@ -121,6 +143,8 @@ const capabilities: HostCapabilities = Object.freeze({
   toolPolicies: Object.freeze(["exact"] as const),
   hostedLookup: "disabled-only",
   observedInference: "not-checked",
+  authContract: "schway.host.auth-routes/v1",
+  authRoutes: Object.freeze(["codex", "grok"] as const),
 });
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */

@@ -10,6 +10,8 @@ import { createActivateSkillTool } from "../skills/activate.ts";
 import type { ToolDefinition } from "../tools/types.ts";
 import { HostError, hostCapabilities, type HostOptions, type HostRuntime, type HostSession, type HostSessionReference,
   type HostEntryReference, type HostRunResult } from "./index.ts";
+import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, credentialReferenceForRoute, validateAuthSelection,
+  type HostAuthReadiness, type HostAuthRunResult, type HostAuthSelection } from "./auth-routes.ts";
 import { acquireSessionLease, type SessionLease } from "./lease.ts";
 import type { Model, ModelRequest } from "../model/model.ts";
 
@@ -22,7 +24,7 @@ function keys(value: unknown, allowed: readonly string[]): asserts value is Reco
 }
 
 function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: ContextSourcePolicy } {
-  keys(input, ["workspaceRoot", "sessionDirectory", "homeDirectory", "context", "tools", "limits"]);
+  keys(input, ["workspaceRoot", "sessionDirectory", "homeDirectory", "context", "tools", "limits", "auth"]);
   keys(input.context, ["policy", "systemPrompt", "sections", "sources", "discovery"]);
   keys(input.tools, ["policy", "definitions", "hostedLookup"]);
   keys(input.limits, ["maxTurns", "maxConcurrentTools", "contextWindow", "maxInputChars"]);
@@ -70,9 +72,22 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
     if (admitted.has(tool.name)) throw new HostError("invalid-options");
     admitted.add(tool.name);
   }
+  let authSelection: HostAuthSelection | undefined;
+  if (input.auth !== undefined) {
+    try { authSelection = validateAuthSelection(input.auth); }
+    catch (error) {
+      if (error instanceof Error && error.message === "unsupported") throw new HostError("unsupported-policy");
+      throw new HostError("invalid-options");
+    }
+    // Env key/value rules live in validateAuthSelection so direct API users get the same rejection.
+  }
   return { sourcePolicy, workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
     context: { policy: input.context.policy, systemPrompt: input.context.systemPrompt, sections: structuredClone(input.context.sections), sources: structuredClone(sources) },
-    tools: { policy: input.tools.policy, hostedLookup: "off" as const, definitions }, limits: { ...input.limits } };
+    tools: { policy: input.tools.policy, hostedLookup: "off" as const, definitions }, limits: { ...input.limits },
+    ...(authSelection ? { auth: { route: authSelection.route, model: authSelection.model,
+      ...(authSelection.store ? { store: authSelection.store } : {}),
+      ...(authSelection.env ? { env: { ...authSelection.env } } : {}),
+      ...(authSelection.fetch ? { fetch: authSelection.fetch } : {}) } } : {}) };
 }
 
 function validateReference(reference: HostSessionReference): void {
@@ -98,6 +113,26 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
   let tools: ToolRegistry;
   try { tools = createToolRegistry(options.tools.definitions); }
   catch { throw new HostError("invalid-options"); }
+  const authSelection: HostAuthSelection | undefined = (options as { auth?: HostAuthSelection }).auth
+    ? { ...((options as { auth?: HostAuthSelection }).auth as HostAuthSelection) } : undefined;
+  // Preserve store/fetch identity so route-scoped renewal stays single-flight across runs.
+  if (authSelection && (options as { auth?: HostAuthSelection }).auth?.store) {
+    authSelection.store = (options as { auth?: HostAuthSelection }).auth!.store;
+  }
+  if (authSelection && (options as { auth?: HostAuthSelection }).auth?.fetch) {
+    authSelection.fetch = (options as { auth?: HostAuthSelection }).auth!.fetch;
+  }
+  const authBinding = authSelection ? Object.freeze({
+    route: authSelection.route,
+    model: authSelection.model,
+    credential: credentialReferenceForRoute(authSelection.route),
+    async checkReadiness(): Promise<HostAuthReadiness> {
+      return checkAuthReadiness(authSelection);
+    },
+    async createModel() {
+      return createAuthRouteModel(authSelection);
+    },
+  }) : undefined;
   let closed = false, opening = 0;
   let closing: Promise<void> | undefined;
   const handles = new Map<HostSession, () => boolean>();
@@ -133,6 +168,11 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
     }));
     const requireIdle = () => { requireOpen(); if (disposed) throw new HostError("closed"); if (busy) throw new HostError("busy"); };
     const ref = (entryId: string): HostEntryReference => Object.freeze({ session: reference, entryId });
+    function validateRouteInput(input: unknown, signal?: AbortSignal): void {
+      if (!record(input) || Object.keys(input).some(key => key !== "text") || typeof (input as { text?: unknown }).text !== "string" ||
+          !(input as { text: string }).text.trim() || (input as { text: string }).text.length > options.limits.maxInputChars) throw new HostError("invalid-input");
+      if (signal?.aborted) throw new HostError("invalid-input");
+    }
     const handle: HostSession = {
       reference,
       async submit(input, model, signal) {
@@ -177,6 +217,70 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         if (!message) throw new HostError("result-not-found");
         return structuredClone(message as AssistantMessage);
       },
+      async submitWithRoute(input, signal): Promise<HostAuthRunResult> {
+        requireIdle();
+        validateRouteInput(input, signal);
+        if (!authSelection || !authBinding) throw new HostError("invalid-options");
+        check();
+        busy = true;
+        const release = native.acquireOperation();
+        try {
+          const id = crypto.randomUUID();
+          try { native.append({ type: "user", id, content: [{ type: "text", text: (input as { text: string }).text }] }); }
+          catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
+          const inputReference = ref(id);
+          let readiness: HostAuthReadiness;
+          try { readiness = await checkAuthReadiness(authSelection); }
+          catch { readiness = classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection); }
+          if (readiness.status !== "configured-unverified") {
+            return { outcome: "error", input: inputReference, auth: readiness };
+          }
+          let route: Model;
+          try { route = snapshotModel(await createAuthRouteModel(authSelection)); }
+          catch (error) {
+            if (error instanceof HostError) throw error;
+            return { outcome: "error", input: inputReference, auth: classifyAuthError(error, authSelection) };
+          }
+          let outcome: HostRunResult["outcome"] = "error";
+          let lastError: unknown;
+          let lastCategory: unknown;
+          for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
+            maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, signal, webSearch: "off", exactTools: true })) {
+            if (event.type === "agent.finished") outcome = event.reason;
+            if (event.type === "error") {
+              // Provider errors arrive as sanitized plain messages without status,
+              // so route classification stays message- and category-based (see classifyAuthError).
+              lastError = new Error(event.message);
+              const category = (event as { category?: unknown }).category;
+              if (category !== undefined) lastCategory = category;
+              if (typeof lastCategory === "string") {
+                (lastError as { category?: unknown }).category = lastCategory;
+              }
+            }
+          }
+          try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
+          if (conflict) throw new HostError("conflict");
+          if (outcome === "completed") {
+            check();
+            const message = native.items.findLast(item => item.type === "assistant");
+            if (!message || message.type !== "assistant") throw new HostError("storage");
+            return { outcome, input: inputReference, result: ref(message.id), message: structuredClone(message), observedInference: "observed" as const };
+          }
+          if (outcome === "cancelled" || outcome === "max_turns") {
+            const current = await checkAuthReadiness(authSelection).catch(() => classifyAuthError(lastError ?? new Error("cancelled"), authSelection));
+            return { outcome, input: inputReference, auth: current.status === "configured-unverified" ? current : classifyAuthError(lastError ?? new Error(String(outcome)), authSelection) };
+          }
+          const auth = classifyAuthError(lastError ?? new Error("Provider request failed"), authSelection);
+          // Preserve retry category when the sanitized message alone is ambiguous.
+          if (auth.status === "integration-unavailable" && typeof lastCategory === "string") {
+            if (lastCategory === "auth") return { outcome, input: inputReference, auth: classifyAuthError(new Error("The subscription session was revoked."), authSelection) };
+            if (lastCategory === "credential-store") return { outcome, input: inputReference, auth: classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection) };
+            if (lastCategory === "model") return { outcome, input: inputReference, auth: { ...auth, status: "model-unavailable" as const, nextAction: `Model ${authSelection.model} is not available on this subscription. Choose a listed model for this route.` } };
+            if (lastCategory === "rate-limit") return { outcome, input: inputReference, auth: classifyAuthError(Object.assign(new Error("rate-limited"), { status: 429 }), authSelection) };
+          }
+          return { outcome, input: inputReference, auth };
+        } finally { release(); busy = false; }
+      },
       async compact(model, signal) {
         requireIdle();
         if (!model || typeof model.stream !== "function" || typeof model.provider !== "string" || !model.provider || typeof model.id !== "string" || !model.id) throw new HostError("invalid-input");
@@ -211,6 +315,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
 
   return Object.freeze({
     capabilities: hostCapabilities(),
+    ...(authBinding ? { auth: authBinding } : {}),
     async createSession() {
       requireOpen(); opening++;
       try {

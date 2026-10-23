@@ -4,6 +4,19 @@
 
 ### Added
 
+- Add explicit Grok/Codex host auth-route binding with an opaque shared
+  credential lifecycle. The host binds one exact model with the `codex` or
+  `grok` route and exposes static support plus local readiness distinct from
+  observed inference. Missing login, locked or malformed stores, refresh,
+  rejection, quota and integration failures map to stable safe categories with
+  next-action guidance and never expose tokens, payloads, headers or stored
+  bodies. Concurrent runs share route-scoped single-flight renewal with
+  cancellation, logout and account-replacement fencing; routes, endpoints,
+  credential identities and billing stay isolated. Only the selected adapter
+  loads when the route is used, SDK retries stay disabled and no new
+  credential import is introduced. Linux store expectations are documented
+  without claiming unattended availability (#398).
+
 - Add exact host tool-policy enforcement with forced hosted-lookup off. An empty
   registry advertises zero tools and unknown calls settle as explicit errors
   without execution; a narrow registry exposes only admitted definitions and

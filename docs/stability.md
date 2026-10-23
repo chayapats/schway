@@ -50,7 +50,13 @@ skill activation or hosted search appears via defaults, hooks or recovery. An
 explicitly admitted `activate_skill` rebinds per session to the current context
 policy. Read-only approval applies after hooks to effective arguments and is
 distinct from isolation; relative tool paths retain primary-workspace-root
-semantics.
+semantics. The auth-routes contract binds one exact model with the `codex` or
+`grok` subscription route, exposes opaque credential references and static
+configured state distinct from observed inference, and composes the existing
+route-scoped renewal and generation fencing without changing billing, credential
+sources or plaintext storage. Only the selected adapter loads when the route is
+used; SDK retries stay disabled and no new credential import is introduced.
+Unattended Linux availability remains unverified before S01 evidence.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing
