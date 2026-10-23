@@ -8,16 +8,25 @@ import { createJsonlSession, loadJsonlSession, SessionConflictError, type JsonlS
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
 import { createActivateSkillTool } from "../skills/activate.ts";
 import type { ToolDefinition } from "../tools/types.ts";
-import { HostError, hostCapabilities, type HostOptions, type HostRuntime, type HostSession, type HostSessionReference,
-  type HostEntryReference, type HostRunResult } from "./index.ts";
+import { HostError, hostCapabilities, type HostClock, type HostOptions, type HostProgressEvent,
+  type HostRunAttemptUsage, type HostRunError, type HostRunOptions, type HostRunResult, type HostRunUsage,
+  type HostRuntime, type HostSession, type HostSessionReference, type HostEntryReference } from "./index.ts";
 import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, credentialReferenceForRoute, validateAuthSelection,
   type HostAuthReadiness, type HostAuthRunResult, type HostAuthSelection } from "./auth-routes.ts";
 import { acquireSessionLease, type SessionLease } from "./lease.ts";
 import type { Model, ModelRequest } from "../model/model.ts";
+import type { RuntimeEvent } from "../agent/events.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Default wall-clock bound for one host run, including retries and compaction. */
+const DEFAULT_DEADLINE_MS = 300_000;
+/** Default transient provider attempts per model turn, matching the harness bound. */
+const DEFAULT_MAX_ATTEMPTS = 3;
+const MAX_DEADLINE_MS = 86_400_000;
+const MAX_ATTEMPTS = 10;
 
 function keys(value: unknown, allowed: readonly string[]): asserts value is Record<string, unknown> {
   if (!record(value) || Object.keys(value).some(key => !allowed.includes(key))) throw new HostError("invalid-options");
@@ -27,7 +36,7 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
   keys(input, ["workspaceRoot", "sessionDirectory", "homeDirectory", "context", "tools", "limits", "auth"]);
   keys(input.context, ["policy", "systemPrompt", "sections", "sources", "discovery"]);
   keys(input.tools, ["policy", "definitions", "hostedLookup"]);
-  keys(input.limits, ["maxTurns", "maxConcurrentTools", "contextWindow", "maxInputChars"]);
+  keys(input.limits, ["maxTurns", "maxConcurrentTools", "contextWindow", "maxInputChars", "deadlineMs", "maxAttempts"]);
   if (!["workspace-discovery", "strict", "controlled"].includes(input.context.policy) || input.tools.policy !== "exact" || (input.tools as { hostedLookup?: unknown }).hostedLookup !== "off") throw new HostError("unsupported-policy");
   let sourcePolicy: ContextSourcePolicy;
   if (input.context.policy === "controlled") {
@@ -44,6 +53,10 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
     const n = input.limits[key];
     if (!Number.isSafeInteger(n) || n < 1 || n > max) throw new HostError("invalid-options");
   }
+  const deadlineMs = input.limits.deadlineMs ?? DEFAULT_DEADLINE_MS;
+  if (!Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > MAX_DEADLINE_MS) throw new HostError("invalid-options");
+  const maxAttempts = input.limits.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > MAX_ATTEMPTS) throw new HostError("invalid-options");
   for (const section of input.context.sections) {
     keys(section, ["name", "content"]);
     if (typeof section.name !== "string" || !section.name.trim() || typeof section.content !== "string") throw new HostError("invalid-options");
@@ -83,7 +96,8 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
   }
   return { sourcePolicy, workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
     context: { policy: input.context.policy, systemPrompt: input.context.systemPrompt, sections: structuredClone(input.context.sections), sources: structuredClone(sources) },
-    tools: { policy: input.tools.policy, hostedLookup: "off" as const, definitions }, limits: { ...input.limits },
+    tools: { policy: input.tools.policy, hostedLookup: "off" as const, definitions },
+    limits: { ...input.limits, deadlineMs, maxAttempts },
     ...(authSelection ? { auth: { route: authSelection.route, model: authSelection.model,
       ...(authSelection.store ? { store: authSelection.store } : {}),
       ...(authSelection.env ? { env: { ...authSelection.env } } : {}),
@@ -94,6 +108,64 @@ function validateReference(reference: HostSessionReference): void {
   if (!record(reference) || Object.keys(reference).some(key => !["id", "branchId"].includes(key)) ||
       typeof reference.id !== "string" || !/^[a-f0-9]{8}-[a-f0-9-]{27}$/.test(reference.id) ||
       typeof reference.branchId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(reference.branchId)) throw new HostError("invalid-reference");
+}
+
+/** System wall clock with monotonic durations and abortable waits. */
+function systemHostClock(): HostClock {
+  return {
+    now: () => Date.now(),
+    monotonicNow: () => performance.now(),
+    async sleep(ms: number, signal?: AbortSignal): Promise<void> {
+      if (ms <= 0) {
+        if (signal?.aborted) throw abortError();
+        return;
+      }
+      if (signal?.aborted) throw abortError();
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
+        const onAbort = () => { clearTimeout(timer); reject(abortError()); };
+        signal?.addEventListener("abort", onAbort, { once: true });
+      });
+    },
+  };
+}
+
+function abortError(): Error {
+  const error = new Error("The operation was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+function monotonicNow(clock: HostClock): number {
+  return clock.monotonicNow ? clock.monotonicNow() : clock.now();
+}
+
+/** Normalize the trailing submit argument while keeping the legacy AbortSignal form. */
+function normalizeRunArgs(signalOrOptions?: AbortSignal | HostRunOptions): { signal?: AbortSignal; clock?: HostClock; onProgress?: (event: HostProgressEvent) => void } {
+  if (signalOrOptions === undefined) return {};
+  if (signalOrOptions instanceof AbortSignal) return { signal: signalOrOptions };
+  if (!record(signalOrOptions) || Object.keys(signalOrOptions).some(key => !["signal", "clock", "onProgress"].includes(key))) throw new HostError("invalid-input");
+  const { signal, clock, onProgress } = signalOrOptions as HostRunOptions;
+  if (signal !== undefined && !(signal instanceof AbortSignal)) throw new HostError("invalid-input");
+  if (clock !== undefined && (!record(clock) || typeof (clock as HostClock).now !== "function" || typeof (clock as HostClock).sleep !== "function")) throw new HostError("invalid-input");
+  if (onProgress !== undefined && typeof onProgress !== "function") throw new HostError("invalid-input");
+  return { ...(signal ? { signal } : {}), ...(clock ? { clock: clock as HostClock } : {}), ...(onProgress ? { onProgress: onProgress as (event: HostProgressEvent) => void } : {}) };
+}
+
+/** Translate one runtime event into a transient host progress observation. */
+function toProgress(event: RuntimeEvent): HostProgressEvent | undefined {
+  switch (event.type) {
+    case "model.delta": return { type: "delta", text: event.content.text, transient: true as const };
+    case "tool.started": return { type: "tool_started", toolCallId: event.toolCallId, name: event.name, transient: true as const };
+    case "tool.finished": return { type: "tool_finished", toolCallId: event.toolCallId, name: event.name, status: event.status, transient: true as const };
+    case "model.retry": return { type: "retry", attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, message: event.message, transient: true as const };
+    case "compaction.started": return { type: "compaction", stage: "started", reason: event.reason, transient: true as const };
+    case "compaction.finished": return event.status === "completed"
+      ? { type: "compaction", stage: "finished", reason: event.reason, status: event.status, transient: true as const }
+      : { type: "compaction", stage: "finished", reason: event.reason, status: event.status, transient: true as const };
+    case "model.usage": return { type: "usage", phase: event.phase, usage: structuredClone(event.usage), complete: event.complete, transient: true as const };
+    default: return undefined;
+  }
 }
 
 /** Compose only native engine services after validating this explicitly trusted base-host configuration. */
@@ -155,6 +227,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       } } as Model);
     };
     let disposed = false, busy = false;
+    let runAbort: AbortController | null = null;
     const reference = Object.freeze({ id: native.header.id, branchId: native.activeBranchId });
     const context = createContextManager(workspace, { home, contextWindow: options.limits.contextWindow,
       systemPrompt: options.context.systemPrompt, sections: options.context.sections, sources: options.context.sources, policy: options.sourcePolicy });
@@ -168,22 +241,82 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
     }));
     const requireIdle = () => { requireOpen(); if (disposed) throw new HostError("closed"); if (busy) throw new HostError("busy"); };
     const ref = (entryId: string): HostEntryReference => Object.freeze({ session: reference, entryId });
+    const modelIdentity = (model: Model): { readonly provider: string; readonly id: string } =>
+      Object.freeze({ provider: model.provider, id: model.id });
+    const failureDetail = (message: string, model: { readonly provider: string; readonly id: string }): HostRunError => Object.freeze({
+      message: sanitizeDiagnostic(message), model, contextPolicy: options.context.policy, toolPolicy: "exact" as const,
+    });
     function validateRouteInput(input: unknown, signal?: AbortSignal): void {
       if (!record(input) || Object.keys(input).some(key => key !== "text") || typeof (input as { text?: unknown }).text !== "string" ||
           !(input as { text: string }).text.trim() || (input as { text: string }).text.length > options.limits.maxInputChars) throw new HostError("invalid-input");
       if (signal?.aborted) throw new HostError("invalid-input");
     }
+    /** Run one admitted turn under the finite wall-clock bound with transient progress. */
+    async function runBounded(run: (signal: AbortSignal, report: (event: HostProgressEvent) => void, collect: (usage: HostRunAttemptUsage) => void, clock: HostClock) => Promise<{ reason: "completed" | "error" | "cancelled" | "max_turns"; message?: string }>,
+      runOptions: { signal?: AbortSignal; clock?: HostClock; onProgress?: (event: HostProgressEvent) => void }): Promise<{ reason: "completed" | "error" | "cancelled" | "max_turns" | "limit_exceeded"; usages: HostRunAttemptUsage[]; totalMs: number; message?: string }> {
+      const clock = runOptions.clock ?? systemHostClock();
+      const usages: HostRunAttemptUsage[] = [];
+      const start = monotonicNow(clock);
+      const report = (event: HostProgressEvent): void => {
+        try { runOptions.onProgress?.(event); } catch { /* Observer failures never alter the admitted run. */ }
+      };
+      const collect = (usage: HostRunAttemptUsage): void => { usages.push(usage); };
+      const combined = new AbortController();
+      const forward = (signal?: AbortSignal): void => {
+        if (!signal) return;
+        if (signal.aborted) combined.abort();
+        else signal.addEventListener("abort", () => combined.abort(), { once: true });
+      };
+      forward(runOptions.signal);
+      // Session cancel shares the same combined signal so late aborts settle cooperatively.
+      const previous = runAbort;
+      runAbort = combined;
+      let deadlineFired = false, settled = false;
+      const deadlineStop = new AbortController();
+      const deadlineMs = options.limits.deadlineMs ?? DEFAULT_DEADLINE_MS;
+      const deadline = clock.sleep(deadlineMs, deadlineStop.signal).then(() => {
+        if (!settled) { deadlineFired = true; combined.abort(); }
+      }, () => undefined);
+      try {
+        const outcome = await run(combined.signal, report, collect, clock);
+        settled = true;
+        deadlineStop.abort();
+        await deadline.catch(() => undefined);
+        if (deadlineFired && outcome.reason !== "completed") return { reason: "limit_exceeded", usages, totalMs: elapsed(clock, start), ...(outcome.message !== undefined ? { message: outcome.message } : {}) };
+        // A deadline that fires before durable publication never flips to completed.
+        if ((combined.signal.aborted || deadlineFired) && outcome.reason === "completed") {
+          return { reason: deadlineFired ? "limit_exceeded" : "cancelled", usages, totalMs: elapsed(clock, start) };
+        }
+        return { ...outcome, usages, totalMs: elapsed(clock, start) };
+      } finally {
+        settled = true;
+        deadlineStop.abort();
+        runAbort = previous;
+      }
+    }
+    const observe = (event: RuntimeEvent, report: (progress: HostProgressEvent) => void, collect: (usage: HostRunAttemptUsage) => void): { reason?: "completed" | "error" | "cancelled" | "max_turns"; message?: string; category?: unknown } => {
+      const progress = toProgress(event);
+      if (progress) report(progress);
+      if (event.type === "model.usage") collect({ phase: event.phase, usage: structuredClone(event.usage), complete: event.complete });
+      if (event.type === "agent.finished") return { reason: event.reason };
+      if (event.type === "error") return { message: event.message, category: (event as { category?: unknown }).category };
+      return {};
+    };
+    const usageSummary = (usages: HostRunAttemptUsage[], totalMs: number, completed: boolean): HostRunUsage =>
+      Object.freeze({ attempts: Object.freeze([...usages]), complete: completed, totalMs });
     const handle: HostSession = {
       reference,
-      async submit(input, model, signal) {
+      async submit(input, model, signalOrOptions) {
         requireIdle();
+        const runArgs = normalizeRunArgs(signalOrOptions);
         if (!record(input) || Object.keys(input).some(key => key !== "text") || typeof input.text !== "string" ||
             !input.text.trim() || input.text.length > options.limits.maxInputChars || !model ||
             typeof model.stream !== "function" || typeof model.provider !== "string" || !model.provider ||
             typeof model.id !== "string" || !model.id) throw new HostError("invalid-input");
-        if (signal?.aborted) throw new HostError("invalid-input");
+        if (runArgs.signal?.aborted) throw new HostError("invalid-input");
         check();
         const route = snapshotModel(model);
+        const identity = modelIdentity(route);
         busy = true;
         const release = native.acquireOperation();
         try {
@@ -191,20 +324,37 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }] }); }
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
           const inputReference = ref(id);
-          let outcome: HostRunResult["outcome"] = "error";
-          for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
-            maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, signal, webSearch: "off", exactTools: true })) {
-            if (event.type === "agent.finished") outcome = event.reason;
-          }
+          let reason: HostRunResult["outcome"] = "error";
+          let usages: HostRunAttemptUsage[] = [];
+          let totalMs = 0;
+          let lastMessage: string | undefined;
+          const bounded = await runBounded(async (signal, report, collect, clock) => {
+            let terminal: "completed" | "error" | "cancelled" | "max_turns" = "error";
+            let message: string | undefined;
+            for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
+              maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, maxAttempts: options.limits.maxAttempts,
+              signal, webSearch: "off", exactTools: true, clock })) {
+              const seen = observe(event, report, collect);
+              if (seen.reason) terminal = seen.reason;
+              if (seen.message !== undefined) message = seen.message;
+            }
+            return { reason: terminal, ...(message !== undefined ? { message } : {}) };
+          }, runArgs);
+          reason = bounded.reason;
+          usages = bounded.usages;
+          totalMs = bounded.totalMs;
+          lastMessage = bounded.message;
           try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
           if (conflict) throw new HostError("conflict");
-          if (outcome === "completed") {
+          if (reason === "completed") {
             check();
             const message = native.items.findLast(item => item.type === "assistant");
             if (!message || message.type !== "assistant") throw new HostError("storage");
-            return { outcome, input: inputReference, result: ref(message.id), message: structuredClone(message) };
+            return { outcome: reason, input: inputReference, result: ref(message.id), message: structuredClone(message),
+              usage: usageSummary(usages, totalMs, true), model: identity };
           }
-          return { outcome, input: inputReference };
+          return { outcome: reason, input: inputReference, usage: usageSummary(usages, totalMs, false),
+            model: identity, error: failureDetail(lastMessage ?? terminalMessage(reason), identity) };
         } finally { release(); busy = false; }
       },
       readResult(result) {
@@ -217,9 +367,10 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         if (!message) throw new HostError("result-not-found");
         return structuredClone(message as AssistantMessage);
       },
-      async submitWithRoute(input, signal): Promise<HostAuthRunResult> {
+      async submitWithRoute(input, signalOrOptions): Promise<HostAuthRunResult> {
         requireIdle();
-        validateRouteInput(input, signal);
+        const runArgs = normalizeRunArgs(signalOrOptions);
+        validateRouteInput(input, runArgs.signal);
         if (!authSelection || !authBinding) throw new HostError("invalid-options");
         check();
         busy = true;
@@ -229,76 +380,146 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           try { native.append({ type: "user", id, content: [{ type: "text", text: (input as { text: string }).text }] }); }
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
           const inputReference = ref(id);
+          const emptyUsage = (totalMs: number): HostRunUsage => usageSummary([], totalMs, false);
           let readiness: HostAuthReadiness;
           try { readiness = await checkAuthReadiness(authSelection); }
           catch { readiness = classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection); }
           if (readiness.status !== "configured-unverified") {
-            return { outcome: "error", input: inputReference, auth: readiness };
+            return { outcome: "error", input: inputReference, auth: readiness, usage: emptyUsage(0) };
           }
           let route: Model;
           try { route = snapshotModel(await createAuthRouteModel(authSelection)); }
           catch (error) {
             if (error instanceof HostError) throw error;
-            return { outcome: "error", input: inputReference, auth: classifyAuthError(error, authSelection) };
+            return { outcome: "error", input: inputReference, auth: classifyAuthError(error, authSelection), usage: emptyUsage(0) };
           }
-          let outcome: HostRunResult["outcome"] = "error";
+          let terminal: HostRunResult["outcome"] = "error";
           let lastError: unknown;
           let lastCategory: unknown;
-          for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
-            maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, signal, webSearch: "off", exactTools: true })) {
-            if (event.type === "agent.finished") outcome = event.reason;
-            if (event.type === "error") {
-              // Provider errors arrive as sanitized plain messages without status,
-              // so route classification stays message- and category-based (see classifyAuthError).
-              lastError = new Error(event.message);
-              const category = (event as { category?: unknown }).category;
-              if (category !== undefined) lastCategory = category;
-              if (typeof lastCategory === "string") {
-                (lastError as { category?: unknown }).category = lastCategory;
+          let usages: HostRunAttemptUsage[] = [];
+          let totalMs = 0;
+          const bounded = await runBounded(async (signal, report, collect, clock) => {
+            let reason: "completed" | "error" | "cancelled" | "max_turns" = "error";
+            for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
+              maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, maxAttempts: options.limits.maxAttempts,
+              signal, webSearch: "off", exactTools: true, clock })) {
+              const seen = observe(event, report, collect);
+              if (seen.reason) reason = seen.reason;
+              if (event.type === "error") {
+                // Provider errors arrive as sanitized plain messages without status,
+                // so route classification stays message- and category-based (see classifyAuthError).
+                lastError = new Error(event.message);
+                const category = (event as { category?: unknown }).category;
+                if (category !== undefined) lastCategory = category;
+                if (typeof lastCategory === "string") {
+                  (lastError as { category?: unknown }).category = lastCategory;
+                }
               }
             }
-          }
+            return { reason };
+          }, runArgs);
+          terminal = bounded.reason;
+          usages = bounded.usages;
+          totalMs = bounded.totalMs;
           try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
           if (conflict) throw new HostError("conflict");
-          if (outcome === "completed") {
+          if (terminal === "completed") {
             check();
             const message = native.items.findLast(item => item.type === "assistant");
             if (!message || message.type !== "assistant") throw new HostError("storage");
-            return { outcome, input: inputReference, result: ref(message.id), message: structuredClone(message), observedInference: "observed" as const };
+            return { outcome: terminal, input: inputReference, result: ref(message.id), message: structuredClone(message),
+              observedInference: "observed" as const, usage: usageSummary(usages, totalMs, true) };
           }
-          if (outcome === "cancelled" || outcome === "max_turns") {
+          if (terminal === "cancelled" || terminal === "max_turns" || terminal === "limit_exceeded") {
+            if (terminal === "limit_exceeded") {
+              const auth = classifyAuthError(lastError ?? new Error("Run deadline elapsed."), authSelection);
+              return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false) };
+            }
             const current = await checkAuthReadiness(authSelection).catch(() => classifyAuthError(lastError ?? new Error("cancelled"), authSelection));
-            return { outcome, input: inputReference, auth: current.status === "configured-unverified" ? current : classifyAuthError(lastError ?? new Error(String(outcome)), authSelection) };
+            return { outcome: terminal, input: inputReference,
+              auth: current.status === "configured-unverified" ? current : classifyAuthError(lastError ?? new Error(String(terminal)), authSelection),
+              usage: usageSummary(usages, totalMs, false) };
           }
           const auth = classifyAuthError(lastError ?? new Error("Provider request failed"), authSelection);
           // Preserve retry category when the sanitized message alone is ambiguous.
           if (auth.status === "integration-unavailable" && typeof lastCategory === "string") {
-            if (lastCategory === "auth") return { outcome, input: inputReference, auth: classifyAuthError(new Error("The subscription session was revoked."), authSelection) };
-            if (lastCategory === "credential-store") return { outcome, input: inputReference, auth: classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection) };
-            if (lastCategory === "model") return { outcome, input: inputReference, auth: { ...auth, status: "model-unavailable" as const, nextAction: `Model ${authSelection.model} is not available on this subscription. Choose a listed model for this route.` } };
-            if (lastCategory === "rate-limit") return { outcome, input: inputReference, auth: classifyAuthError(Object.assign(new Error("rate-limited"), { status: 429 }), authSelection) };
+            if (lastCategory === "auth") return { outcome: terminal, input: inputReference, auth: classifyAuthError(new Error("The subscription session was revoked."), authSelection), usage: usageSummary(usages, totalMs, false) };
+            if (lastCategory === "credential-store") return { outcome: terminal, input: inputReference, auth: classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection), usage: usageSummary(usages, totalMs, false) };
+            if (lastCategory === "model") return { outcome: terminal, input: inputReference, auth: { ...auth, status: "model-unavailable" as const, nextAction: `Model ${authSelection.model} is not available on this subscription. Choose a listed model for this route.` }, usage: usageSummary(usages, totalMs, false) };
+            if (lastCategory === "rate-limit") return { outcome: terminal, input: inputReference, auth: classifyAuthError(Object.assign(new Error("rate-limited"), { status: 429 }), authSelection), usage: usageSummary(usages, totalMs, false) };
           }
-          return { outcome, input: inputReference, auth };
+          return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false) };
         } finally { release(); busy = false; }
       },
-      async compact(model, signal) {
+      async compact(model, signalOrOptions) {
         requireIdle();
+        const runArgs = normalizeRunArgs(signalOrOptions);
         if (!model || typeof model.stream !== "function" || typeof model.provider !== "string" || !model.provider || typeof model.id !== "string" || !model.id) throw new HostError("invalid-input");
         check();
         const route = snapshotModel(model);
         busy = true;
         try {
+          let recordId: string | null = null;
           let failed = false;
-          const record = await context.compact(native, route, { reason: "manual", signal, onOutcome: result => { if (result === "failed") failed = true; } });
+          let noopBoundary = false;
+          const bounded = await runBounded(async (signal, report, collect, _clock) => {
+            for (const entry of context.takeUsage()) {
+              const sample = { phase: "compaction" as const, usage: structuredClone(entry.usage), complete: entry.complete };
+              collect(sample);
+              report({ type: "usage", phase: "compaction", usage: structuredClone(entry.usage), complete: entry.complete, transient: true as const });
+            }
+            report({ type: "compaction", stage: "started", reason: "manual", transient: true as const });
+            try {
+              const record = await context.compact(native, route, { reason: "manual", signal, onOutcome: result => { if (result === "failed") failed = true; } });
+              recordId = record ? record.id : null;
+            } catch {
+              report({ type: "compaction", stage: "finished", reason: "manual", status: signal.aborted ? "cancelled" : "failed", transient: true as const });
+              return { reason: signal.aborted ? "cancelled" as const : "error" as const };
+            }
+            for (const entry of context.takeUsage()) {
+              const sample = { phase: "compaction" as const, usage: structuredClone(entry.usage), complete: entry.complete };
+              collect(sample);
+              report({ type: "usage", phase: "compaction", usage: structuredClone(entry.usage), complete: entry.complete, transient: true as const });
+            }
+            if (signal.aborted) {
+              report({ type: "compaction", stage: "finished", reason: "manual", status: "cancelled", transient: true as const });
+              return { reason: "cancelled" as const };
+            }
+            if (recordId) {
+              report({ type: "compaction", stage: "finished", reason: "manual", status: "completed", transient: true as const });
+              return { reason: "completed" as const };
+            }
+            if (failed) {
+              report({ type: "compaction", stage: "finished", reason: "manual", status: "failed", transient: true as const });
+              return { reason: "error" as const };
+            }
+            noopBoundary = true;
+            report({ type: "compaction", stage: "finished", reason: "manual", status: "noop", transient: true as const });
+            return { reason: "cancelled" as const };
+          }, runArgs);
           check();
-          return record ? { outcome: "completed", result: ref(record.id) } : { outcome: failed ? "error" : signal?.aborted ? "cancelled" : "noop" };
+          const usages = bounded.usages;
+          if (bounded.reason === "completed" && recordId) {
+            return { outcome: "completed", result: ref(recordId), usage: usageSummary(usages, bounded.totalMs, true) };
+          }
+          if (bounded.reason === "limit_exceeded") return { outcome: "limit_exceeded", usage: usageSummary(usages, bounded.totalMs, false) };
+          // A manual compaction with no boundary is an explicit noop; an aborted
+          // in-flight compaction settles as cancelled through the bounded outcome.
+          if (bounded.reason === "cancelled") return noopBoundary
+            ? { outcome: "noop", usage: usageSummary(usages, bounded.totalMs, false) }
+            : { outcome: "cancelled", usage: usageSummary(usages, bounded.totalMs, false) };
+          return { outcome: "error", usage: usageSummary(usages, bounded.totalMs, false) };
         } catch (error) {
           if (conflict || error instanceof SessionConflictError || error instanceof HostError && error.code === "conflict") {
             conflict = true;
             throw new HostError("conflict");
           }
-          return { outcome: signal?.aborted ? "cancelled" : "error" };
+          throw error;
         } finally { busy = false; }
+      },
+      cancel() {
+        // Cooperative cancellation only; synchronous extension code stays outside hard preemption.
+        runAbort?.abort();
       },
       async close() {
         if (disposed) return;
@@ -368,4 +589,25 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
 function structuredCloneRequest(request: ModelRequest): ModelRequest {
   const { signal, ...data } = request;
   return { ...structuredClone(data), ...(signal ? { signal } : {}) };
+}
+
+/** Whole nonnegative milliseconds between two monotonic readings. */
+function elapsed(clock: HostClock, from: number): number {
+  return Math.max(0, Math.round(monotonicNow(clock) - from));
+}
+
+/** Keep failure diagnostics terse, single-line and free of secrets or wire payloads. */
+function sanitizeDiagnostic(message: string): string {
+  const single = message.replace(/\s+/g, " ").trim().slice(0, 500);
+  return single.length > 0 ? single : "Provider request failed.";
+}
+
+/** Stable terminal message for non-error outcomes without provider text. */
+function terminalMessage(reason: "error" | "cancelled" | "max_turns" | "limit_exceeded"): string {
+  switch (reason) {
+    case "cancelled": return "Run cancelled before durable completion.";
+    case "max_turns": return "Run reached its model-round bound before completion.";
+    case "limit_exceeded": return "Run reached its wall-clock bound before durable completion.";
+    default: return "Provider request failed.";
+  }
 }

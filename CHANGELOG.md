@@ -4,6 +4,21 @@
 
 ### Added
 
+- Add bounded host run controls with honest terminal outcomes. Finite
+  `deadlineMs` and `maxAttempts` join the existing round, concurrency, window
+  and input bounds; malformed or unlimited values fail admission and retry
+  backoff plus overflow/compaction recovery count against the deadline.
+  `submit`, `submitWithRoute` and `compact` accept a cooperative signal, an
+  injectable fake clock and a transient progress observer whose detachment or
+  failure never duplicates or completes a run. Terminal outcomes distinguish
+  `completed`, `error`, `cancelled`, `max_turns` and `limit_exceeded` with
+  selected route/session/run references, durable output only when committed,
+  null-preserving usage and sanitized policy-preserving diagnostics. Session
+  `cancel()` aborts model/retry waits and settles cooperative tools before
+  ownership release; late provider callbacks cannot flip to completed or append
+  late answers and `close()` stays idle-only. No competing durable job
+  scheduler is introduced (#400).
+
 - Add explicit Grok/Codex host auth-route binding with an opaque shared
   credential lifecycle. The host binds one exact model with the `codex` or
   `grok` route and exposes static support plus local readiness distinct from

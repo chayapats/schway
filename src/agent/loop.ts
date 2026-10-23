@@ -35,6 +35,8 @@ export interface AgentLoopOptions {
   signal?: AbortSignal;
   maxTurns?: number;
   maxConcurrentTools?: number;
+  /** Bounded transient provider attempts per model turn, including the first. */
+  maxAttempts?: number;
   /** Override the environment inherited by shell tools without changing the parent process. */
   toolEnv?: NodeJS.ProcessEnv;
   clock?: AgentClock;
@@ -75,6 +77,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
   const undoTurn: UndoTurn | undefined = user ? { sessionId: options.session.rootId, turnId: user.id,
     turnNumber: options.session.items.filter(item => item.type === "user").length } : undefined;
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
+  const maxAttempts = options.maxAttempts ?? 3;
   const clock = options.clock ?? systemClock();
   let tools = options.tools;
   const hooks = options.extensions?.hooks.active ? options.extensions.hooks : undefined;
@@ -204,6 +207,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
       call,
       clock,
       signal,
+      maxAttempts,
     });
     if (outcome.kind === "overflow") {
       yield {
@@ -244,6 +248,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
         call,
         clock,
         signal,
+        maxAttempts,
       });
       if (outcome.kind === "overflow") {
         const recovered = yield* recoverFromOverflow();
@@ -263,6 +268,11 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
         return;
       }
 
+      // A late provider callback after cancellation must not become durable output.
+      if (signal?.aborted || toolHooks?.signal.aborted) {
+        yield { type: "agent.finished", reason: "cancelled" };
+        return;
+      }
       try { options.session.append(outcome.message); }
       catch (error) { yield classifiedError(errorMessage(error), "harness", "session-write"); yield { type: "agent.finished", reason: "error" }; return; }
       yield { type: "model.finished" };

@@ -166,16 +166,16 @@ test("explicit native compaction reports noop/error/cancellation and keeps handl
   const f = await adversarial(dir), host = await createHost(f.options), session = await host.createSession();
   let unexpectedCalls = 0;
   const unusedModel: Model = { provider: "scripted", id: "unused", async *stream() { unexpectedCalls++; throw new Error("No summary boundary"); } };
-  expect(await session.compact(unusedModel)).toEqual({ outcome: "noop" }); expect(unexpectedCalls).toBe(0);
+  expect(await session.compact(unusedModel)).toMatchObject({ outcome: "noop" }); expect(unexpectedCalls).toBe(0);
   for (let i = 0; i < 12; i++) await session.submit({ text: `retained ${i}` }, createScriptedModel({ text: "retained output" }));
   const historyPath = join(f.options.sessionDirectory, `${session.reference.id}.jsonl`), before = await readFile(historyPath, "utf8");
   for (const content of [[], [{ type: "text", text: " \n\t " }], [{ type: "tool_call", id: "invalid-summary-tool", name: "ignored", arguments: {} }]] satisfies AssistantContent[][]) {
     let calls = 0;
     const emptyModel: Model = { provider: "scripted", id: "empty-summary", async *stream() { calls++; yield { type: "message_complete", message: { type: "assistant", id: "empty-summary", content } }; } };
-    expect(await session.compact(emptyModel)).toEqual({ outcome: "error" }); expect(calls).toBe(1); expect(await readFile(historyPath, "utf8")).toBe(before);
+    expect(await session.compact(emptyModel)).toMatchObject({ outcome: "error" }); expect(calls).toBe(1); expect(await readFile(historyPath, "utf8")).toBe(before);
   }
-  expect(await session.compact(createScriptedModel({ error: "private-summary-diagnostic", status: 400 }))).toEqual({ outcome: "error" });
-  const abort = new AbortController(); abort.abort(); expect(await session.compact(createScriptedModel({ responses: [] }), abort.signal)).toEqual({ outcome: "cancelled" });
+  expect(await session.compact(createScriptedModel({ error: "private-summary-diagnostic", status: 400 }))).toMatchObject({ outcome: "error" });
+  const abort = new AbortController(); abort.abort(); expect(await session.compact(createScriptedModel({ responses: [] }), abort.signal)).toMatchObject({ outcome: "cancelled" });
   let started!: () => void, release!: () => void; const began = new Promise<void>(r => { started = r; }), gate = new Promise<void>(r => { release = r; });
   const model: Model = { provider: "scripted", id: "gate", async *stream() { started(); await gate; yield { type: "message_complete", message: { type: "assistant", id: "summary-final", content: [{ type: "text", text: "fixture summary" }] } }; } };
   const pending = session.compact(model); await began;

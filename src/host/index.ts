@@ -1,4 +1,4 @@
-import type { Model } from "../model/model.ts";
+import type { Model, ModelUsage } from "../model/model.ts";
 import type { ContextSection } from "../context/manager.ts";
 import type { AssistantMessage } from "../conversation/types.ts";
 import type { ToolDefinition } from "../tools/types.ts";
@@ -43,6 +43,7 @@ export interface HostCapabilities {
   readonly observedInference: "not-checked";
   readonly authContract: "schway.host.auth-routes/v1";
   readonly authRoutes: readonly ["codex", "grok"];
+  readonly runContract: "schway.host.run-control/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -51,6 +52,10 @@ export interface HostLimits {
   maxConcurrentTools: number;
   contextWindow: number;
   maxInputChars: number;
+  /** Wall-clock bound for one run including retries and compaction; defaults to 300000. */
+  deadlineMs?: number;
+  /** Transient provider attempts per model turn including the first; defaults to 3. */
+  maxAttempts?: number;
 }
 
 /** Trusted host composition with exact tool registry and forced hosted-lookup off. */
@@ -75,26 +80,85 @@ export interface HostEntryReference { readonly session: HostSessionReference; re
 /** Plain user input accepted durably before the first model request. */
 export interface HostInput { text: string }
 
+/** Selected model identity carried on every terminal run outcome. */
+export interface HostModelIdentity {
+  readonly provider: string;
+  readonly id: string;
+}
+
+/** Injectable wall clock so deterministic tests control backoff and deadline waits. */
+export interface HostClock {
+  /** Return milliseconds since the Unix epoch for retry timestamps and deadlines. */
+  now(): number;
+  /** Wait the requested milliseconds, rejecting promptly when the supplied signal aborts. */
+  sleep(ms: number, signal?: AbortSignal): Promise<void>;
+  /** Return monotonic milliseconds for durations; `now` is used when absent. */
+  monotonicNow?(): number;
+}
+
+/** Transient progress observation; dropping it never creates durable output. */
+export type HostProgressEvent =
+  | { type: "delta"; text: string; transient: true }
+  | { type: "tool_started"; toolCallId: string; name: string; transient: true }
+  | { type: "tool_finished"; toolCallId: string; name: string; status: "success" | "error" | "cancelled"; transient: true }
+  | { type: "retry"; attempt: number; maxAttempts: number; delayMs: number; message: string; transient: true }
+  | { type: "compaction"; stage: "started" | "finished"; reason: string; status?: string; transient: true }
+  | { type: "usage"; phase: "turn" | "compaction"; usage: ModelUsage; complete: boolean; transient: true };
+
+/** Per-run options carrying cancellation, a fake clock and transient progress. */
+export interface HostRunOptions {
+  /** Cooperative cancellation for the model, backoff and compaction waits. */
+  readonly signal?: AbortSignal;
+  /** Injected clock for backoff and deadline waits; defaults to the system clock. */
+  readonly clock?: HostClock;
+  /** Transient observer; throwing or detaching never duplicates or completes a run. */
+  readonly onProgress?: (event: HostProgressEvent) => void;
+}
+
+/** One reported usage sample with its completeness flag; null counters were unreported. */
+export interface HostRunAttemptUsage {
+  readonly phase: "turn" | "compaction";
+  readonly usage: ModelUsage;
+  readonly complete: boolean;
+}
+
+/** Honest run consumption; unknown counters stay null and never read as zero quota. */
+export interface HostRunUsage {
+  readonly attempts: readonly HostRunAttemptUsage[];
+  readonly complete: boolean;
+  readonly totalMs: number;
+}
+
+/** Sanitized failure detail preserving the effective route, policy and model. */
+export interface HostRunError {
+  readonly message: string;
+  readonly model: HostModelIdentity;
+  readonly contextPolicy: "workspace-discovery" | "strict" | "controlled";
+  readonly toolPolicy: "exact";
+}
+
 /** A native terminal observation; completed results include a persisted assistant entry. */
 export type HostRunResult =
-  | { outcome: "completed"; input: HostEntryReference; result: HostEntryReference; message: AssistantMessage }
-  | { outcome: "error" | "cancelled" | "max_turns"; input: HostEntryReference };
+  | { outcome: "completed"; input: HostEntryReference; result: HostEntryReference; message: AssistantMessage; usage: HostRunUsage; model: HostModelIdentity }
+  | { outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded"; input: HostEntryReference; usage: HostRunUsage; model: HostModelIdentity; error: HostRunError };
 
 /** Native explicit compaction distinguishes a persisted summary reference from an unchanged or unsuccessful attempt. */
-export type HostCompactionResult = { outcome: "completed"; result: HostEntryReference }
-  | { outcome: "noop" | "error" | "cancelled" };
+export type HostCompactionResult = { outcome: "completed"; result: HostEntryReference; usage: HostRunUsage }
+  | { outcome: "noop" | "error" | "cancelled" | "limit_exceeded"; usage: HostRunUsage };
 
-/** A process-owned native session handle; close is idle-only in the base contract. */
+/** A process-owned native session handle; cancel settles work and close releases ownership. */
 export interface HostSession {
   readonly reference: HostSessionReference;
   /** Persist input, run the native loop and return a durable reference only for committed completion. */
-  submit(input: HostInput, model: Model, signal?: AbortSignal): Promise<HostRunResult>;
+  submit(input: HostInput, model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostRunResult>;
   /** Run the bound Grok/Codex route without caller-supplied credentials; auth failures carry safe status. */
-  submitWithRoute(input: HostInput, signal?: AbortSignal): Promise<import("./auth-routes.ts").HostAuthRunResult>;
+  submitWithRoute(input: HostInput, signalOrOptions?: AbortSignal | HostRunOptions): Promise<import("./auth-routes.ts").HostAuthRunResult>;
   /** Compact native history under the same current host policy without discovering an alternative instruction source. */
-  compact(model: Model, signal?: AbortSignal): Promise<HostCompactionResult>;
+  compact(model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostCompactionResult>;
   /** Read one assistant entry from this exact native ancestry without calling models or tools. */
   readResult(reference: HostEntryReference): AssistantMessage;
+  /** Abort the admitted run and settle cooperative tools; safe to repeat and safe when idle. */
+  cancel(): void;
   /** Release this idle handle; busy handles reject until their submitted run settles. */
   close(): Promise<void>;
 }
@@ -145,7 +209,8 @@ const capabilities: HostCapabilities = Object.freeze({
   observedInference: "not-checked",
   authContract: "schway.host.auth-routes/v1",
   authRoutes: Object.freeze(["codex", "grok"] as const),
-});
+  runContract: "schway.host.run-control/v1",
+} as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */
 export function hostCapabilities(): HostCapabilities { return capabilities; }

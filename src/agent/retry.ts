@@ -3,7 +3,7 @@ import type { Model, ModelCallOptions, ModelRequest, ModelUsage } from "../model
 import type { ModelRetryCause, RuntimeEvent } from "./events.ts";
 
 /** Total provider stream attempts allowed for one model turn, including the first. */
-const MAX_TRANSIENT_ATTEMPTS = 3;
+export const MAX_TRANSIENT_ATTEMPTS = 3;
 
 /** Backoff before the second attempt when the provider does not send Retry-After. */
 const DEFAULT_BACKOFF_MS = 1000;
@@ -112,13 +112,16 @@ export async function* streamModelTurn(options: {
   call?: ModelCallOptions;
   clock: AgentClock;
   signal?: AbortSignal;
+  /** Bounded transient attempts for one model turn, including the first; defaults to the harness bound. */
+  maxAttempts?: number;
 }): AsyncGenerator<RuntimeEvent, ModelTurnOutcome> {
   const { model, request, call, clock, signal } = options;
+  const maxAttempts = options.maxAttempts ?? MAX_TRANSIENT_ATTEMPTS;
   const firstStart = monotonicNow(clock);
   const startedAt = new Date(clock.now()).toISOString();
   let retryWaitMs = 0;
 
-  for (let attempt = 1; attempt <= MAX_TRANSIENT_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     if (signal?.aborted) {
       return { kind: "cancelled" };
     }
@@ -165,12 +168,12 @@ export async function* streamModelTurn(options: {
       }
       const cause = transientFailureCause(error);
       const transient = cause !== undefined;
-      if (transient && attempt < MAX_TRANSIENT_ATTEMPTS) {
+      if (transient && attempt < maxAttempts) {
         const delayMs = retryDelayMs(error, attempt, clock.now());
         yield {
           type: "model.retry",
           attempt,
-          maxAttempts: MAX_TRANSIENT_ATTEMPTS,
+          maxAttempts,
           delayMs,
           message,
           cause,
@@ -193,7 +196,7 @@ export async function* streamModelTurn(options: {
       if (transient) {
         return {
           kind: "error",
-          message: `Provider request failed after ${MAX_TRANSIENT_ATTEMPTS} transient attempts: ${message}`,
+          message: `Provider request failed after ${maxAttempts} transient attempts: ${message}`,
           category: providerFailureCategory(error),
         };
       }
@@ -205,6 +208,9 @@ export async function* streamModelTurn(options: {
         startedAt: attemptStartedAt, firstDeltaMs, attemptMs, ...(attemptWaitMs !== undefined ? { retryWaitMs: attemptWaitMs } : {}) };
     }
 
+    if (signal?.aborted) {
+      return { kind: "cancelled" };
+    }
     if (!complete) {
       return {
         kind: "error",
@@ -225,7 +231,7 @@ export async function* streamModelTurn(options: {
 
   return {
     kind: "error",
-    message: `Provider request failed after ${MAX_TRANSIENT_ATTEMPTS} transient attempts`,
+    message: `Provider request failed after ${maxAttempts} transient attempts`,
   };
 }
 
