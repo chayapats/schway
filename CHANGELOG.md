@@ -19,8 +19,9 @@
   `schway.host.auth-routes/v1`, `schway.host.run-control/v1`,
   `schway.host.managed-session-data/v1`, `schway.host.session-snapshot/v1`,
   and `schway.host.release/v1`. This branch stays at `1.0.0-rc.2`; the next
-  `1.0.0-rc.3` publish carries these contracts. Tested revision is
-  `b1d00aa4b93ea7d50f4692b0eebb0132083ad4b8` (PR head); integration
+  `1.0.0-rc.3` publish carries these contracts. Code-tested revision is
+  `b1d00aa4b93ea7d50f4692b0eebb0132083ad4b8` (full suite green on that
+  tree; heads after it are docs-only wording). Integration
   squash-merges tree-identically (coordinator verifies an empty tree diff
   against the merge commit). Jit pins either the
   tested tarball SHA (reproduce with `bun pm pack --destination <dir>` then
