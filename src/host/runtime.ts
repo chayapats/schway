@@ -1,6 +1,7 @@
 import { mkdir, realpath, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
+import { MAX_TRANSIENT_ATTEMPTS } from "../agent/retry.ts";
 import { createContextManager } from "../context/manager.ts";
 import { contextPolicySnapshot, STRICT_CONTEXT_POLICY, WORKSPACE_CONTEXT_POLICY, type ContextSourcePolicy } from "../context/policy.ts";
 import type { AssistantMessage } from "../conversation/types.ts";
@@ -24,7 +25,7 @@ const record = (value: unknown): value is Record<string, unknown> => typeof valu
 /** Default wall-clock bound for one host run, including retries and compaction. */
 const DEFAULT_DEADLINE_MS = 300_000;
 /** Default transient provider attempts per model turn, matching the harness bound. */
-const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_MAX_ATTEMPTS = MAX_TRANSIENT_ATTEMPTS;
 const MAX_DEADLINE_MS = 86_400_000;
 const MAX_ATTEMPTS = 10;
 
@@ -140,14 +141,36 @@ function monotonicNow(clock: HostClock): number {
   return clock.monotonicNow ? clock.monotonicNow() : clock.now();
 }
 
+/** Cross-realm AbortSignal check: structural when `instanceof` fails across realms. */
+function isAbortSignal(value: unknown): value is AbortSignal {
+  if (value instanceof AbortSignal) return true;
+  return record(value) && typeof (value as { aborted?: unknown }).aborted === "boolean" &&
+    typeof (value as { addEventListener?: unknown }).addEventListener === "function";
+}
+
+/** Race an untrusted clock sleep against abort so an abort-ignoring clock cannot hang settlement. */
+function sleepWithAbort(clock: HostClock, ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return clock.sleep(ms);
+  if (signal.aborted) return Promise.reject(abortError());
+  let onAbort: () => void = () => undefined;
+  const abortPromise = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  return Promise.race([clock.sleep(ms, signal), abortPromise]).finally(() => {
+    signal.removeEventListener("abort", onAbort);
+  });
+}
+
 /** Normalize the trailing submit argument while keeping the legacy AbortSignal form. */
 function normalizeRunArgs(signalOrOptions?: AbortSignal | HostRunOptions): { signal?: AbortSignal; clock?: HostClock; onProgress?: (event: HostProgressEvent) => void } {
   if (signalOrOptions === undefined) return {};
-  if (signalOrOptions instanceof AbortSignal) return { signal: signalOrOptions };
+  if (isAbortSignal(signalOrOptions)) return { signal: signalOrOptions };
   if (!record(signalOrOptions) || Object.keys(signalOrOptions).some(key => !["signal", "clock", "onProgress"].includes(key))) throw new HostError("invalid-input");
   const { signal, clock, onProgress } = signalOrOptions as HostRunOptions;
-  if (signal !== undefined && !(signal instanceof AbortSignal)) throw new HostError("invalid-input");
-  if (clock !== undefined && (!record(clock) || typeof (clock as HostClock).now !== "function" || typeof (clock as HostClock).sleep !== "function")) throw new HostError("invalid-input");
+  if (signal !== undefined && !isAbortSignal(signal)) throw new HostError("invalid-input");
+  if (clock !== undefined && (!record(clock) || typeof (clock as HostClock).now !== "function" || typeof (clock as HostClock).sleep !== "function" ||
+      ((clock as HostClock).monotonicNow !== undefined && typeof (clock as HostClock).monotonicNow !== "function"))) throw new HostError("invalid-input");
   if (onProgress !== undefined && typeof onProgress !== "function") throw new HostError("invalid-input");
   return { ...(signal ? { signal } : {}), ...(clock ? { clock: clock as HostClock } : {}), ...(onProgress ? { onProgress: onProgress as (event: HostProgressEvent) => void } : {}) };
 }
@@ -160,9 +183,7 @@ function toProgress(event: RuntimeEvent): HostProgressEvent | undefined {
     case "tool.finished": return { type: "tool_finished", toolCallId: event.toolCallId, name: event.name, status: event.status, transient: true as const };
     case "model.retry": return { type: "retry", attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs, message: event.message, transient: true as const };
     case "compaction.started": return { type: "compaction", stage: "started", reason: event.reason, transient: true as const };
-    case "compaction.finished": return event.status === "completed"
-      ? { type: "compaction", stage: "finished", reason: event.reason, status: event.status, transient: true as const }
-      : { type: "compaction", stage: "finished", reason: event.reason, status: event.status, transient: true as const };
+    case "compaction.finished": return { type: "compaction", stage: "finished", reason: event.reason, status: event.status, transient: true as const };
     case "model.usage": return { type: "usage", phase: event.phase, usage: structuredClone(event.usage), complete: event.complete, transient: true as const };
     default: return undefined;
   }
@@ -262,19 +283,19 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       };
       const collect = (usage: HostRunAttemptUsage): void => { usages.push(usage); };
       const combined = new AbortController();
-      const forward = (signal?: AbortSignal): void => {
-        if (!signal) return;
-        if (signal.aborted) combined.abort();
-        else signal.addEventListener("abort", () => combined.abort(), { once: true });
-      };
-      forward(runOptions.signal);
+      const source = runOptions.signal;
+      const onSourceAbort = (): void => combined.abort();
+      if (source) {
+        if (source.aborted) combined.abort();
+        else source.addEventListener("abort", onSourceAbort, { once: true });
+      }
       // Session cancel shares the same combined signal so late aborts settle cooperatively.
       const previous = runAbort;
       runAbort = combined;
       let deadlineFired = false, settled = false;
       const deadlineStop = new AbortController();
       const deadlineMs = options.limits.deadlineMs ?? DEFAULT_DEADLINE_MS;
-      const deadline = clock.sleep(deadlineMs, deadlineStop.signal).then(() => {
+      const deadline = sleepWithAbort(clock, deadlineMs, deadlineStop.signal).then(() => {
         if (!settled) { deadlineFired = true; combined.abort(); }
       }, () => undefined);
       try {
@@ -283,14 +304,13 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         deadlineStop.abort();
         await deadline.catch(() => undefined);
         if (deadlineFired && outcome.reason !== "completed") return { reason: "limit_exceeded", usages, totalMs: elapsed(clock, start), ...(outcome.message !== undefined ? { message: outcome.message } : {}) };
-        // A deadline that fires before durable publication never flips to completed.
-        if ((combined.signal.aborted || deadlineFired) && outcome.reason === "completed") {
-          return { reason: deadlineFired ? "limit_exceeded" : "cancelled", usages, totalMs: elapsed(clock, start) };
-        }
+        // A loop-reported completed already passed the pre-append cancellation check,
+        // so its durable entry is committed; trust it over a raced abort or deadline.
         return { ...outcome, usages, totalMs: elapsed(clock, start) };
       } finally {
         settled = true;
         deadlineStop.abort();
+        source?.removeEventListener("abort", onSourceAbort);
         runAbort = previous;
       }
     }
@@ -481,13 +501,15 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               collect(sample);
               report({ type: "usage", phase: "compaction", usage: structuredClone(entry.usage), complete: entry.complete, transient: true as const });
             }
-            if (signal.aborted) {
-              report({ type: "compaction", stage: "finished", reason: "manual", status: "cancelled", transient: true as const });
-              return { reason: "cancelled" as const };
-            }
+            // A durable record stays completed even when abort races publication;
+            // mirrors context.compact, which preserves completed over a late abort.
             if (recordId) {
               report({ type: "compaction", stage: "finished", reason: "manual", status: "completed", transient: true as const });
               return { reason: "completed" as const };
+            }
+            if (signal.aborted) {
+              report({ type: "compaction", stage: "finished", reason: "manual", status: "cancelled", transient: true as const });
+              return { reason: "cancelled" as const };
             }
             if (failed) {
               report({ type: "compaction", stage: "finished", reason: "manual", status: "failed", transient: true as const });
@@ -596,9 +618,17 @@ function elapsed(clock: HostClock, from: number): number {
   return Math.max(0, Math.round(monotonicNow(clock) - from));
 }
 
-/** Keep failure diagnostics terse, single-line and free of secrets or wire payloads. */
+/** Keep failure diagnostics terse, single-line and free of secrets or wire payloads.
+ * Defense-in-depth over provider text: raw model errors are untrusted, so redact
+ * bearer/JWT/key-like credentials here even when an upstream sanitizer also runs. */
 function sanitizeDiagnostic(message: string): string {
-  const single = message.replace(/\s+/g, " ").trim().slice(0, 500);
+  const redacted = message
+    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]*/g, "[redacted]")
+    .replace(/\b(?:Bearer|Basic|Token)\s+[^\s,"'}]+/gi, "[redacted]")
+    .replace(/\b(?:sk-[A-Za-z0-9-]+|xai-[A-Za-z0-9-]+)\b/g, "[redacted]")
+    .replace(/[A-Za-z0-9_.-]*?(?:api[_-]?key|secret|password|passwd|token|credential|access_token|refresh_token|private[_-]?key|session[_-]?key)[A-Za-z0-9_.-]*["']?\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/gi, "[redacted]")
+    .replace(/([?&](?:[^=&]*(?:key|token|secret|password|auth|credential|code|signature|sig)[^=&]*)=)[^&#\s]*/gi, "$1[redacted]");
+  const single = redacted.replace(/\s+/g, " ").trim().slice(0, 500);
   return single.length > 0 ? single : "Provider request failed.";
 }
 

@@ -102,7 +102,7 @@ export type HostProgressEvent =
   | { type: "tool_started"; toolCallId: string; name: string; transient: true }
   | { type: "tool_finished"; toolCallId: string; name: string; status: "success" | "error" | "cancelled"; transient: true }
   | { type: "retry"; attempt: number; maxAttempts: number; delayMs: number; message: string; transient: true }
-  | { type: "compaction"; stage: "started" | "finished"; reason: string; status?: string; transient: true }
+  | { type: "compaction"; stage: "started" | "finished"; reason: string; status?: "completed" | "failed" | "cancelled" | "noop"; transient: true }
   | { type: "usage"; phase: "turn" | "compaction"; usage: ModelUsage; complete: boolean; transient: true };
 
 /** Per-run options carrying cancellation, a fake clock and transient progress. */
@@ -159,7 +159,7 @@ export interface HostSession {
   readResult(reference: HostEntryReference): AssistantMessage;
   /** Abort the admitted run and settle cooperative tools; safe to repeat and safe when idle. */
   cancel(): void;
-  /** Release this idle handle; busy handles reject until their submitted run settles. */
+  /** Release this idle handle; busy handles reject with busy instead of aborting. Cancel first, await settlement, then close. */
   close(): Promise<void>;
 }
 
@@ -182,7 +182,7 @@ export interface HostRuntime {
   createSession(): Promise<HostSession>;
   /** Reopen the exact saved native branch within this configured workspace and store. */
   openSession(reference: HostSessionReference): Promise<HostSession>;
-  /** Close idle handles and refuse disposal while session creation or a run is in progress. */
+  /** Close idle handles and refuse disposal while session creation or a run is in progress. Cancel admitted runs first; close never aborts or settles them. */
   close(): Promise<void>;
 }
 

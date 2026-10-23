@@ -232,7 +232,7 @@ test("session cancel aborts retry waits and settles cooperative tools before rel
     session.cancel();
     session.cancel();
     const result = await pending;
-    expect(["cancelled", "limit_exceeded"]).toContain(result.outcome);
+    expect(result.outcome).toBe("cancelled");
     expect("result" in result).toBe(false);
     const saved = await readFile(join(config.sessionDirectory, `${session.reference.id}.jsonl`), "utf8");
     expect(saved).toContain("cooperative tools");
@@ -309,6 +309,72 @@ test("failures preserve effective policy and sanitized diagnostics without secre
     expect(failed.error.message).not.toMatch(/eyJ|Bearer|secret/i);
     const limited = await session.submit({ text: "round limit" }, createScriptedModel({ toolCalls: [{ id: "t", name: "missing", arguments: {} }] }));
     expect(limited.outcome).toBe("max_turns");
+    await session.close();
+    await host.close();
+  });
+});
+
+test("failure diagnostics redact bearer/JWT/secret material defense-in-depth", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir), host = await createHost(config), session = await host.createSession();
+    const jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0In0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+    const raw = `upstream failure Bearer sentinel-bearer-abc123 ${jwt} secret=sentinel-secret-value sk-sentinel-key-xyz api_key="sentinel-api-value" ?token=sentinel-query-value`;
+    const failed = await session.submit({ text: "secret leak" }, createScriptedModel({ error: raw, status: 400 }));
+    expect(failed.outcome).toBe("error");
+    if (failed.outcome !== "error") throw new Error("Expected error");
+    for (const sentinel of ["sentinel-bearer-abc123", "sentinel-secret-value", "sentinel-key-xyz", "sentinel-api-value", "sentinel-query-value"]) {
+      expect(failed.error.message).not.toContain(sentinel);
+    }
+    expect(failed.error.message).not.toMatch(/eyJ|Bearer/i);
+    expect(failed.error.message).toContain("[redacted]");
+    expect(failed.error.message).not.toContain("\n");
+    expect(failed.error.message.length).toBeLessThanOrEqual(500);
+    await session.close();
+    await host.close();
+  });
+});
+
+test("compact under deadline settles as limit-exceeded without durable summary", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir, { deadlineMs: 300 }), host = await createHost(config), session = await host.createSession();
+    for (let i = 0; i < 12; i++) await session.submit({ text: `retained ${i}` }, createScriptedModel({ text: "retained output" }));
+    const before = await readFile(join(config.sessionDirectory, `${session.reference.id}.jsonl`), "utf8");
+    const clock = manualClock();
+    const slow: Model = { provider: "scripted", id: "slow-summary",
+      async *stream(request) {
+        if (request.signal?.aborted) return;
+        await new Promise<void>(resolve => {
+          if (request.signal?.aborted) { resolve(); return; }
+          request.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+      } };
+    const pending = session.compact(slow, { clock });
+    const result = await drive(clock, pending);
+    expect(result.outcome).toBe("limit_exceeded");
+    expect("result" in result).toBe(false);
+    expect(result.usage.complete).toBe(false);
+    expect(await readFile(join(config.sessionDirectory, `${session.reference.id}.jsonl`), "utf8")).toBe(before);
+    await session.close();
+    await host.close();
+  });
+});
+
+test("abort-ignoring clock still terminates settlement", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir), host = await createHost(config), session = await host.createSession();
+    const ignoring: HostClock = {
+      now: () => Date.now(),
+      monotonicNow: () => performance.now(),
+      sleep: (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+    };
+    const controller = new AbortController();
+    const pending = session.submit({ text: "ignoring clock" },
+      createScriptedModel({ waitForAbort: true }), { signal: controller.signal, clock: ignoring });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    controller.abort();
+    const result = await pending;
+    expect(result.outcome).toBe("cancelled");
+    expect("result" in result).toBe(false);
     await session.close();
     await host.close();
   });

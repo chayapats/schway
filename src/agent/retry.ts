@@ -117,6 +117,7 @@ export async function* streamModelTurn(options: {
 }): AsyncGenerator<RuntimeEvent, ModelTurnOutcome> {
   const { model, request, call, clock, signal } = options;
   const maxAttempts = options.maxAttempts ?? MAX_TRANSIENT_ATTEMPTS;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new Error("Invalid maxAttempts: expected a positive safe integer.");
   const firstStart = monotonicNow(clock);
   const startedAt = new Date(clock.now()).toISOString();
   let retryWaitMs = 0;

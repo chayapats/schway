@@ -16,6 +16,7 @@ import type { RuntimeEvent } from "./events.ts";
 import type { ExtensionRuntime } from "../extensions/host.ts";
 import {
   streamModelTurn,
+  MAX_TRANSIENT_ATTEMPTS,
   systemClock,
   type AgentClock,
   type ModelTurnOutcome,
@@ -77,7 +78,8 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
   const undoTurn: UndoTurn | undefined = user ? { sessionId: options.session.rootId, turnId: user.id,
     turnNumber: options.session.items.filter(item => item.type === "user").length } : undefined;
   const maxTurns = options.maxTurns ?? DEFAULT_MAX_TURNS;
-  const maxAttempts = options.maxAttempts ?? 3;
+  const maxAttempts = options.maxAttempts ?? MAX_TRANSIENT_ATTEMPTS;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1) throw new Error("Invalid maxAttempts: expected a positive safe integer.");
   const clock = options.clock ?? systemClock();
   let tools = options.tools;
   const hooks = options.extensions?.hooks.active ? options.extensions.hooks : undefined;

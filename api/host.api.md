@@ -335,7 +335,7 @@ export type HostProgressEvent = {
     type: "compaction";
     stage: "started" | "finished";
     reason: string;
-    status?: string;
+    status?: "completed" | "failed" | "cancelled" | "noop";
     transient: true;
 } | {
     type: "usage";
