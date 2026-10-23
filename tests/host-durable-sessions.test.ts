@@ -11,7 +11,7 @@ async function options(dir: string): Promise<HostOptions> {
   await mkdir(workspaceRoot, { recursive: true }); await mkdir(homeDirectory, { recursive: true });
   return { workspaceRoot, homeDirectory, sessionDirectory: join(dir, "sessions"),
     context: { policy: "strict", systemPrompt: "Immutable operator", sections: [], sources: [{ id: "evidence", revision: "v1", content: "inert evidence" }] },
-    tools: { policy: "include-skill-activation", definitions: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
     limits: { maxTurns: 3, maxConcurrentTools: 2, contextWindow: 32768, maxInputChars: 4096 } };
 }
 

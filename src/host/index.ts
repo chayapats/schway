@@ -32,7 +32,9 @@ export interface HostCapabilities {
   readonly sessionOwnership: "exclusive-local-process-lease";
   readonly contextContract: "schway.host.context-policy/v1";
   readonly extensionDiscovery: "disabled-only";
-  readonly toolPolicies: readonly ["include-skill-activation"];
+  readonly toolContract: "schway.host.tool-policy/v1";
+  readonly toolPolicies: readonly ["exact"];
+  readonly hostedLookup: "disabled-only";
   readonly observedInference: "not-checked";
 }
 
@@ -44,7 +46,7 @@ export interface HostLimits {
   maxInputChars: number;
 }
 
-/** Trusted host composition with explicit context sources; exact registry enforcement is a later capability. */
+/** Trusted host composition with exact tool registry and forced hosted-lookup off. */
 export interface HostOptions {
   workspaceRoot: string;
   sessionDirectory: string;
@@ -52,7 +54,7 @@ export interface HostOptions {
   context: { policy: "workspace-discovery" | "strict" | "controlled"; systemPrompt: string; sections: readonly ContextSection[];
     discovery?: import("../context/policy.ts").ContextSourcePolicy;
     sources?: readonly import("../context/policy.ts").ContextSourceDocument[] };
-  tools: { policy: "include-skill-activation"; definitions: readonly ToolDefinition[] };
+  tools: { policy: "exact"; definitions: readonly ToolDefinition[]; hostedLookup: "off" };
   limits: HostLimits;
 }
 
@@ -115,7 +117,9 @@ const capabilities: HostCapabilities = Object.freeze({
   sessionOwnership: "exclusive-local-process-lease",
   contextContract: "schway.host.context-policy/v1",
   extensionDiscovery: "disabled-only",
-  toolPolicies: Object.freeze(["include-skill-activation"] as const),
+  toolContract: "schway.host.tool-policy/v1",
+  toolPolicies: Object.freeze(["exact"] as const),
+  hostedLookup: "disabled-only",
   observedInference: "not-checked",
 });
 

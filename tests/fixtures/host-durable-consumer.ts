@@ -20,7 +20,7 @@ if (input.action.startsWith("fault-")) {
   } }));
 }
 try {
-  const host = await createHost({ ...input.options, tools: { policy: "include-skill-activation", definitions: [{
+  const host = await createHost({ ...input.options, tools: { policy: "exact", hostedLookup: "off", definitions: [{
     name: "effect", description: "Record one non-idempotent fixture effect", execution: "exclusive", effect: "mutating", inputSchema: { type: "object" },
     async execute() {
       executions++;

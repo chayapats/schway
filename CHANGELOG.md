@@ -4,6 +4,17 @@
 
 ### Added
 
+- Add exact host tool-policy enforcement with forced hosted-lookup off. An empty
+  registry advertises zero tools and unknown calls settle as explicit errors
+  without execution; a narrow registry exposes only admitted definitions and
+  duplicates/unsupported policies fail before inference. No built-in, skill
+  activation or hosted search appears via loop startup, hooks, context prep,
+  retry, overflow recovery or reopen. An explicitly admitted `activate_skill`
+  rebinds per session to the current context policy; hook-enlarged tools and
+  hosted entries are rejected and effective post-hook arguments still pass the
+  existing approval path. Relative tool paths retain primary-workspace-root
+  semantics (#399).
+
 - Add explicit strict/controlled host context-source policies, separated operator
   instructions and source documents, native compaction with the same permissions,
   and activation admission that cannot rediscover disabled sources. Current host
