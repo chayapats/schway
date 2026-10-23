@@ -258,7 +258,7 @@ test("older supported native versions restore through forward-only migration", a
   });
 });
 
-test("restore never overwrites an existing target and reports conflict", async () => {
+test("restore is idempotent for identical targets and conflicts on mismatch", async () => {
   await withTempDir(async dir => {
     const config = await options(dir);
     const host = await createHost(config);
@@ -273,8 +273,13 @@ test("restore never overwrites an existing target and reports conflict", async (
     const first = await fresh.restoreSessionSnapshot(structuredClone(snapshot));
     expect(first.status).toBe("restored");
     const second = await fresh.restoreSessionSnapshot(structuredClone(snapshot));
-    expect(second).toMatchObject({ status: "quarantined", reason: "conflict" });
-    expect(await readFile(join(freshConfig.sessionDirectory, `${reference.id}.jsonl`), "utf8")).toContain("original");
+    expect(second.status).toBe("restored");
+    expect(second.nextAction).toContain("Reopen");
+    await Bun.write(join(freshConfig.sessionDirectory, `${reference.id}.jsonl`), "forged-by-outside\n");
+    const third = await fresh.restoreSessionSnapshot(structuredClone(snapshot));
+    expect(third).toMatchObject({ status: "quarantined", reason: "conflict" });
+    if (third.status !== "quarantined") throw new Error("Expected quarantined");
+    expect(third.nextAction).toBe("Snapshot quarantined. Delete the existing sessions, then retry restore.");
     await fresh.close();
     await host.close();
   });
@@ -316,6 +321,213 @@ test("snapshot manifest carries stable refs and sanitized diagnostics", async ()
     await expect(host.snapshotSessions([{ id: "../escape", branchId: "main" }])).rejects.toMatchObject({ code: "invalid-reference" });
     await expect(host.snapshotSessions([])).rejects.toMatchObject({ code: "invalid-input" });
     await expect(host.snapshotSessions([reference], { excludeRetired: "yes" } as unknown as { excludeRetired: boolean })).rejects.toMatchObject({ code: "invalid-input" });
+    await host.close();
+  });
+});
+
+test("metadata symlink blocks snapshot through the pinned descriptor", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir);
+    const host = await createHost(config);
+    const session = await host.createSession();
+    await session.submit({ text: "meta-symlink" }, createScriptedModel({ text: "ok" }));
+    const reference = session.reference;
+    await session.close();
+    const metaPath = join(config.sessionDirectory, `${reference.id}.jsonl.meta`);
+    const before = await Bun.file(metaPath).exists() ? await readFile(metaPath) : undefined;
+    const outside = join(dir, "outside.meta");
+    await Bun.write(outside, "unowned-metadata");
+    try { await unlink(metaPath); } catch { /* Missing metadata still exercises the alias path. */ }
+    await symlink(outside, metaPath);
+    await expect(host.snapshotSessions([reference])).rejects.toMatchObject({ code: "conflict" });
+    await unlink(metaPath);
+    if (before !== undefined) await Bun.write(metaPath, before);
+    const snapshot = await host.snapshotSessions([reference]);
+    expect(snapshot.sessions).toHaveLength(1);
+    await host.close();
+  });
+});
+
+test("mutated bytes after validation quarantine on restore without throwing", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir);
+    const host = await createHost(config);
+    const session = await host.createSession();
+    await session.submit({ text: "mutate me" }, createScriptedModel({ text: "ok" }));
+    const reference = session.reference;
+    await session.close();
+    const snapshot = await host.snapshotSessions([reference]);
+    expect(host.validateSessionSnapshot(snapshot).status).toBe("valid");
+    const tampered = structuredClone(snapshot);
+    const entry = (tampered.sessions[0]!.artifacts as { kind: string; dataBase64: string; size: number; sha256: string }[])
+      .find(artifact => artifact.kind === "conversation")!;
+    entry.dataBase64 = Buffer.from("tampered-bytes").toString("base64");
+    const freshDir = join(dir, "fresh-mutated");
+    const freshConfig = await options(freshDir);
+    const fresh = await createHost({ ...freshConfig, workspaceRoot: config.workspaceRoot });
+    const result = await fresh.restoreSessionSnapshot(tampered);
+    expect(result.status).toBe("quarantined");
+    if (result.status !== "quarantined") throw new Error("Expected quarantined");
+    expect(result.reason).toBe("corrupt");
+    expect(await Bun.file(join(freshConfig.sessionDirectory, `${reference.id}.jsonl`)).exists()).toBe(false);
+    const missing = structuredClone(snapshot);
+    (missing.sessions[0] as unknown as { artifacts: unknown[] }).artifacts = [];
+    const missingResult = await fresh.restoreSessionSnapshot(missing);
+    expect(missingResult.status).toBe("quarantined");
+    await fresh.close();
+    await host.close();
+  });
+});
+
+test("partial guidance resumes and busy guidance closes first", async () => {
+  const { snapshotGuidance } = await import("../src/host/snapshot.ts");
+  expect(snapshotGuidance("partial")).toBe("Snapshot partly restored. Retry restore to resume.");
+  expect(snapshotGuidance("quarantined", "conflict")).toBe("Snapshot quarantined. Close the session and retry restore.");
+  expect(snapshotGuidance("quarantined", "conflict", "target-exists")).toBe("Snapshot quarantined. Delete the existing sessions, then retry restore.");
+  expect(snapshotGuidance("valid")).toBe("Snapshot valid. Restore into a fresh store to continue.");
+  await withTempDir(async dir => {
+    const config = await options(dir);
+    const host = await createHost(config);
+    const first = await host.createSession();
+    await first.submit({ text: "one" }, createScriptedModel({ text: "ok" }));
+    const firstRef = first.reference;
+    await first.close();
+    const second = await host.createSession();
+    await second.submit({ text: "two" }, createScriptedModel({ text: "ok" }));
+    const secondRef = second.reference;
+    await second.close();
+    const full = await host.snapshotSessions([firstRef, secondRef]);
+    const freshDir = join(dir, "fresh-resume");
+    const freshConfig = await options(freshDir);
+    const fresh = await createHost({ ...freshConfig, workspaceRoot: config.workspaceRoot });
+    const single = structuredClone(full) as unknown as { sessions: unknown[] };
+    single.sessions = [single.sessions[0]];
+    const one = await fresh.restoreSessionSnapshot(single);
+    expect(one.status).toBe("restored");
+    const resumed = await fresh.restoreSessionSnapshot(structuredClone(full));
+    expect(resumed.status).toBe("restored");
+    if (resumed.status !== "restored") throw new Error("Expected restored");
+    expect(resumed.sessions.map(entry => entry.id).sort()).toEqual([firstRef.id, secondRef.id].sort());
+    const busyHost = await createHost({ ...freshConfig, workspaceRoot: config.workspaceRoot });
+    const opened = await busyHost.openSession(firstRef);
+    const busyResult = await busyHost.restoreSessionSnapshot(structuredClone(full));
+    expect(busyResult).toMatchObject({ status: "quarantined", reason: "conflict" });
+    if (busyResult.status !== "quarantined") throw new Error("Expected quarantined");
+    expect(busyResult.nextAction).toBe("Snapshot quarantined. Close the session and retry restore.");
+    await opened.close();
+    await busyHost.close();
+    await fresh.close();
+    await host.close();
+  });
+});
+
+test("oversized totals quarantine before decoding without huge allocation", async () => {
+  const { validateSnapshotShape, MAX_SNAPSHOT_TOTAL_BYTES, MAX_SNAPSHOT_ARTIFACT_BYTES } = await import("../src/host/snapshot.ts");
+  const { hashSnapshotBytes } = await import("../src/host/snapshot.ts");
+  const tiny = Buffer.from("x");
+  const tinyBase64 = tiny.toString("base64");
+  const tinyHash = hashSnapshotBytes(tiny);
+  const perSession = 32 * 1024 * 1024;
+  const count = Math.ceil((MAX_SNAPSHOT_TOTAL_BYTES + 1) / perSession);
+  expect(count).toBeLessThanOrEqual(64);
+  const sessions = Array.from({ length: count }, (_, index) => {
+    const id = `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    return {
+      id,
+      branchId: "main",
+      workspaceRoot: "/work",
+      headerCreatedAt: "2026-01-01T00:00:00.000Z",
+      nativeFormatVersion: 4,
+      retired: false,
+      artifacts: [{ kind: "conversation", size: perSession, sha256: tinyHash, dataBase64: tinyBase64 }],
+    };
+  });
+  const oversized = {
+    snapshotContract: "schway.host.session-snapshot/v1",
+    nativeFormatVersion: 4,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    sessions,
+  };
+  expect(perSession).toBeLessThanOrEqual(MAX_SNAPSHOT_ARTIFACT_BYTES);
+  const verdict = validateSnapshotShape(oversized);
+  expect(verdict.status).toBe("quarantined");
+});
+
+test("snapshot shape rejects empty sets, unknown keys and relative roots", async () => {
+  const { validateSnapshotShape } = await import("../src/host/snapshot.ts");
+  await withTempDir(async dir => {
+    const config = await options(dir);
+    const host = await createHost(config);
+    const session = await host.createSession();
+    await session.close();
+    const snapshot = structuredClone(await host.snapshotSessions([session.reference]));
+    expect(validateSnapshotShape({ ...snapshot, sessions: [] })).toMatchObject({ status: "quarantined", reason: "incomplete" });
+    expect(validateSnapshotShape({ ...snapshot, extra: 1 })).toMatchObject({ status: "quarantined", reason: "incomplete" });
+    const badSession = structuredClone(snapshot);
+    (badSession.sessions[0] as unknown as Record<string, unknown>)["extra"] = 1;
+    expect(validateSnapshotShape(badSession)).toMatchObject({ status: "quarantined", reason: "incomplete" });
+    const badArtifact = structuredClone(snapshot);
+    ((badArtifact.sessions[0]!.artifacts as unknown[])[0] as Record<string, unknown>)["extra"] = 1;
+    expect(validateSnapshotShape(badArtifact)).toMatchObject({ status: "quarantined" });
+    const relative = structuredClone(snapshot);
+    (relative.sessions[0] as unknown as Record<string, unknown>)["workspaceRoot"] = "relative/root";
+    expect(validateSnapshotShape(relative)).toMatchObject({ status: "quarantined", reason: "incomplete" });
+    const emptyRoot = structuredClone(snapshot);
+    (emptyRoot.sessions[0] as unknown as Record<string, unknown>)["workspaceRoot"] = "";
+    expect(validateSnapshotShape(emptyRoot)).toMatchObject({ status: "quarantined", reason: "incomplete" });
+    await host.close();
+  });
+});
+
+test("legacy restore keeps raw bytes until the next append", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir);
+    const host = await createHost(config);
+    const id = crypto.randomUUID();
+    const header = { type: "session", version: 1, id, createdAt: "2026-01-01T00:00:00.000Z",
+      workspaceRoot: config.workspaceRoot, launchCwd: config.workspaceRoot, extraRoots: [] };
+    const user = { type: "user", id: "u-lazy", content: [{ type: "text", text: "legacy work" }] };
+    const assistant = { type: "assistant", id: "a-lazy", content: [{ type: "text", text: "legacy reply" }] };
+    const lines = [JSON.stringify(header),
+      JSON.stringify({ ...user, parentId: id }),
+      JSON.stringify({ ...assistant, parentId: "u-lazy" })].join("\n") + "\n";
+    await Bun.write(join(config.sessionDirectory, `${id}.jsonl`), lines);
+    const reference: HostSessionReference = { id, branchId: "main" };
+    const snapshot = await host.snapshotSessions([reference]);
+    const freshDir = join(dir, "fresh-lazy");
+    const freshConfig = await options(freshDir);
+    const fresh = await createHost({ ...freshConfig, workspaceRoot: config.workspaceRoot });
+    const restored = await fresh.restoreSessionSnapshot(structuredClone(snapshot));
+    expect(restored.status).toBe("restored");
+    const expected = Buffer.from(snapshot.sessions[0]!.artifacts.find(artifact => artifact.kind === "conversation")!.dataBase64, "base64");
+    expect(await readFile(join(freshConfig.sessionDirectory, `${id}.jsonl`))).toEqual(expected);
+    const reopened = await fresh.openSession(reference);
+    expect(await readFile(join(freshConfig.sessionDirectory, `${id}.jsonl`))).toEqual(expected);
+    await reopened.close();
+    await fresh.close();
+    await host.close();
+  });
+});
+
+test("restored retired tombstones populate the in-memory closed set", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir);
+    const host = await createHost(config);
+    const session = await host.createSession();
+    const reference = session.reference;
+    await session.close();
+    await host.retireSession(reference);
+    const snapshot = await host.snapshotSessions([reference]);
+    expect(snapshot.sessions[0]!.retired).toBe(true);
+    const freshDir = join(dir, "fresh-remember");
+    const freshConfig = await options(freshDir);
+    const fresh = await createHost({ ...freshConfig, workspaceRoot: config.workspaceRoot });
+    const restored = await fresh.restoreSessionSnapshot(structuredClone(snapshot));
+    expect(restored.status).toBe("restored");
+    await expect(fresh.openSession(reference)).rejects.toMatchObject({ code: "closed" });
+    await unlink(join(freshConfig.sessionDirectory, `${reference.id}.host-retired`));
+    await expect(fresh.openSession(reference)).rejects.toMatchObject({ code: "closed" });
+    await fresh.close();
     await host.close();
   });
 });

@@ -550,6 +550,9 @@ export const MAX_SNAPSHOT_ARTIFACT_BYTES: number;
 export const MAX_SNAPSHOT_SESSIONS = 64;
 
 // @public
+export const MAX_SNAPSHOT_TOTAL_BYTES: number;
+
+// @public
 export interface Model {
     // (undocumented)
     readonly id: string;

@@ -1,6 +1,6 @@
 import { mkdir, realpath, stat } from "node:fs/promises";
-import { lstat, readFile, unlink } from "node:fs/promises";
-import { closeSync, fsyncSync, openSync } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { closeSync, constants, fsyncSync, openSync } from "node:fs";
 import { open as openFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isAbsolute } from "node:path";
@@ -21,7 +21,7 @@ import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, credential
 import { acquireSessionLease, type SessionLease } from "./lease.ts";
 import { deleteManagedSession, isManagedRetired, isManagedRetiredSync, markManagedRetired, readManagedHeader } from "./managed-data.ts";
 import { SESSION_FORMAT_VERSION } from "../session/jsonl.ts";
-import { MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_SNAPSHOT_SESSIONS, SNAPSHOT_CONTRACT, SNAPSHOT_NATIVE_FORMAT_VERSION, hashSnapshotBytes, snapshotGuidance, validateSnapshotShape,
+import { MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_SNAPSHOT_SESSIONS, MAX_SNAPSHOT_TOTAL_BYTES, SNAPSHOT_CONTRACT, SNAPSHOT_NATIVE_FORMAT_VERSION, hashSnapshotBytes, snapshotGuidance, validateSnapshotShape,
   type HostSessionSnapshot, type HostSnapshotArtifact, type HostSnapshotOptions, type HostSnapshotQuarantineReason, type HostSnapshotRestoreOptions,
   type HostSnapshotRestoreResult, type HostSnapshotSession, type HostSnapshotValidation } from "./snapshot.ts";
 import type { Model, ModelRequest } from "../model/model.ts";
@@ -717,6 +717,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           }
         }
         const captured: HostSnapshotSession[] = [];
+        let totalCaptured = 0;
         for (const reference of references) {
           const id = reference.id;
           let header: { workspaceRoot: string; extraRoots: readonly string[] };
@@ -742,15 +743,15 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           const conversationPath = join(directory, `${id}.jsonl`);
           let conversation: Uint8Array;
           try {
-            const info = await lstat(conversationPath);
-            if (!info.isFile() || info.nlink !== 1) throw new HostError("conflict");
-            conversation = await readFile(conversationPath);
+            conversation = await readOwnedSnapshotBytes(conversationPath);
           } catch (error) {
             if (error instanceof HostError) throw error;
             if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new HostError("storage");
             throw new HostError("storage");
           }
           if (conversation.length < 1 || conversation.length > MAX_SNAPSHOT_ARTIFACT_BYTES) throw new HostError("storage");
+          totalCaptured += conversation.length;
+          if (totalCaptured > MAX_SNAPSHOT_TOTAL_BYTES) throw new HostError("storage");
           let firstLine: string;
           let parsedHeader: { version?: unknown; createdAt?: unknown };
           try {
@@ -764,6 +765,20 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               typeof parsedHeader.createdAt !== "string" || !Number.isFinite(Date.parse(parsedHeader.createdAt))) {
             throw new HostError("conflict");
           }
+          const metadataPath = `${conversationPath}.meta`;
+          let metadata: Uint8Array | undefined;
+          try {
+            const candidate = await readOwnedSnapshotBytes(metadataPath);
+            if (candidate.length > MAX_SNAPSHOT_ARTIFACT_BYTES) throw new HostError("storage");
+            if (candidate.length > 0) {
+              metadata = candidate;
+              totalCaptured += metadata.length;
+              if (totalCaptured > MAX_SNAPSHOT_TOTAL_BYTES) throw new HostError("storage");
+            }
+          } catch (error) {
+            if (error instanceof HostError) throw error;
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
+          }
           const artifacts: HostSnapshotArtifact[] = [];
           artifacts.push(Object.freeze({
             kind: "conversation" as const,
@@ -771,23 +786,13 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             sha256: hashSnapshotBytes(conversation),
             dataBase64: Buffer.from(conversation).toString("base64"),
           }));
-          const metadataPath = `${conversationPath}.meta`;
-          try {
-            const metaInfo = await lstat(metadataPath);
-            if (metaInfo.isSymbolicLink() || !metaInfo.isFile() || metaInfo.nlink !== 1) throw new HostError("conflict");
-            const metadata = await readFile(metadataPath);
-            if (metadata.length > MAX_SNAPSHOT_ARTIFACT_BYTES) throw new HostError("storage");
-            if (metadata.length > 0) {
-              artifacts.push(Object.freeze({
-                kind: "metadata" as const,
-                size: metadata.length,
-                sha256: hashSnapshotBytes(metadata),
-                dataBase64: Buffer.from(metadata).toString("base64"),
-              }));
-            }
-          } catch (error) {
-            if (error instanceof HostError) throw error;
-            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
+          if (metadata) {
+            artifacts.push(Object.freeze({
+              kind: "metadata" as const,
+              size: metadata.length,
+              sha256: hashSnapshotBytes(metadata),
+              dataBase64: Buffer.from(metadata).toString("base64"),
+            }));
           }
           // Re-verify the lease, retirement and bytes before reporting a coherent set.
           try {
@@ -805,11 +810,24 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           if (retiredNow !== retired) throw new HostError("conflict");
           let reread: Uint8Array;
           try {
-            reread = await readFile(conversationPath);
-          } catch {
+            reread = await readOwnedSnapshotBytes(conversationPath);
+          } catch (error) {
+            if (error instanceof HostError) throw error;
             throw new HostError("storage");
           }
           if (reread.length !== conversation.length || !Buffer.from(reread).equals(Buffer.from(conversation))) throw new HostError("conflict");
+          let rereadMeta: Uint8Array | undefined;
+          try {
+            const candidate = await readOwnedSnapshotBytes(metadataPath);
+            if (candidate.length > 0) rereadMeta = candidate;
+          } catch (error) {
+            if (error instanceof HostError) throw error;
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
+          }
+          const metaMatches = (metadata === undefined && rereadMeta === undefined) ||
+            (metadata !== undefined && rereadMeta !== undefined &&
+              rereadMeta.length === metadata.length && Buffer.from(rereadMeta).equals(Buffer.from(metadata)));
+          if (!metaMatches) throw new HostError("conflict");
           captured.push(Object.freeze({
             id,
             branchId: reference.branchId,
@@ -847,11 +865,17 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       requireOpen();
       if (SESSION_FORMAT_VERSION !== SNAPSHOT_NATIVE_FORMAT_VERSION) throw new HostError("storage");
       const excludeRetired = snapshotOption(options);
-      const verdict = validateSnapshotShape(snapshot);
+      let isolated: unknown;
+      try {
+        isolated = structuredClone(snapshot);
+      } catch {
+        return Object.freeze({ status: "quarantined" as const, reason: "incomplete" as const, nextAction: snapshotGuidance("quarantined", "incomplete") });
+      }
+      const verdict = validateSnapshotShape(isolated);
       if (verdict.status !== "valid") {
         return Object.freeze({ status: "quarantined" as const, reason: verdict.reason, nextAction: verdict.nextAction });
       }
-      const source = snapshot as HostSessionSnapshot;
+      const source = isolated as HostSessionSnapshot;
       for (const session of source.sessions) {
         if (session.workspaceRoot !== root) {
           return Object.freeze({ status: "quarantined" as const, reason: "workspace-mismatch" as const, nextAction: snapshotGuidance("quarantined", "workspace-mismatch") });
@@ -863,7 +887,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       }
       for (const session of wanted) {
         if (ownedSessions.has(`${directory}/${session.id}`)) {
-          return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict") });
+          return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "busy") });
         }
       }
       opening++;
@@ -890,20 +914,77 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               try { lease.release(); } catch { /* Preserve the restore verdict. */ }
             }
             held.clear();
-            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict") });
+            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "busy") });
           }
         }
+        const decoded = new Map<string, { conversation: Uint8Array; metadata?: Uint8Array }>();
         for (const session of wanted) {
-          let exists = false;
+          const conversationEntry = session.artifacts.find(artifact => artifact.kind === "conversation");
+          if (!conversationEntry) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "incomplete" as const, nextAction: snapshotGuidance("quarantined", "incomplete") });
+          }
+          const metadataEntry = session.artifacts.find(artifact => artifact.kind === "metadata");
+          let conversation: Uint8Array;
           try {
-            await lstat(join(directory, `${session.id}.jsonl`));
-            exists = true;
+            conversation = Buffer.from(conversationEntry.dataBase64, "base64");
+          } catch {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "corrupt" as const, nextAction: snapshotGuidance("quarantined", "corrupt") });
+          }
+          if (conversation.length !== conversationEntry.size || conversation.length < 1 ||
+              conversation.length > MAX_SNAPSHOT_ARTIFACT_BYTES ||
+              hashSnapshotBytes(conversation) !== conversationEntry.sha256) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "corrupt" as const, nextAction: snapshotGuidance("quarantined", "corrupt") });
+          }
+          let metadata: Uint8Array | undefined;
+          if (metadataEntry) {
+            try {
+              metadata = Buffer.from(metadataEntry.dataBase64, "base64");
+            } catch {
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "corrupt" as const, nextAction: snapshotGuidance("quarantined", "corrupt") });
+            }
+            if (metadata.length !== metadataEntry.size || metadata.length < 1 ||
+                metadata.length > MAX_SNAPSHOT_ARTIFACT_BYTES ||
+                hashSnapshotBytes(metadata) !== metadataEntry.sha256) {
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "corrupt" as const, nextAction: snapshotGuidance("quarantined", "corrupt") });
+            }
+          }
+          decoded.set(session.id, { conversation, ...(metadata ? { metadata } : {}) });
+        }
+        const restored: HostSnapshotSession[] = [];
+        const needsWrite = new Map<string, boolean>();
+        for (const session of wanted) {
+          const expected = decoded.get(session.id);
+          if (!expected) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "incomplete" as const, nextAction: snapshotGuidance("quarantined", "incomplete") });
+          }
+          const conversationPath = join(directory, `${session.id}.jsonl`);
+          const metadataPath = `${conversationPath}.meta`;
+          let existing: Uint8Array | undefined;
+          try {
+            existing = await readOwnedSnapshotBytes(conversationPath);
           } catch (error) {
+            if (error instanceof HostError) {
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+            }
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
           }
-          if (exists) {
-            releaseAll();
-            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict") });
+          let existingMeta: Uint8Array | undefined;
+          try {
+            const candidate = await readOwnedSnapshotBytes(metadataPath);
+            if (candidate.length > 0) existingMeta = candidate;
+          } catch (error) {
+            if (error instanceof HostError) {
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+            }
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
           }
           let retiredExists = false;
           try {
@@ -911,29 +992,63 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           } catch {
             throw new HostError("storage");
           }
-          if (retiredExists) {
+          if (existing !== undefined) {
+            const conversationMatches = existing.length === expected.conversation.length &&
+              Buffer.from(existing).equals(Buffer.from(expected.conversation));
+            const metaMatches = (expected.metadata === undefined && existingMeta === undefined) ||
+              (expected.metadata !== undefined && existingMeta !== undefined &&
+                existingMeta.length === expected.metadata.length &&
+                Buffer.from(existingMeta).equals(Buffer.from(expected.metadata)));
+            if (conversationMatches && metaMatches) {
+              if (retiredExists && !session.retired) {
+                releaseAll();
+                return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+              }
+              needsWrite.set(session.id, false);
+              restored.push(session);
+              continue;
+            }
             releaseAll();
-            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict") });
+            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
           }
+          if (existingMeta !== undefined && expected.metadata === undefined) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+          }
+          if (retiredExists && !session.retired) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+          }
+          needsWrite.set(session.id, true);
         }
-        const restored: HostSnapshotSession[] = [];
-        const decoded = new Map<string, { conversation: Uint8Array; metadata?: Uint8Array }>();
-        for (const session of wanted) {
-          const conversationEntry = session.artifacts.find(artifact => artifact.kind === "conversation")!;
-          const metadataEntry = session.artifacts.find(artifact => artifact.kind === "metadata");
-          decoded.set(session.id, {
-            conversation: Buffer.from(conversationEntry.dataBase64, "base64"),
-            ...(metadataEntry ? { metadata: Buffer.from(metadataEntry.dataBase64, "base64") } : {}),
-          });
-        }
-        for (const session of wanted) {
-          const bytes = decoded.get(session.id)!;
+        const pending = wanted.filter(session => needsWrite.get(session.id) !== false);
+        for (const session of pending) {
+          const bytes = decoded.get(session.id);
+          if (!bytes) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "incomplete" as const, nextAction: snapshotGuidance("quarantined", "incomplete") });
+          }
           try {
             await writeSnapshotFile(join(directory, `${session.id}.jsonl`), bytes.conversation);
             if (bytes.metadata) await writeSnapshotFile(join(directory, `${session.id}.jsonl.meta`), bytes.metadata);
-          } catch {
-            const remaining = wanted.slice(wanted.indexOf(session)).map(entry => Object.freeze({ id: entry.id, branchId: entry.branchId }));
+            const written = await readOwnedSnapshotBytes(join(directory, `${session.id}.jsonl`));
+            if (written.length !== bytes.conversation.length ||
+                !Buffer.from(written).equals(Buffer.from(bytes.conversation)) ||
+                hashSnapshotBytes(written) !== hashSnapshotBytes(bytes.conversation)) {
+              throw new HostError("storage");
+            }
+            if (bytes.metadata) {
+              const writtenMeta = await readOwnedSnapshotBytes(join(directory, `${session.id}.jsonl.meta`));
+              if (writtenMeta.length !== bytes.metadata.length ||
+                  !Buffer.from(writtenMeta).equals(Buffer.from(bytes.metadata))) {
+                throw new HostError("storage");
+              }
+            }
+          } catch (error) {
+            if (error instanceof HostError && error.code !== "storage") throw error;
             const done = restored.map(entry => Object.freeze({ id: entry.id, branchId: entry.branchId }));
+            const remaining = wanted.filter(entry => !restored.some(doneEntry => doneEntry.id === entry.id))
+              .map(entry => Object.freeze({ id: entry.id, branchId: entry.branchId }));
             // Keep coherent writes; partial never auto-runs model calls or tools.
             releaseAll();
             return Object.freeze({ status: "partial" as const, restored: Object.freeze(done), remaining: Object.freeze(remaining), nextAction: snapshotGuidance("partial") });
@@ -972,6 +1087,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           if (!session.retired) continue;
           try {
             await markManagedRetired(directory, session.id, root);
+            rememberRetired(`${directory}/${session.id}`);
           } catch {
             try { await unlink(join(directory, `${session.id}.jsonl`)); } catch { /* Preserve partial inventory. */ }
             try { await unlink(join(directory, `${session.id}.jsonl.meta`)); } catch { /* Preserve partial inventory. */ }
@@ -1047,6 +1163,30 @@ function snapshotOption(options: HostSnapshotOptions | HostSnapshotRestoreOption
   const excludeRetired = (options as { excludeRetired?: unknown }).excludeRetired ?? false;
   if (typeof excludeRetired !== "boolean") throw new HostError("invalid-input");
   return excludeRetired;
+}
+
+/** Read one owned snapshot artifact through a pinned descriptor that never follows a symlink. */
+async function readOwnedSnapshotBytes(path: string): Promise<Uint8Array> {
+  let file;
+  try {
+    file = await openFile(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") throw error;
+    if (code === "ELOOP") throw new HostError("conflict");
+    throw new HostError("storage");
+  }
+  try {
+    const info = await file.stat();
+    if (!info.isFile() || info.nlink !== 1) throw new HostError("conflict");
+    return await file.readFile();
+  } catch (error) {
+    if (error instanceof HostError) throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+    throw new HostError("storage");
+  } finally {
+    await file.close();
+  }
 }
 
 /** Write one restored artifact exclusively so a second restore cannot mix generations. */

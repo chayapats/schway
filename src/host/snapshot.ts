@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
 
 /** Supported native-state snapshot contract for quiesced managed sessions. */
 export const SNAPSHOT_CONTRACT = "schway.host.session-snapshot/v1" as const;
@@ -11,6 +12,9 @@ export const MAX_SNAPSHOT_SESSIONS = 64;
 
 /** Bound on one opaque artifact; production histories stay far below this. */
 export const MAX_SNAPSHOT_ARTIFACT_BYTES = 32 * 1024 * 1024;
+
+/** Bound on decoded bytes across one snapshot; keeps validation and capture bounded. */
+export const MAX_SNAPSHOT_TOTAL_BYTES = 256 * 1024 * 1024;
 
 /** Opaque native artifact kind captured for one managed session. */
 export type HostSnapshotArtifactKind = "conversation" | "metadata";
@@ -100,15 +104,17 @@ export function hashSnapshotBytes(bytes: Uint8Array): string {
 }
 
 /** Sanitized next-action guidance without paths, tokens or provider payloads. */
-export function snapshotGuidance(kind: "valid" | "restored" | "quarantined" | "partial", reason?: HostSnapshotQuarantineReason): string {
-  if (kind === "restored" || kind === "valid") return "Snapshot restored. Reopen a session to continue.";
-  if (kind === "partial") return "Snapshot partly restored. Retry restore after checking session storage permissions.";
+export function snapshotGuidance(kind: "valid" | "restored" | "quarantined" | "partial", reason?: HostSnapshotQuarantineReason, detail?: "busy" | "target-exists"): string {
+  if (kind === "restored") return "Snapshot restored. Reopen a session to continue.";
+  if (kind === "valid") return "Snapshot valid. Restore into a fresh store to continue.";
+  if (kind === "partial") return "Snapshot partly restored. Retry restore to resume.";
   switch (reason) {
     case "unsupported-version":
       return "Snapshot quarantined. Restore with a compatible Schway build.";
     case "workspace-mismatch":
       return "Snapshot quarantined. Restore into the matching workspace store.";
     case "conflict":
+      if (detail === "target-exists") return "Snapshot quarantined. Delete the existing sessions, then retry restore.";
       return "Snapshot quarantined. Close the session and retry restore.";
     case "missing-artifact":
       return "Snapshot quarantined. Export the sessions again before restoring.";
@@ -125,6 +131,7 @@ export function validateSnapshotShape(snapshot: unknown): HostSnapshotValidation
     Object.freeze({ status: "quarantined" as const, reason, nextAction: snapshotGuidance("quarantined", reason) });
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return fail("incomplete");
   const record = snapshot as Record<string, unknown>;
+  if (!hasOnlyKeys(record, ["snapshotContract", "nativeFormatVersion", "createdAt", "sessions"])) return fail("incomplete");
   if (record["snapshotContract"] !== SNAPSHOT_CONTRACT) {
     const versions = record["nativeFormatVersion"];
     if (typeof versions === "number" && (!Number.isSafeInteger(versions) || versions < 1 || versions > SNAPSHOT_NATIVE_FORMAT_VERSION)) return fail("unsupported-version");
@@ -136,17 +143,20 @@ export function validateSnapshotShape(snapshot: unknown): HostSnapshotValidation
     return fail("unsupported-version");
   }
   if (typeof record["createdAt"] !== "string" || !Number.isFinite(Date.parse(record["createdAt"] as string))) return fail("incomplete");
-  if (!Array.isArray(record["sessions"]) || record["sessions"].length > MAX_SNAPSHOT_SESSIONS) return fail("incomplete");
+  if (!Array.isArray(record["sessions"]) || record["sessions"].length < 1 || record["sessions"].length > MAX_SNAPSHOT_SESSIONS) return fail("incomplete");
   const sessions = record["sessions"] as unknown[];
   const seen = new Set<string>();
   const references: import("./index.ts").HostSessionReference[] = [];
+  let totalBytes = 0;
+  const pending: { item: Record<string, unknown>; size: number; sha256: string; dataBase64: string }[] = [];
   for (const entry of sessions) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return fail("incomplete");
     const session = entry as Record<string, unknown>;
+    if (!hasOnlyKeys(session, ["id", "branchId", "workspaceRoot", "headerCreatedAt", "nativeFormatVersion", "retired", "artifacts"])) return fail("incomplete");
     if (typeof session["id"] !== "string" || !ID_PATTERN.test(session["id"] as string) || seen.has(session["id"] as string)) return fail("incomplete");
     seen.add(session["id"] as string);
     if (typeof session["branchId"] !== "string" || !BRANCH_PATTERN.test(session["branchId"] as string)) return fail("incomplete");
-    if (typeof session["workspaceRoot"] !== "string" || !(session["workspaceRoot"] as string).startsWith("/")) return fail("incomplete");
+    if (typeof session["workspaceRoot"] !== "string" || (session["workspaceRoot"] as string).length < 1 || !isAbsolute(session["workspaceRoot"] as string)) return fail("incomplete");
     if (typeof session["headerCreatedAt"] !== "string" || !Number.isFinite(Date.parse(session["headerCreatedAt"] as string))) return fail("incomplete");
     if (typeof session["nativeFormatVersion"] !== "number" || !Number.isSafeInteger(session["nativeFormatVersion"] as number) ||
         (session["nativeFormatVersion"] as number) < 1 || (session["nativeFormatVersion"] as number) > SNAPSHOT_NATIVE_FORMAT_VERSION) {
@@ -162,6 +172,7 @@ export function validateSnapshotShape(snapshot: unknown): HostSnapshotValidation
     for (const artifact of artifacts) {
       if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) return fail("corrupt");
       const item = artifact as Record<string, unknown>;
+      if (!hasOnlyKeys(item, ["kind", "size", "sha256", "dataBase64"])) return fail("corrupt");
       if (item["kind"] !== "conversation" && item["kind"] !== "metadata") return fail("corrupt");
       if (kinds.has(item["kind"] as string)) return fail("corrupt");
       kinds.add(item["kind"] as string);
@@ -171,18 +182,31 @@ export function validateSnapshotShape(snapshot: unknown): HostSnapshotValidation
       if (typeof item["sha256"] !== "string" || !SHA_PATTERN.test(item["sha256"] as string)) return fail("corrupt");
       if (typeof item["dataBase64"] !== "string" || (item["dataBase64"] as string).length < 1 ||
           (item["dataBase64"] as string).length % 4 !== 0 || !BASE64_PATTERN.test(item["dataBase64"] as string)) return fail("corrupt");
-      let decoded: Uint8Array;
-      try {
-        decoded = Buffer.from(item["dataBase64"] as string, "base64");
-      } catch {
-        return fail("corrupt");
-      }
-      if (decoded.length !== (item["size"] as number)) return fail("corrupt");
-      if (decoded.length > MAX_SNAPSHOT_ARTIFACT_BYTES) return fail("corrupt");
-      if (hashSnapshotBytes(decoded) !== (item["sha256"] as string)) return fail("corrupt");
+      const size = item["size"] as number;
+      const dataBase64 = item["dataBase64"] as string;
+      if (dataBase64.length > 4 * Math.ceil(size / 3) + 4) return fail("corrupt");
+      totalBytes += size;
+      if (totalBytes > MAX_SNAPSHOT_TOTAL_BYTES) return fail("corrupt");
+      pending.push({ item, size, sha256: item["sha256"] as string, dataBase64 });
     }
     if (!hasConversation) return fail("missing-artifact");
     references.push(Object.freeze({ id: session["id"] as string, branchId: session["branchId"] as string }));
   }
+  for (const entry of pending) {
+    let decoded: Uint8Array;
+    try {
+      decoded = Buffer.from(entry.dataBase64, "base64");
+    } catch {
+      return fail("corrupt");
+    }
+    if (decoded.length !== entry.size) return fail("corrupt");
+    if (decoded.length > MAX_SNAPSHOT_ARTIFACT_BYTES) return fail("corrupt");
+    if (hashSnapshotBytes(decoded) !== entry.sha256) return fail("corrupt");
+  }
   return Object.freeze({ status: "valid" as const, sessions: Object.freeze(references), nextAction: snapshotGuidance("valid") });
+}
+
+/** Whether a record carries only the allowed snapshot keys. */
+function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  return Object.keys(value).every(key => allowed.includes(key));
 }

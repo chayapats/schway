@@ -22,7 +22,7 @@ export type {
   HostSessionSnapshot, HostSnapshotArtifact, HostSnapshotArtifactKind, HostSnapshotOptions, HostSnapshotQuarantineReason,
   HostSnapshotRestoreOptions, HostSnapshotRestoreResult, HostSnapshotSession, HostSnapshotValidation,
 } from "./snapshot.ts";
-export { SNAPSHOT_CONTRACT, SNAPSHOT_NATIVE_FORMAT_VERSION, MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_SNAPSHOT_SESSIONS, hashSnapshotBytes, validateSnapshotShape } from "./snapshot.ts";
+export { SNAPSHOT_CONTRACT, SNAPSHOT_NATIVE_FORMAT_VERSION, MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_SNAPSHOT_SESSIONS, MAX_SNAPSHOT_TOTAL_BYTES, hashSnapshotBytes, validateSnapshotShape } from "./snapshot.ts";
 /** Named host-supplied context sent separately from durable conversation messages. */
 export type { ContextSection } from "../context/manager.ts";
 /** Complete discovery controls and explicitly versioned untrusted evidence for host-managed context. */
