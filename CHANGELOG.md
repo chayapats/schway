@@ -4,6 +4,30 @@
 
 ### Added
 
+- Add a versioned packed host artifact with a composed `schway.host.release/v1`
+  contract for downstream pinning. `hostCapabilities()` advertises
+  `releaseContract` alongside the eight sliced contracts and `RELEASE_CONTRACT`
+  exports the same version string. The packed tarball ships `schway/host` with
+  reachable declarations, the `examples/host/review.ts` strict-review embedded
+  consumer, and host docs. An external temporary consumer installs that tarball
+  without private source access and proves strict review, narrow tools,
+  independent sessions, normalized usage, cancellation, retire/delete, snapshot
+  restore, Grok/Codex route isolation, and concurrent renewal sharing one
+  refresh without cross-route reads through public imports only. The supported
+  set is `schway.host.base/v1`, `schway.host.context-policy/v1`,
+  `schway.host.tool-policy/v1`, `schway.host.durable-sessions/v1`,
+  `schway.host.auth-routes/v1`, `schway.host.run-control/v1`,
+  `schway.host.managed-session-data/v1`, `schway.host.session-snapshot/v1`,
+  and `schway.host.release/v1`. This branch stays at `1.0.0-rc.2`; the next
+  `1.0.0-rc.3` publish carries these contracts. Code-tested revision is
+  `b1d00aa4b93ea7d50f4692b0eebb0132083ad4b8` (full suite green on that
+  tree; heads after it are docs-only wording). Integration
+  squash-merges tree-identically (coordinator verifies an empty tree diff
+  against the merge commit). Jit pins either the
+  tested tarball SHA (reproduce with `bun pm pack --destination <dir>` then
+  `shasum -a 256 <tarball>`) or `schway@^1.0.0-rc.3`; actual npm/GitHub
+  publication still requires existing repository authorization (#403).
+
 - Add quiesced host snapshots and validated restore for owned native sessions.
   `HostRuntime.snapshotSessions()` captures a coherent set under one copy
   lease per session id after open handles close and admitted runs settle, so

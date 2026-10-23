@@ -21,6 +21,7 @@
     "bin",
     "src",
     "examples/extensions",
+    "examples/host",
     "examples/packages",
     "docs/live-providers.md",
     "docs/doctor.md",

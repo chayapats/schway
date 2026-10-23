@@ -13,5 +13,5 @@
     "noUnusedParameters": true,
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts", "examples/host/**/*.ts"]
 }
