@@ -4,6 +4,22 @@
 
 ### Added
 
+- Add narrow host retirement and deletion for owned native session data.
+  `HostSession.retire()` and `HostRuntime.retireSession()` stop new work for
+  an exact managed reference with a validated tombstone so later reopen,
+  submit or read cannot silently reintroduce it. `HostRuntime.deleteSession()`
+  removes only owned conversation, history, draft, undo, metadata and lease
+  artifacts for validated opaque references, reusing the private Schway-owned
+  cleanup path without a raw arbitrary-path remover or JSONL rewrite.
+  Traversal, symlink and hardlink escapes, workspace-mismatched and unrelated
+  global CLI sessions are rejected without deletion. Active and unknown
+  writers yield blocked `busy` or `conflict` status with no partial deletion,
+  and late writers cannot recreate deleted artifacts or publish accepted
+  output. Results report sanitized `deleted`, `already-deleted`, `partial` or
+  `blocked` status with retry guidance and never success after partial
+  failure. Jit owns authorization, lineage, generations, backups and external
+  copies; remote provider erasure is not promised (#401).
+
 - Add bounded host run controls with honest terminal outcomes. Finite
   `deadlineMs` and `maxAttempts` join the existing round, concurrency, window
   and input bounds; malformed or unlimited values fail admission and retry
