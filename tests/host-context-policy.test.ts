@@ -45,7 +45,19 @@ async function adversarial(dir: string): Promise<{ options: HostOptions; marker:
     tools: { policy: "exact", hostedLookup: "off", definitions: [] }, limits: { maxTurns: 4, maxConcurrentTools: 2, contextWindow: 1000000, maxInputChars: 4096 } } };
 }
 type RecordedRequest = { summary: boolean; systemPrompt: string; context: ModelRequest["context"]; tools: string[]; hostedTools: unknown[]; toolResults: unknown[] };
-type Consumer = { reference: HostSessionReference; requests: RecordedRequest[]; results: Array<{ outcome: string }>; ordinary: number; summaries: number };
+type Consumer = { reference: HostSessionReference; requests: RecordedRequest[]; results: Array<{ outcome: string; usage?: { complete: boolean; totalMs: number; attempts: Array<{ phase: string; complete: boolean; usage: Record<string, unknown> }> } }>; ordinary: number; summaries: number };
+function assertUsageShape(result: Consumer["results"][number], expectedComplete: boolean): void {
+  expect(result.usage).toBeDefined();
+  expect(result.usage!.complete).toBe(expectedComplete);
+  expect(Number.isSafeInteger(result.usage!.totalMs)).toBe(true);
+  expect(Array.isArray(result.usage!.attempts)).toBe(true);
+  expect(result.usage!.attempts.length).toBeGreaterThan(0);
+  for (const attempt of result.usage!.attempts) {
+    expect(["turn", "compaction"]).toContain(attempt.phase);
+    expect(typeof attempt.complete).toBe("boolean");
+  }
+  expect(JSON.stringify(result.usage)).not.toContain('"inputTokens":0');
+}
 async function consumer(dir: string, options: HostOptions, action: string, reference?: HostSessionReference, seedSummary = false): Promise<Consumer> {
   const root = join(dir, "external-consumer"); await mkdir(join(root, "node_modules"), { recursive: true });
   try { await symlink(resolve(import.meta.dir, ".."), join(root, "node_modules/schway"), "dir"); } catch (e) { if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e; }
@@ -77,7 +89,7 @@ test("public strict consumer keeps malicious workspace/home/parent/config/packag
     await Bun.write(path, JSON.stringify({ packages: ["attack-package"], extensions: ["evil.ts"], operator: "CONFIG_INSTRUCTION_SENTINEL" }));
   }
   const first = await consumer(dir, f.options, "run"); assertStrict(first.requests);
-  expect(first.results[0]!.outcome).toBe("completed"); expect(first.ordinary).toBe(2);
+  expect(first.results[0]!.outcome).toBe("completed"); assertUsageShape(first.results[0]!, true); expect(first.ordinary).toBe(2);
   expect(JSON.stringify(first.requests.at(-1)!.toolResults)).toContain("Unknown tool");
   const reopened = await consumer(dir, f.options, "run", first.reference); assertStrict(reopened.requests); expect(reopened.reference).toEqual(first.reference);
   expect(await Bun.file(f.marker).exists()).toBe(false); expect(hostCapabilities().contextPolicies).toContain("strict"); expect(hostCapabilities().contextContract).toBe("schway.host.context-policy/v1");
@@ -85,14 +97,16 @@ test("public strict consumer keeps malicious workspace/home/parent/config/packag
 
 for (const action of ["pressure", "overflow", "manual"] as const) test(`public ${action} compaction preserves source/operator policy and summary provenance after fresh reopen`, async () => withTempDir(async dir => {
   const f = await adversarial(dir), seeded = await consumer(dir, f.options, "seed"); expect(seeded.results.every(r => r.outcome === "completed")).toBe(true);
+  for (const result of seeded.results) assertUsageShape(result, true);
   const options = structuredClone(f.options); if (action === "pressure") options.limits.contextWindow = 100;
   const run = await consumer(dir, options, action, seeded.reference); assertStrict(run.requests); expect(run.summaries).toBeGreaterThan(0); expect(run.results.every(r => r.outcome === "completed")).toBe(true);
+  for (const result of run.results) assertUsageShape(result, true);
   expect(run.requests.some(r => r.summary)).toBe(true); expect(run.requests.some(r => !r.summary && r.context.some(s => s.name === "summary" && s.trust === "summary"))).toBe(true);
   const replay = await consumer(dir, f.options, "run", run.reference); assertStrict(replay.requests); expect(replay.requests[0]!.context.some(s => s.name === "summary" && s.trust === "summary")).toBe(true); expect(await Bun.file(f.marker).exists()).toBe(false);
 }));
 
 test("public transport retry retains strict source policy and exact selected model without discovery", async () => withTempDir(async dir => {
-  const f = await adversarial(dir), run = await consumer(dir, f.options, "retry"); assertStrict(run.requests); expect(run.ordinary).toBe(2); expect(run.results[0]!.outcome).toBe("completed"); expect(await Bun.file(f.marker).exists()).toBe(false);
+  const f = await adversarial(dir), run = await consumer(dir, f.options, "retry"); assertStrict(run.requests); expect(run.ordinary).toBe(2); expect(run.results[0]!.outcome).toBe("completed"); assertUsageShape(run.results[0]!, true); expect(await Bun.file(f.marker).exists()).toBe(false);
 }));
 
 test("reopening history from a weaker host applies current strict restrictions and treats historical summaries as untrusted", async () => withTempDir(async dir => {
@@ -166,16 +180,30 @@ test("explicit native compaction reports noop/error/cancellation and keeps handl
   const f = await adversarial(dir), host = await createHost(f.options), session = await host.createSession();
   let unexpectedCalls = 0;
   const unusedModel: Model = { provider: "scripted", id: "unused", async *stream() { unexpectedCalls++; throw new Error("No summary boundary"); } };
-  expect(await session.compact(unusedModel)).toEqual({ outcome: "noop" }); expect(unexpectedCalls).toBe(0);
+  const noop = await session.compact(unusedModel);
+  expect(noop.outcome).toBe("noop"); expect(unexpectedCalls).toBe(0);
+  if (noop.outcome !== "noop") throw new Error("Expected noop");
+  expect(noop.usage.complete).toBe(false); expect(Array.isArray(noop.usage.attempts)).toBe(true);
+  expect(Number.isSafeInteger(noop.usage.totalMs)).toBe(true);
   for (let i = 0; i < 12; i++) await session.submit({ text: `retained ${i}` }, createScriptedModel({ text: "retained output" }));
   const historyPath = join(f.options.sessionDirectory, `${session.reference.id}.jsonl`), before = await readFile(historyPath, "utf8");
   for (const content of [[], [{ type: "text", text: " \n\t " }], [{ type: "tool_call", id: "invalid-summary-tool", name: "ignored", arguments: {} }]] satisfies AssistantContent[][]) {
     let calls = 0;
     const emptyModel: Model = { provider: "scripted", id: "empty-summary", async *stream() { calls++; yield { type: "message_complete", message: { type: "assistant", id: "empty-summary", content } }; } };
-    expect(await session.compact(emptyModel)).toEqual({ outcome: "error" }); expect(calls).toBe(1); expect(await readFile(historyPath, "utf8")).toBe(before);
+    const failed = await session.compact(emptyModel);
+    expect(failed.outcome).toBe("error"); expect(calls).toBe(1); expect(await readFile(historyPath, "utf8")).toBe(before);
+    if (failed.outcome !== "error") throw new Error("Expected error");
+    expect(failed.usage.complete).toBe(false); expect(failed.usage.attempts.length).toBeGreaterThan(0);
   }
-  expect(await session.compact(createScriptedModel({ error: "private-summary-diagnostic", status: 400 }))).toEqual({ outcome: "error" });
-  const abort = new AbortController(); abort.abort(); expect(await session.compact(createScriptedModel({ responses: [] }), abort.signal)).toEqual({ outcome: "cancelled" });
+  const diagnostic = await session.compact(createScriptedModel({ error: "private-summary-diagnostic", status: 400 }));
+  expect(diagnostic.outcome).toBe("error");
+  if (diagnostic.outcome !== "error") throw new Error("Expected error");
+  expect(diagnostic.usage.complete).toBe(false);
+  const abort = new AbortController(); abort.abort();
+  const cancelled = await session.compact(createScriptedModel({ responses: [] }), abort.signal);
+  expect(cancelled.outcome).toBe("cancelled");
+  if (cancelled.outcome !== "cancelled") throw new Error("Expected cancelled");
+  expect(cancelled.usage.complete).toBe(false);
   let started!: () => void, release!: () => void; const began = new Promise<void>(r => { started = r; }), gate = new Promise<void>(r => { release = r; });
   const model: Model = { provider: "scripted", id: "gate", async *stream() { started(); await gate; yield { type: "message_complete", message: { type: "assistant", id: "summary-final", content: [{ type: "text", text: "fixture summary" }] } }; } };
   const pending = session.compact(model); await began;

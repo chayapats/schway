@@ -56,7 +56,13 @@ configured state distinct from observed inference, and composes the existing
 route-scoped renewal and generation fencing without changing billing, credential
 sources or plaintext storage. Only the selected adapter loads when the route is
 used; SDK retries stay disabled and no new credential import is introduced.
-Unattended Linux availability remains unverified before S01 evidence.
+Unattended Linux availability remains unverified before S01 evidence. The
+run-control contract adds finite `deadlineMs`/`maxAttempts` admission bounds,
+transient progress distinct from durable results, honest null-preserving usage,
+`completed`/`error`/`cancelled`/`max_turns`/`limit_exceeded` terminal outcomes
+with selected route/session/run references, and cooperative cancel/settle with
+late-callback fencing before ownership release. It composes the existing loop,
+retry and scheduler without a competing durable job scheduler.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing

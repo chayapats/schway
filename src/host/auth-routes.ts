@@ -64,8 +64,8 @@ export interface HostAuthDescription {
 /** Terminal observation for a route-bound run with safe auth detail on failures. */
 export type HostAuthRunResult =
   | { outcome: "completed"; input: import("./index.ts").HostEntryReference; result: import("./index.ts").HostEntryReference;
-      message: import("../conversation/types.ts").AssistantMessage; observedInference: "observed" }
-  | { outcome: "error" | "cancelled" | "max_turns"; input: import("./index.ts").HostEntryReference; auth: HostAuthReadiness };
+      message: import("../conversation/types.ts").AssistantMessage; observedInference: "observed"; usage: import("./index.ts").HostRunUsage }
+  | { outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded"; input: import("./index.ts").HostEntryReference; auth: HostAuthReadiness; usage: import("./index.ts").HostRunUsage };
 
 const MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 

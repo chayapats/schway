@@ -142,10 +142,12 @@ export type HostAuthRunResult = {
     result: HostEntryReference;
     message: AssistantMessage;
     observedInference: "observed";
+    usage: HostRunUsage;
 } | {
-    outcome: "error" | "cancelled" | "max_turns";
+    outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded";
     input: HostEntryReference;
     auth: HostAuthReadiness;
+    usage: HostRunUsage;
 };
 
 // @public
@@ -186,6 +188,8 @@ export interface HostCapabilities {
     // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
+    readonly runContract: "schway.host.run-control/v1";
+    // (undocumented)
     readonly sessionContract: "schway.host.durable-sessions/v1";
     // (undocumented)
     readonly sessionOwnership: "exclusive-local-process-lease";
@@ -199,11 +203,20 @@ export interface HostCapabilities {
 export function hostCapabilities(): HostCapabilities;
 
 // @public
+export interface HostClock {
+    monotonicNow?(): number;
+    now(): number;
+    sleep(ms: number, signal?: AbortSignal): Promise<void>;
+}
+
+// @public
 export type HostCompactionResult = {
     outcome: "completed";
     result: HostEntryReference;
+    usage: HostRunUsage;
 } | {
-    outcome: "noop" | "error" | "cancelled";
+    outcome: "noop" | "error" | "cancelled" | "limit_exceeded";
+    usage: HostRunUsage;
 };
 
 // @public
@@ -249,12 +262,22 @@ export interface HostInput {
 export interface HostLimits {
     // (undocumented)
     contextWindow: number;
+    deadlineMs?: number;
+    maxAttempts?: number;
     // (undocumented)
     maxConcurrentTools: number;
     // (undocumented)
     maxInputChars: number;
     // (undocumented)
     maxTurns: number;
+}
+
+// @public
+export interface HostModelIdentity {
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly provider: string;
 }
 
 // @public
@@ -286,14 +309,85 @@ export interface HostOptions {
 }
 
 // @public
+export type HostProgressEvent = {
+    type: "delta";
+    text: string;
+    transient: true;
+} | {
+    type: "tool_started";
+    toolCallId: string;
+    name: string;
+    transient: true;
+} | {
+    type: "tool_finished";
+    toolCallId: string;
+    name: string;
+    status: "success" | "error" | "cancelled";
+    transient: true;
+} | {
+    type: "retry";
+    attempt: number;
+    maxAttempts: number;
+    delayMs: number;
+    message: string;
+    transient: true;
+} | {
+    type: "compaction";
+    stage: "started" | "finished";
+    reason: string;
+    status?: "completed" | "failed" | "cancelled" | "noop";
+    transient: true;
+} | {
+    type: "usage";
+    phase: "turn" | "compaction";
+    usage: ModelUsage;
+    complete: boolean;
+    transient: true;
+};
+
+// @public
+export interface HostRunAttemptUsage {
+    // (undocumented)
+    readonly complete: boolean;
+    // (undocumented)
+    readonly phase: "turn" | "compaction";
+    // (undocumented)
+    readonly usage: ModelUsage;
+}
+
+// @public
+export interface HostRunError {
+    // (undocumented)
+    readonly contextPolicy: "workspace-discovery" | "strict" | "controlled";
+    // (undocumented)
+    readonly message: string;
+    // (undocumented)
+    readonly model: HostModelIdentity;
+    // (undocumented)
+    readonly toolPolicy: "exact";
+}
+
+// @public
+export interface HostRunOptions {
+    readonly clock?: HostClock;
+    readonly onProgress?: (event: HostProgressEvent) => void;
+    readonly signal?: AbortSignal;
+}
+
+// @public
 export type HostRunResult = {
     outcome: "completed";
     input: HostEntryReference;
     result: HostEntryReference;
     message: AssistantMessage;
+    usage: HostRunUsage;
+    model: HostModelIdentity;
 } | {
-    outcome: "error" | "cancelled" | "max_turns";
+    outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded";
     input: HostEntryReference;
+    usage: HostRunUsage;
+    model: HostModelIdentity;
+    error: HostRunError;
 };
 
 // @public
@@ -308,14 +402,25 @@ export interface HostRuntime {
 }
 
 // @public
+export interface HostRunUsage {
+    // (undocumented)
+    readonly attempts: readonly HostRunAttemptUsage[];
+    // (undocumented)
+    readonly complete: boolean;
+    // (undocumented)
+    readonly totalMs: number;
+}
+
+// @public
 export interface HostSession {
+    cancel(): void;
     close(): Promise<void>;
-    compact(model: Model, signal?: AbortSignal): Promise<HostCompactionResult>;
+    compact(model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostCompactionResult>;
     readResult(reference: HostEntryReference): AssistantMessage;
     // (undocumented)
     readonly reference: HostSessionReference;
-    submit(input: HostInput, model: Model, signal?: AbortSignal): Promise<HostRunResult>;
-    submitWithRoute(input: HostInput, signal?: AbortSignal): Promise<HostAuthRunResult>;
+    submit(input: HostInput, model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostRunResult>;
+    submitWithRoute(input: HostInput, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostAuthRunResult>;
 }
 
 // @public
