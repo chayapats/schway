@@ -4,6 +4,19 @@
 
 ### Added
 
+- Add a versioned packed host artifact with a composed `schway.host.release/v1`
+  contract for downstream pinning. `hostCapabilities()` advertises
+  `releaseContract` alongside the eight sliced contracts and `RELEASE_CONTRACT`
+  exports the same version string. The packed tarball ships `schway/host` with
+  reachable declarations, the `examples/host/review.ts` strict-review embedded
+  consumer, and host docs. An external temporary consumer installs that tarball
+  without private source access and proves strict review, narrow tools,
+  independent sessions, normalized usage, cancellation, retire/delete, snapshot
+  restore, and Grok/Codex route isolation through public imports only.
+  Downstream pins the tested revision plus `schway.host.release/v1`; actual
+  npm/GitHub publication still requires existing repository authorization
+  (#403).
+
 - Add quiesced host snapshots and validated restore for owned native sessions.
   `HostRuntime.snapshotSessions()` captures a coherent set under one copy
   lease per session id after open handles close and admitted runs settle, so

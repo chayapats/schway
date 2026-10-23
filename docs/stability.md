@@ -77,7 +77,17 @@ contract versions plus SHA-256 inventory without credentials or unowned files,
 and restore revalidates, quarantines incomplete or incompatible sets, and
 resumes ancestry through Schway-owned forward-only migration without running
 models or tools. Jit coordinates its own app store and deletion ledger; no
-distributed atomicity is promised.
+distributed atomicity is promised. The release contract composes all eight
+sliced contracts as `schway.host.release/v1` for versioned downstream pinning:
+`hostCapabilities().releaseContract` and the `RELEASE_CONTRACT` export name the
+supported behavior set, the packed artifact ships `schway/host` with reachable
+`dist/types` declarations and the `examples/host` embedded consumer, and an
+external temporary consumer installs that tarball without private source access
+to prove the composed restrictions, lifecycle, route fixtures and compatibility.
+Capability/configuration claims stay distinct from S01 Pi/account support:
+`observedInference` remains `not-checked` until a committed route-bound run,
+and Linux store availability is documented without claiming unattended support.
+Actual npm/GitHub publication still requires existing repository authorization.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing

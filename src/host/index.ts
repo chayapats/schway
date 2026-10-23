@@ -34,9 +34,13 @@ export type {
 /** Canonical primary workspace identity supplied to each selected tool invocation. */
 export type { Workspace } from "../workspace/workspace.ts";
 
+/** Supported composed host-release contract for versioned downstream pinning. */
+export const RELEASE_CONTRACT = "schway.host.release/v1" as const;
+
 /** Static API support only; capability discovery never probes accounts or inference. */
 export interface HostCapabilities {
   readonly contract: "schway.host.base/v1";
+  readonly releaseContract: "schway.host.release/v1";
   readonly features: readonly ["host-supplied-model", "native-result-reference", "explicit-compaction"];
   readonly contextPolicies: readonly ["workspace-discovery", "strict", "controlled"];
   readonly sessionContract: "schway.host.durable-sessions/v1";
@@ -227,6 +231,7 @@ export class HostError extends Error {
 
 const capabilities: HostCapabilities = Object.freeze({
   contract: "schway.host.base/v1",
+  releaseContract: "schway.host.release/v1",
   features: Object.freeze(["host-supplied-model", "native-result-reference", "explicit-compaction"] as const),
   contextPolicies: Object.freeze(["workspace-discovery", "strict", "controlled"] as const),
   sessionContract: "schway.host.durable-sessions/v1",

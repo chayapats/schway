@@ -193,6 +193,8 @@ export interface HostCapabilities {
     // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
+    readonly releaseContract: "schway.host.release/v1";
+    // (undocumented)
     readonly runContract: "schway.host.run-control/v1";
     // (undocumented)
     readonly sessionContract: "schway.host.durable-sessions/v1";
@@ -621,6 +623,9 @@ export interface ModelUsage {
 
 // @public
 export type ProviderMetadata = Record<string, unknown>;
+
+// @public
+export const RELEASE_CONTRACT: "schway.host.release/v1";
 
 // @public
 export const SNAPSHOT_CONTRACT: "schway.host.session-snapshot/v1";
