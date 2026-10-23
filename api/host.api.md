@@ -90,6 +90,9 @@ export function credentialReferenceForRoute(route: HostAuthRoute): HostCredentia
 export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescription;
 
 // @public
+export function hashSnapshotBytes(bytes: Uint8Array): string;
+
+// @public
 export interface HostAuthBinding {
     checkReadiness(): Promise<HostAuthReadiness>;
     createModel(): Promise<Model>;
@@ -195,6 +198,8 @@ export interface HostCapabilities {
     readonly sessionContract: "schway.host.durable-sessions/v1";
     // (undocumented)
     readonly sessionOwnership: "exclusive-local-process-lease";
+    // (undocumented)
+    readonly snapshotContract: "schway.host.session-snapshot/v1";
     // (undocumented)
     readonly toolContract: "schway.host.tool-policy/v1";
     // (undocumented)
@@ -405,7 +410,10 @@ export interface HostRuntime {
     createSession(): Promise<HostSession>;
     deleteSession(reference: HostSessionReference): Promise<HostSessionDeletion>;
     openSession(reference: HostSessionReference): Promise<HostSession>;
+    restoreSessionSnapshot(snapshot: unknown, options?: HostSnapshotRestoreOptions): Promise<HostSnapshotRestoreResult>;
     retireSession(reference: HostSessionReference): Promise<void>;
+    snapshotSessions(references: readonly HostSessionReference[], options?: HostSnapshotOptions): Promise<HostSessionSnapshot>;
+    validateSessionSnapshot(snapshot: unknown): HostSnapshotValidation;
 }
 
 // @public
@@ -463,7 +471,86 @@ export interface HostSessionReference {
 }
 
 // @public
+export interface HostSessionSnapshot {
+    readonly createdAt: string;
+    readonly nativeFormatVersion: number;
+    readonly sessions: readonly HostSnapshotSession[];
+    readonly snapshotContract: typeof SNAPSHOT_CONTRACT;
+}
+
+// @public
+export interface HostSnapshotArtifact {
+    readonly dataBase64: string;
+    readonly kind: HostSnapshotArtifactKind;
+    readonly sha256: string;
+    readonly size: number;
+}
+
+// @public
+export type HostSnapshotArtifactKind = "conversation" | "metadata";
+
+// @public
+export interface HostSnapshotOptions {
+    readonly excludeRetired?: boolean;
+}
+
+// @public
+export type HostSnapshotQuarantineReason = "missing-artifact" | "corrupt" | "unsupported-version" | "incomplete" | "conflict" | "workspace-mismatch";
+
+// @public
+export interface HostSnapshotRestoreOptions {
+    readonly excludeRetired?: boolean;
+}
+
+// @public
+export type HostSnapshotRestoreResult = {
+    readonly status: "restored";
+    readonly sessions: readonly HostSessionReference[];
+    readonly nextAction: string;
+} | {
+    readonly status: "quarantined";
+    readonly reason: HostSnapshotQuarantineReason;
+    readonly nextAction: string;
+} | {
+    readonly status: "partial";
+    readonly restored: readonly HostSessionReference[];
+    readonly remaining: readonly HostSessionReference[];
+    readonly nextAction: string;
+};
+
+// @public
+export interface HostSnapshotSession {
+    readonly artifacts: readonly HostSnapshotArtifact[];
+    readonly branchId: string;
+    readonly headerCreatedAt: string;
+    readonly id: string;
+    readonly nativeFormatVersion: number;
+    readonly retired: boolean;
+    readonly workspaceRoot: string;
+}
+
+// @public
+export type HostSnapshotValidation = {
+    readonly status: "valid";
+    readonly sessions: readonly HostSessionReference[];
+    readonly nextAction: string;
+} | {
+    readonly status: "quarantined";
+    readonly reason: HostSnapshotQuarantineReason;
+    readonly nextAction: string;
+};
+
+// @public
 export type JsonSchema = Record<string, unknown>;
+
+// @public
+export const MAX_SNAPSHOT_ARTIFACT_BYTES: number;
+
+// @public
+export const MAX_SNAPSHOT_SESSIONS = 64;
+
+// @public
+export const MAX_SNAPSHOT_TOTAL_BYTES: number;
 
 // @public
 export interface Model {
@@ -534,6 +621,12 @@ export interface ModelUsage {
 
 // @public
 export type ProviderMetadata = Record<string, unknown>;
+
+// @public
+export const SNAPSHOT_CONTRACT: "schway.host.session-snapshot/v1";
+
+// @public
+export const SNAPSHOT_NATIVE_FORMAT_VERSION = 4;
 
 // @public
 export interface TextContent {
@@ -649,6 +742,9 @@ export interface UserMessage {
     // (undocumented)
     type: "user";
 }
+
+// @public
+export function validateSnapshotShape(snapshot: unknown): HostSnapshotValidation;
 
 // @public
 export interface Workspace {

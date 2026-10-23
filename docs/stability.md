@@ -69,7 +69,15 @@ deletion reuses Schway-owned conversation, history, draft, undo, metadata and
 lease cleanup with honest `deleted`, `already-deleted`, `partial` and `blocked`
 status, and busy, unknown, symlink, traversal and unrelated-store writers
 delete nothing. It promises no remote provider erasure, no JSONL rewrite and
-no general filesystem removal.
+no general filesystem removal. The
+session-snapshot contract adds quiesced export and validated restore for
+closed managed sessions: copy leases make one captured set coherent with
+`busy`/`conflict` fencing, manifests carry stable refs, ancestry, native and
+contract versions plus SHA-256 inventory without credentials or unowned files,
+and restore revalidates, quarantines incomplete or incompatible sets, and
+resumes ancestry through Schway-owned forward-only migration without running
+models or tools. Jit coordinates its own app store and deletion ledger; no
+distributed atomicity is promised.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing

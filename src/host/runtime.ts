@@ -1,4 +1,8 @@
 import { mkdir, realpath, stat } from "node:fs/promises";
+import { unlink } from "node:fs/promises";
+import { closeSync, constants, fsyncSync, openSync } from "node:fs";
+import { open as openFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { isAbsolute } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
 import { MAX_TRANSIENT_ATTEMPTS } from "../agent/retry.ts";
@@ -16,6 +20,10 @@ import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, credential
   type HostAuthReadiness, type HostAuthRunResult, type HostAuthSelection } from "./auth-routes.ts";
 import { acquireSessionLease, type SessionLease } from "./lease.ts";
 import { deleteManagedSession, isManagedRetired, isManagedRetiredSync, markManagedRetired, readManagedHeader } from "./managed-data.ts";
+import { SESSION_FORMAT_VERSION } from "../session/jsonl.ts";
+import { MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_SNAPSHOT_SESSIONS, MAX_SNAPSHOT_TOTAL_BYTES, SNAPSHOT_CONTRACT, SNAPSHOT_NATIVE_FORMAT_VERSION, hashSnapshotBytes, snapshotGuidance, validateSnapshotShape,
+  type HostSessionSnapshot, type HostSnapshotArtifact, type HostSnapshotOptions, type HostSnapshotQuarantineReason, type HostSnapshotRestoreOptions,
+  type HostSnapshotRestoreResult, type HostSnapshotSession, type HostSnapshotValidation } from "./snapshot.ts";
 import type { Model, ModelRequest } from "../model/model.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 
@@ -680,6 +688,425 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       } catch { /* In-memory retirement stays best-effort when the store moved. */ }
       return result;
     },
+    async snapshotSessions(references: readonly HostSessionReference[], options?: HostSnapshotOptions): Promise<HostSessionSnapshot> {
+      requireOpen();
+      if (SESSION_FORMAT_VERSION !== SNAPSHOT_NATIVE_FORMAT_VERSION) throw new HostError("storage");
+      const excludeRetired = snapshotOption(options);
+      if (!Array.isArray(references) || references.length < 1 || references.length > MAX_SNAPSHOT_SESSIONS) throw new HostError("invalid-input");
+      for (const reference of references) validateReference(reference);
+      const ids = references.map(reference => reference.id);
+      if (new Set(ids).size !== ids.length) throw new HostError("invalid-input");
+      for (const id of ids) {
+        if (ownedSessions.has(`${directory}/${id}`)) throw new HostError("busy");
+      }
+      opening++;
+      const held = new Map<string, SessionLease>();
+      const releaseAll = (): void => {
+        for (const lease of held.values()) {
+          try { lease.release(); } catch { /* Preserve the snapshot verdict. */ }
+        }
+        held.clear();
+      };
+      try {
+        for (const id of [...ids].sort()) {
+          try {
+            held.set(id, acquireSessionLease(directory, id));
+          } catch (error) {
+            if (error instanceof HostError && error.code === "busy") throw new HostError("busy");
+            throw new HostError("storage");
+          }
+        }
+        const captured: HostSnapshotSession[] = [];
+        let totalCaptured = 0;
+        for (const reference of references) {
+          const id = reference.id;
+          let header: { workspaceRoot: string; extraRoots: readonly string[] };
+          try {
+            header = await readManagedHeader(directory, id);
+          } catch (error) {
+            if (error instanceof HostError) throw error;
+            if ((error as { code?: string }).code === "missing") throw new HostError("storage");
+            throw new HostError("conflict");
+          }
+          if (header.workspaceRoot !== root || header.extraRoots.length !== 0) throw new HostError("workspace-mismatch");
+          let retired = false;
+          try {
+            retired = await isManagedRetired(directory, id);
+          } catch {
+            throw new HostError("storage");
+          }
+          if (retired && excludeRetired) {
+            try { held.get(id)?.release(); } catch { /* Preserve the snapshot verdict. */ }
+            held.delete(id);
+            continue;
+          }
+          const conversationPath = join(directory, `${id}.jsonl`);
+          let conversation: Uint8Array;
+          try {
+            conversation = await readOwnedSnapshotBytes(conversationPath);
+          } catch (error) {
+            if (error instanceof HostError) throw error;
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new HostError("storage");
+            throw new HostError("storage");
+          }
+          if (conversation.length < 1 || conversation.length > MAX_SNAPSHOT_ARTIFACT_BYTES) throw new HostError("storage");
+          totalCaptured += conversation.length;
+          if (totalCaptured > MAX_SNAPSHOT_TOTAL_BYTES) throw new HostError("storage");
+          let firstLine: string;
+          let parsedHeader: { version?: unknown; createdAt?: unknown };
+          try {
+            firstLine = Buffer.from(conversation).toString("utf8").split("\n", 1)[0] ?? "";
+            parsedHeader = JSON.parse(firstLine) as { version?: unknown; createdAt?: unknown };
+          } catch {
+            throw new HostError("conflict");
+          }
+          if (typeof parsedHeader.version !== "number" || !Number.isSafeInteger(parsedHeader.version) ||
+              parsedHeader.version < 1 || parsedHeader.version > SESSION_FORMAT_VERSION ||
+              typeof parsedHeader.createdAt !== "string" || !Number.isFinite(Date.parse(parsedHeader.createdAt))) {
+            throw new HostError("conflict");
+          }
+          const metadataPath = `${conversationPath}.meta`;
+          let metadata: Uint8Array | undefined;
+          try {
+            const candidate = await readOwnedSnapshotBytes(metadataPath);
+            if (candidate.length > MAX_SNAPSHOT_ARTIFACT_BYTES) throw new HostError("storage");
+            if (candidate.length > 0) {
+              metadata = candidate;
+              totalCaptured += metadata.length;
+              if (totalCaptured > MAX_SNAPSHOT_TOTAL_BYTES) throw new HostError("storage");
+            }
+          } catch (error) {
+            if (error instanceof HostError) throw error;
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
+          }
+          const artifacts: HostSnapshotArtifact[] = [];
+          artifacts.push(Object.freeze({
+            kind: "conversation" as const,
+            size: conversation.length,
+            sha256: hashSnapshotBytes(conversation),
+            dataBase64: Buffer.from(conversation).toString("base64"),
+          }));
+          if (metadata) {
+            artifacts.push(Object.freeze({
+              kind: "metadata" as const,
+              size: metadata.length,
+              sha256: hashSnapshotBytes(metadata),
+              dataBase64: Buffer.from(metadata).toString("base64"),
+            }));
+          }
+          // Re-verify the lease, retirement and bytes before reporting a coherent set.
+          try {
+            held.get(id)?.assertOwned();
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new HostError("storage");
+            throw new HostError("conflict");
+          }
+          let retiredNow = false;
+          try {
+            retiredNow = await isManagedRetired(directory, id);
+          } catch {
+            throw new HostError("storage");
+          }
+          if (retiredNow !== retired) throw new HostError("conflict");
+          let reread: Uint8Array;
+          try {
+            reread = await readOwnedSnapshotBytes(conversationPath);
+          } catch (error) {
+            if (error instanceof HostError) throw error;
+            throw new HostError("storage");
+          }
+          if (reread.length !== conversation.length || !Buffer.from(reread).equals(Buffer.from(conversation))) throw new HostError("conflict");
+          let rereadMeta: Uint8Array | undefined;
+          try {
+            const candidate = await readOwnedSnapshotBytes(metadataPath);
+            if (candidate.length > 0) rereadMeta = candidate;
+          } catch (error) {
+            if (error instanceof HostError) throw error;
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
+          }
+          const metaMatches = (metadata === undefined && rereadMeta === undefined) ||
+            (metadata !== undefined && rereadMeta !== undefined &&
+              rereadMeta.length === metadata.length && Buffer.from(rereadMeta).equals(Buffer.from(metadata)));
+          if (!metaMatches) throw new HostError("conflict");
+          captured.push(Object.freeze({
+            id,
+            branchId: reference.branchId,
+            workspaceRoot: header.workspaceRoot,
+            headerCreatedAt: parsedHeader.createdAt as string,
+            nativeFormatVersion: parsedHeader.version as number,
+            retired,
+            artifacts: Object.freeze(artifacts),
+          }));
+        }
+        return Object.freeze({
+          snapshotContract: SNAPSHOT_CONTRACT,
+          nativeFormatVersion: SESSION_FORMAT_VERSION,
+          createdAt: new Date().toISOString(),
+          sessions: Object.freeze(captured),
+        });
+      } finally {
+        releaseAll();
+        opening--;
+      }
+    },
+    validateSessionSnapshot(snapshot: unknown): HostSnapshotValidation {
+      requireOpen();
+      const verdict = validateSnapshotShape(snapshot);
+      if (verdict.status !== "valid") return verdict;
+      const record = snapshot as { sessions: readonly { workspaceRoot: string }[] };
+      for (const session of record.sessions) {
+        if (session.workspaceRoot !== root) {
+          return Object.freeze({ status: "quarantined" as const, reason: "workspace-mismatch" as const, nextAction: snapshotGuidance("quarantined", "workspace-mismatch") });
+        }
+      }
+      return verdict;
+    },
+    async restoreSessionSnapshot(snapshot: unknown, options?: HostSnapshotRestoreOptions): Promise<HostSnapshotRestoreResult> {
+      requireOpen();
+      if (SESSION_FORMAT_VERSION !== SNAPSHOT_NATIVE_FORMAT_VERSION) throw new HostError("storage");
+      const excludeRetired = snapshotOption(options);
+      let isolated: unknown;
+      try {
+        isolated = structuredClone(snapshot);
+      } catch {
+        return Object.freeze({ status: "quarantined" as const, reason: "incomplete" as const, nextAction: snapshotGuidance("quarantined", "incomplete") });
+      }
+      const verdict = validateSnapshotShape(isolated);
+      if (verdict.status !== "valid") {
+        return Object.freeze({ status: "quarantined" as const, reason: verdict.reason, nextAction: verdict.nextAction });
+      }
+      const source = isolated as HostSessionSnapshot;
+      for (const session of source.sessions) {
+        if (session.workspaceRoot !== root) {
+          return Object.freeze({ status: "quarantined" as const, reason: "workspace-mismatch" as const, nextAction: snapshotGuidance("quarantined", "workspace-mismatch") });
+        }
+      }
+      const wanted = source.sessions.filter(session => !(excludeRetired && session.retired));
+      if (wanted.length === 0) {
+        return Object.freeze({ status: "restored" as const, sessions: Object.freeze([]), nextAction: snapshotGuidance("restored") });
+      }
+      for (const session of wanted) {
+        if (ownedSessions.has(`${directory}/${session.id}`)) {
+          return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "busy") });
+        }
+      }
+      opening++;
+      const held = new Map<string, SessionLease>();
+      const releaseAll = (): void => {
+        for (const lease of held.values()) {
+          try { lease.release(); } catch { /* Preserve the restore verdict. */ }
+        }
+        held.clear();
+      };
+      try {
+        try {
+          if (!(await stat(directory)).isDirectory()) throw new HostError("storage");
+        } catch (error) {
+          if (error instanceof HostError) throw error;
+          throw new HostError("storage");
+        }
+        for (const id of wanted.map(session => session.id).sort()) {
+          try {
+            held.set(id, acquireSessionLease(directory, id));
+          } catch {
+            const acquired = [...held.values()];
+            for (const lease of acquired) {
+              try { lease.release(); } catch { /* Preserve the restore verdict. */ }
+            }
+            held.clear();
+            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "busy") });
+          }
+        }
+        const decoded = new Map<string, { conversation: Uint8Array; metadata?: Uint8Array }>();
+        for (const session of wanted) {
+          const conversationEntry = session.artifacts.find(artifact => artifact.kind === "conversation");
+          if (!conversationEntry) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "incomplete" as const, nextAction: snapshotGuidance("quarantined", "incomplete") });
+          }
+          const metadataEntry = session.artifacts.find(artifact => artifact.kind === "metadata");
+          let conversation: Uint8Array;
+          try {
+            conversation = Buffer.from(conversationEntry.dataBase64, "base64");
+          } catch {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "corrupt" as const, nextAction: snapshotGuidance("quarantined", "corrupt") });
+          }
+          if (conversation.length !== conversationEntry.size || conversation.length < 1 ||
+              conversation.length > MAX_SNAPSHOT_ARTIFACT_BYTES ||
+              hashSnapshotBytes(conversation) !== conversationEntry.sha256) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "corrupt" as const, nextAction: snapshotGuidance("quarantined", "corrupt") });
+          }
+          let metadata: Uint8Array | undefined;
+          if (metadataEntry) {
+            try {
+              metadata = Buffer.from(metadataEntry.dataBase64, "base64");
+            } catch {
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "corrupt" as const, nextAction: snapshotGuidance("quarantined", "corrupt") });
+            }
+            if (metadata.length !== metadataEntry.size || metadata.length < 1 ||
+                metadata.length > MAX_SNAPSHOT_ARTIFACT_BYTES ||
+                hashSnapshotBytes(metadata) !== metadataEntry.sha256) {
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "corrupt" as const, nextAction: snapshotGuidance("quarantined", "corrupt") });
+            }
+          }
+          decoded.set(session.id, { conversation, ...(metadata ? { metadata } : {}) });
+        }
+        const restored: HostSnapshotSession[] = [];
+        const needsWrite = new Map<string, boolean>();
+        for (const session of wanted) {
+          const expected = decoded.get(session.id);
+          if (!expected) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "incomplete" as const, nextAction: snapshotGuidance("quarantined", "incomplete") });
+          }
+          const conversationPath = join(directory, `${session.id}.jsonl`);
+          const metadataPath = `${conversationPath}.meta`;
+          let existing: Uint8Array | undefined;
+          try {
+            existing = await readOwnedSnapshotBytes(conversationPath);
+          } catch (error) {
+            if (error instanceof HostError) {
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+            }
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
+          }
+          let existingMeta: Uint8Array | undefined;
+          try {
+            const candidate = await readOwnedSnapshotBytes(metadataPath);
+            if (candidate.length > 0) existingMeta = candidate;
+          } catch (error) {
+            if (error instanceof HostError) {
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+            }
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
+          }
+          let retiredExists = false;
+          try {
+            retiredExists = await isManagedRetired(directory, session.id);
+          } catch {
+            throw new HostError("storage");
+          }
+          if (existing !== undefined) {
+            const conversationMatches = existing.length === expected.conversation.length &&
+              Buffer.from(existing).equals(Buffer.from(expected.conversation));
+            const metaMatches = (expected.metadata === undefined && existingMeta === undefined) ||
+              (expected.metadata !== undefined && existingMeta !== undefined &&
+                existingMeta.length === expected.metadata.length &&
+                Buffer.from(existingMeta).equals(Buffer.from(expected.metadata)));
+            if (conversationMatches && metaMatches) {
+              if (retiredExists && !session.retired) {
+                releaseAll();
+                return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+              }
+              needsWrite.set(session.id, false);
+              restored.push(session);
+              continue;
+            }
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+          }
+          if (existingMeta !== undefined && expected.metadata === undefined) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+          }
+          if (retiredExists && !session.retired) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "conflict" as const, nextAction: snapshotGuidance("quarantined", "conflict", "target-exists") });
+          }
+          needsWrite.set(session.id, true);
+        }
+        const pending = wanted.filter(session => needsWrite.get(session.id) !== false);
+        for (const session of pending) {
+          const bytes = decoded.get(session.id);
+          if (!bytes) {
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason: "incomplete" as const, nextAction: snapshotGuidance("quarantined", "incomplete") });
+          }
+          try {
+            await writeSnapshotFile(join(directory, `${session.id}.jsonl`), bytes.conversation);
+            if (bytes.metadata) await writeSnapshotFile(join(directory, `${session.id}.jsonl.meta`), bytes.metadata);
+            const written = await readOwnedSnapshotBytes(join(directory, `${session.id}.jsonl`));
+            if (written.length !== bytes.conversation.length ||
+                !Buffer.from(written).equals(Buffer.from(bytes.conversation)) ||
+                hashSnapshotBytes(written) !== hashSnapshotBytes(bytes.conversation)) {
+              throw new HostError("storage");
+            }
+            if (bytes.metadata) {
+              const writtenMeta = await readOwnedSnapshotBytes(join(directory, `${session.id}.jsonl.meta`));
+              if (writtenMeta.length !== bytes.metadata.length ||
+                  !Buffer.from(writtenMeta).equals(Buffer.from(bytes.metadata))) {
+                throw new HostError("storage");
+              }
+            }
+          } catch (error) {
+            if (error instanceof HostError && error.code !== "storage") throw error;
+            const done = restored.map(entry => Object.freeze({ id: entry.id, branchId: entry.branchId }));
+            const remaining = wanted.filter(entry => !restored.some(doneEntry => doneEntry.id === entry.id))
+              .map(entry => Object.freeze({ id: entry.id, branchId: entry.branchId }));
+            // Keep coherent writes; partial never auto-runs model calls or tools.
+            releaseAll();
+            return Object.freeze({ status: "partial" as const, restored: Object.freeze(done), remaining: Object.freeze(remaining), nextAction: snapshotGuidance("partial") });
+          }
+          restored.push(session);
+        }
+        for (const session of restored) {
+          try {
+            const lease = held.get(session.id);
+            await loadJsonlSession({ directory, id: session.id, branchId: session.branchId,
+              managed: lease ? { assertOwnership: () => lease.assertOwned() } : undefined,
+              validateIdentity: (workspaceRoot, extraRoots) => {
+                if (workspaceRoot !== root || extraRoots.length) throw new HostError("workspace-mismatch");
+              } });
+          } catch (error) {
+            if (error instanceof HostError && error.code === "workspace-mismatch") {
+              for (const entry of restored) {
+                try { await unlink(join(directory, `${entry.id}.jsonl`)); } catch { /* Preserve quarantine. */ }
+                try { await unlink(join(directory, `${entry.id}.jsonl.meta`)); } catch { /* Preserve quarantine. */ }
+              }
+              releaseAll();
+              return Object.freeze({ status: "quarantined" as const, reason: "workspace-mismatch" as const, nextAction: snapshotGuidance("quarantined", "workspace-mismatch") });
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            const reason: HostSnapshotQuarantineReason = /Unsupported session format version|Unsupported or invalid session format transition|requires a valid branch operation/i.test(message)
+              ? "unsupported-version" : "corrupt";
+            for (const entry of restored) {
+              try { await unlink(join(directory, `${entry.id}.jsonl`)); } catch { /* Preserve quarantine. */ }
+              try { await unlink(join(directory, `${entry.id}.jsonl.meta`)); } catch { /* Preserve quarantine. */ }
+            }
+            releaseAll();
+            return Object.freeze({ status: "quarantined" as const, reason, nextAction: snapshotGuidance("quarantined", reason) });
+          }
+        }
+        for (const session of restored) {
+          if (!session.retired) continue;
+          try {
+            await markManagedRetired(directory, session.id, root);
+            rememberRetired(`${directory}/${session.id}`);
+          } catch {
+            try { await unlink(join(directory, `${session.id}.jsonl`)); } catch { /* Preserve partial inventory. */ }
+            try { await unlink(join(directory, `${session.id}.jsonl.meta`)); } catch { /* Preserve partial inventory. */ }
+            const done = restored.filter(entry => entry.id !== session.id).map(entry => Object.freeze({ id: entry.id, branchId: entry.branchId }));
+            const remaining = wanted.filter(entry => entry.id === session.id || !done.some(entry2 => entry2.id === entry.id))
+              .map(entry => Object.freeze({ id: entry.id, branchId: entry.branchId }));
+            releaseAll();
+            return Object.freeze({ status: "partial" as const, restored: Object.freeze(done), remaining: Object.freeze(remaining), nextAction: snapshotGuidance("partial") });
+          }
+        }
+        const references = wanted.filter(session => restored.some(entry => entry.id === session.id))
+          .map(session => Object.freeze({ id: session.id, branchId: session.branchId }));
+        releaseAll();
+        return Object.freeze({ status: "restored" as const, sessions: Object.freeze(references), nextAction: snapshotGuidance("restored") });
+      } finally {
+        releaseAll();
+        opening--;
+      }
+    },
     async close() {
       if (closing) return closing;
       if (closed) return;
@@ -725,5 +1152,56 @@ function terminalMessage(reason: "error" | "cancelled" | "max_turns" | "limit_ex
     case "max_turns": return "Run reached its model-round bound before completion.";
     case "limit_exceeded": return "Run reached its wall-clock bound before durable completion.";
     default: return "Provider request failed.";
+  }
+}
+
+/** Validate snapshot/restore options carrying only the retired filter. */
+function snapshotOption(options: HostSnapshotOptions | HostSnapshotRestoreOptions | undefined): boolean {
+  if (options === undefined) return false;
+  if (!options || typeof options !== "object" || Array.isArray(options) ||
+      Object.keys(options).some(key => key !== "excludeRetired")) throw new HostError("invalid-input");
+  const excludeRetired = (options as { excludeRetired?: unknown }).excludeRetired ?? false;
+  if (typeof excludeRetired !== "boolean") throw new HostError("invalid-input");
+  return excludeRetired;
+}
+
+/** Read one owned snapshot artifact through a pinned descriptor that never follows a symlink. */
+async function readOwnedSnapshotBytes(path: string): Promise<Uint8Array> {
+  let file;
+  try {
+    file = await openFile(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") throw error;
+    if (code === "ELOOP") throw new HostError("conflict");
+    throw new HostError("storage");
+  }
+  try {
+    const info = await file.stat();
+    if (!info.isFile() || info.nlink !== 1) throw new HostError("conflict");
+    return await file.readFile();
+  } catch (error) {
+    if (error instanceof HostError) throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+    throw new HostError("storage");
+  } finally {
+    await file.close();
+  }
+}
+
+/** Write one restored artifact exclusively so a second restore cannot mix generations. */
+async function writeSnapshotFile(path: string, bytes: Uint8Array): Promise<void> {
+  const file = await openFile(path, "wx", 0o600);
+  try {
+    await file.writeFile(bytes);
+    await file.sync();
+  } finally {
+    await file.close();
+  }
+  const dir = openSync(dirname(path), "r");
+  try {
+    fsyncSync(dir);
+  } finally {
+    closeSync(dir);
   }
 }
