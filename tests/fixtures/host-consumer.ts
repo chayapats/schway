@@ -8,7 +8,7 @@ if (input.discovery) {
   const readNote: ToolDefinition = { name: "read_note", description: "Read the host fixture note", execution: "parallel", effect: "read-only",
     inputSchema: { type: "object", additionalProperties: false },
     async execute() { executions++; return { content: "fixture-note" }; } };
-  const host = await createHost({ ...input.options, tools: { policy: "include-skill-activation", definitions: [readNote] } });
+  const host = await createHost({ ...input.options, tools: { policy: "exact", hostedLookup: "off", definitions: [readNote] } });
   const session = input.reference ? await host.openSession(input.reference) : await host.createSession();
   const previous = input.previous ? session.readResult(input.previous) : undefined;
   const model: Model = {

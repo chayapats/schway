@@ -44,6 +44,13 @@ leases fail closed for uncertain owners; native reopen owns interrupted-call
 settlement without replaying tool effects. The ownership boundary and recovery
 conditions are documented in [host contracts](host.md). It introduces no JSONL
 format change or distributed transaction with an embedding application's store.
+The exact tool-policy contract advertises an `exact` registry with hosted lookup
+disabled-only; an empty registry advertises zero tools and no implicit built-in,
+skill activation or hosted search appears via defaults, hooks or recovery. An
+explicitly admitted `activate_skill` rebinds per session to the current context
+policy. Read-only approval applies after hooks to effective arguments and is
+distinct from isolation; relative tool paths retain primary-workspace-root
+semantics.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing

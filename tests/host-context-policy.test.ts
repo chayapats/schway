@@ -42,7 +42,7 @@ async function adversarial(dir: string): Promise<{ options: HostOptions; marker:
   return { marker, options: { workspaceRoot: work, homeDirectory: home, sessionDirectory: join(dir, "sessions"),
     context: { policy: "strict", systemPrompt: operator, sections: [{ name: "operator-rules", content: "Host-owned responsibility" }],
       sources: [{ id: "repo/AGENTS.md", revision: "r1-g1", content: await readFile(join(work, "AGENTS.md"), "utf8") }] },
-    tools: { policy: "include-skill-activation", definitions: [] }, limits: { maxTurns: 4, maxConcurrentTools: 2, contextWindow: 1000000, maxInputChars: 4096 } } };
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] }, limits: { maxTurns: 4, maxConcurrentTools: 2, contextWindow: 1000000, maxInputChars: 4096 } } };
 }
 type RecordedRequest = { summary: boolean; systemPrompt: string; context: ModelRequest["context"]; tools: string[]; hostedTools: unknown[]; toolResults: unknown[] };
 type Consumer = { reference: HostSessionReference; requests: RecordedRequest[]; results: Array<{ outcome: string }>; ordinary: number; summaries: number };
@@ -117,6 +117,9 @@ test("controlled policy independently selects workspace/home AGENTS and metadata
 
 test("package-off activation cannot rediscover configured package skills; deliberately enabled direct skill activation still works", async () => withTempDir(async dir => {
   const f = await adversarial(dir), options = structuredClone(f.options); options.context.policy = "controlled"; options.context.discovery = { ...disabled, skills: true, skillActivation: true };
+  options.tools = { policy: "exact", hostedLookup: "off", definitions: [{ name: "activate_skill", description: "Explicitly admitted activation",
+    execution: "exclusive" as const, effect: "read-only" as const, inputSchema: { type: "object" },
+    async execute() { throw new Error("host rebinds activation"); } }] };
   const host = await createHost(options), session = await host.createSession();
   let calls = 0;
   const result = await session.submit({ text: "activate selected sources only" }, createScriptedModel({ responses: [

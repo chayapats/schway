@@ -2,7 +2,7 @@
 
 `schway/host` is the semver-governed application-host entry. It composes Schway's existing loop, context preparation, tool scheduler, retries and native JSONL persistence. It does not import the CLI or construct a provider. Discovery and scripted tests need no account or paid request.
 
-This implements `schway.host.base/v1` from [ENG01 #395](https://github.com/chayapats/schway/issues/395), `schway.host.context-policy/v1` from [ENG02 #396](https://github.com/chayapats/schway/issues/396), and `schway.host.durable-sessions/v1` from [ENG04 #397](https://github.com/chayapats/schway/issues/397), slices of [S02 #393](https://github.com/chayapats/schway/issues/393). Strict context discovery and exclusive durable sessions are supported; exact registry enforcement, provider routes and the production bridge remain later capabilities. Unsupported policies/fields fail before input acceptance or inference. CLI context defaults are unchanged.
+This implements `schway.host.base/v1` from [ENG01 #395](https://github.com/chayapats/schway/issues/395), `schway.host.context-policy/v1` from [ENG02 #396](https://github.com/chayapats/schway/issues/396), `schway.host.durable-sessions/v1` from [ENG04 #397](https://github.com/chayapats/schway/issues/397), and `schway.host.tool-policy/v1` from [ENG03 #399](https://github.com/chayapats/schway/issues/399), slices of [S02 #393](https://github.com/chayapats/schway/issues/393). Strict context discovery, exclusive durable sessions and exact tool registries are supported; provider routes and the production bridge remain later capabilities. Unsupported policies/fields fail before input acceptance or inference. CLI context defaults are unchanged.
 
 ```ts
 import { createHost, hostCapabilities, type Model } from "schway/host";
@@ -17,7 +17,7 @@ const host = await createHost({
     systemPrompt: "You are the host application's analyst.",
     sections: [{ name: "owner-context", content: "Explicit trusted host context" }],
   },
-  tools: { policy: "include-skill-activation", definitions: [] },
+  tools: { policy: "exact", hostedLookup: "off", definitions: [] },
   limits: { maxTurns: 3, maxConcurrentTools: 2, contextWindow: 32768, maxInputChars: 4096 },
 });
 const model: Model = {
@@ -44,7 +44,7 @@ Every path is explicit and absolute. Workspace and home must already be readable
 
 Opening a managed reference validates its saved workspace and attached roots before native torn-tail repair, branch selection or interrupted-call settlement can write. A mismatched identity is rejected with the original artifact bytes preserved. A valid owner can still reopen through ordinary native recovery.
 
-`submit` accepts nonempty text up to `maxInputChars`, appends and flushes a native user entry before publishing acceptance, then calls the supplied provider-independent `Model` through the native loop. Tool definitions are cloned/validated at startup and use the existing scheduler. Native `activate_skill` is added only when current context policy permits activation. No shell/edit/write tools, extensions or provider adapters are registered by host startup. Provider-hosted lookup is off; the complete exact-registry capability remains ENG03.
+`submit` accepts nonempty text up to `maxInputChars`, appends and flushes a native user entry before publishing acceptance, then calls the supplied provider-independent `Model` through the native loop. Tool definitions are cloned/validated at startup and use the existing scheduler. The registry is exact: an empty registry advertises and executes zero function tools, and a narrow registry exposes only admitted definitions. No shell/edit/write/fetch, `activate_skill` or provider adapter is added implicitly by loop startup, extensions, context preparation, retry, overflow recovery or reopened sessions. An explicitly admitted `activate_skill` is rebound per session to the current context manager so its policy still applies; unadmitted calls fail as `Unknown tool` without execution. Provider-hosted lookup is forced off (`hostedLookup: "off"`); request builders and adapters never attach search after hooks or during compaction/preflight/replay when off. Read-only approval applies after hooks to effective arguments but is not isolation; the trusted host owns resource-scoped connector implementations. Relative tool paths retain Schway canonical primary-workspace-root semantics; no independent Jit path model or alternative executor is introduced.
 
 `maxTurns` is an integer 1–100, `maxConcurrentTools` 1–32, `contextWindow` 1–2,000,000 and `maxInputChars` 1–1,000,000. These are validation ceilings, not capacity/performance measurements or hard process deadlines. Native retry policy remains authoritative. A supplied abort signal is cooperative; hard bounds/cancel/disposal contracts are ENG06. The base `close` methods reject `HostError` code `busy` during accepted work or session opening. Await settlement before closing. Close is idempotent; a closed handle cannot submit or read again.
 
@@ -96,6 +96,10 @@ Workspace/home AGENTS are independent; `skills` governs direct and package-backe
 Ordinary calls, transport retries, pressure/overflow recovery and explicit `session.compact(model, signal?)` use the same captured permissions and source separation. Managed summary calls receive current trusted operator instructions plus native summary guidance, and policy-filtered context; default CLI summary behavior is unchanged. `compact` returns completed with an exact native summary reference, noop when no older turn boundary exists, or error/cancelled. It retains the session handle's busy lease while summarization is pending. It neither accepts a user turn nor claims application success; `readResult` continues to read assistant references only.
 
 Reopen constructs context from the current host options, including stricter options than a prior writer. It never restores a weaker historical discovery policy. Durable history/summaries remain data and do not trigger old tools or restore instructions. Current source revisions are explicit supplied evidence; this does not implement retirement/deletion/forget or cross-store fences. Native formats are unchanged. See ADR0010 and the public adversarial consumer tests.
+
+## Tool policy and hosted lookup
+
+`tools.policy` is `"exact"` with `hostedLookup: "off"`. Any other policy, a missing `hostedLookup`, or malformed/duplicate/unsupported definitions fail at `createHost` before any session or model call. Unknown tools called by a model settle as `isError` tool results (`Unknown tool: <name>`) without execution; the scheduler never runs unadmitted code. Before-model hooks may only select an unchanged subset of admitted tools (`validateTools`); attempts to add tools or set `hostedTools` fail the turn before inference. Before-tool hooks may replace arguments, but replacements are revalidated and approval (`read-only`/`ask`) applies to the effective post-hook arguments. `activate_skill` is never injected; admit it explicitly to bind per-session activation to the current context manager, where the same discovery policy still governs direct and restored activation. Requested restrictions that cannot be honored fail before inference. See ADR0012 and `tests/host-tool-policy.test.ts`.
 
 ## Public API
 
@@ -150,7 +154,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 
 ## Validation
 
-`bun test tests/host.test.ts` exercises a disposable external consumer that imports only `schway/host`, executes a scripted native tool round and reopens/continues in a fresh process. Preload sentinels reject provider/TUI initialization and runtime loading during static discovery. Other fixtures cover unsupported policies/options, durable input before inference, write failures, busy handles, cancellation, detached result reads and native terminal outcomes.
+`bun test tests/host.test.ts` exercises a disposable external consumer that imports only `schway/host`, executes a scripted native tool round and reopens/continues in a fresh process. `bun test tests/host-tool-policy.test.ts` proves empty/narrow registries stay authoritative across retry/overflow/reopen, hook-mutated calls pass approval on effective arguments, and selected-provider bodies carry no hosted search even where an allowlist would admit it. Preload sentinels reject provider/TUI initialization and runtime loading during static discovery. Other fixtures cover unsupported policies/options, durable input before inference, write failures, busy handles, cancellation, detached result reads and native terminal outcomes.
 
 Run `bun run typecheck` and full `bun test`. The declaration builder emits both entries; `bun scripts/extension-api-report.ts` checks unchanged extension declarations and `bun scripts/extension-api-report.ts --host` checks the host report. Intentional host API changes use `--host --update`, followed by inventory/declaration tests. No live provider call or human credential setup belongs in these deterministic checks.
 

@@ -6,6 +6,7 @@ import { contextPolicySnapshot, STRICT_CONTEXT_POLICY, WORKSPACE_CONTEXT_POLICY,
 import type { AssistantMessage } from "../conversation/types.ts";
 import { createJsonlSession, loadJsonlSession, SessionConflictError, type JsonlSession } from "../session/jsonl.ts";
 import { createToolRegistry, type ToolRegistry } from "../tools/registry.ts";
+import { createActivateSkillTool } from "../skills/activate.ts";
 import type { ToolDefinition } from "../tools/types.ts";
 import { HostError, hostCapabilities, type HostOptions, type HostRuntime, type HostSession, type HostSessionReference,
   type HostEntryReference, type HostRunResult } from "./index.ts";
@@ -23,9 +24,9 @@ function keys(value: unknown, allowed: readonly string[]): asserts value is Reco
 function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: ContextSourcePolicy } {
   keys(input, ["workspaceRoot", "sessionDirectory", "homeDirectory", "context", "tools", "limits"]);
   keys(input.context, ["policy", "systemPrompt", "sections", "sources", "discovery"]);
-  keys(input.tools, ["policy", "definitions"]);
+  keys(input.tools, ["policy", "definitions", "hostedLookup"]);
   keys(input.limits, ["maxTurns", "maxConcurrentTools", "contextWindow", "maxInputChars"]);
-  if (!["workspace-discovery", "strict", "controlled"].includes(input.context.policy) || input.tools.policy !== "include-skill-activation") throw new HostError("unsupported-policy");
+  if (!["workspace-discovery", "strict", "controlled"].includes(input.context.policy) || input.tools.policy !== "exact" || (input.tools as { hostedLookup?: unknown }).hostedLookup !== "off") throw new HostError("unsupported-policy");
   let sourcePolicy: ContextSourcePolicy;
   if (input.context.policy === "controlled") {
     if (!record(input.context.discovery)) throw new HostError("invalid-options");
@@ -59,14 +60,19 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
   if (contextChars > 1000000) throw new HostError("invalid-options");
   const definitions: ToolDefinition[] = input.tools.definitions.map(tool => {
     keys(tool, ["name", "description", "inputSchema", "execution", "effect", "execute"]);
-    if (typeof tool.name !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(tool.name) || tool.name === "activate_skill" ||
+    if (typeof tool.name !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(tool.name) ||
         typeof tool.description !== "string" || typeof tool.execute !== "function" || !record(tool.inputSchema) ||
         typeof tool.execution !== "string" || !["parallel", "exclusive"].includes(tool.execution)) throw new HostError("invalid-options");
     return { ...tool as unknown as ToolDefinition, inputSchema: structuredClone(tool.inputSchema) };
   });
+  const admitted = new Set<string>();
+  for (const tool of definitions) {
+    if (admitted.has(tool.name)) throw new HostError("invalid-options");
+    admitted.add(tool.name);
+  }
   return { sourcePolicy, workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
     context: { policy: input.context.policy, systemPrompt: input.context.systemPrompt, sections: structuredClone(input.context.sections), sources: structuredClone(sources) },
-    tools: { policy: input.tools.policy, definitions }, limits: { ...input.limits } };
+    tools: { policy: input.tools.policy, hostedLookup: "off" as const, definitions }, limits: { ...input.limits } };
 }
 
 function validateReference(reference: HostSessionReference): void {
@@ -113,13 +119,18 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         for await (const event of stream(structuredCloneRequest(request), call)) yield structuredClone(event);
       } } as Model);
     };
-    const runTools = createToolRegistry(tools.definitions().map(tool => ({ ...tool,
-      execute(input, context) { check(); return tool.execute(input, context); },
-    })));
     let disposed = false, busy = false;
     const reference = Object.freeze({ id: native.header.id, branchId: native.activeBranchId });
     const context = createContextManager(workspace, { home, contextWindow: options.limits.contextWindow,
       systemPrompt: options.context.systemPrompt, sections: options.context.sections, sources: options.context.sources, policy: options.sourcePolicy });
+    const admittedActivation = tools.get("activate_skill");
+    const boundActivation = admittedActivation ? createActivateSkillTool(context) : undefined;
+    const runTools = createToolRegistry(tools.definitions().map(tool => {
+      if (tool.name === "activate_skill" && boundActivation) {
+        return { ...boundActivation, execute(input: unknown, toolContext: Parameters<typeof boundActivation.execute>[1]) { check(); return boundActivation.execute(input as { name: string }, toolContext); } };
+      }
+      return { ...tool, execute(input: unknown, toolContext: Parameters<typeof tool.execute>[1]) { check(); return tool.execute(input, toolContext); } };
+    }));
     const requireIdle = () => { requireOpen(); if (disposed) throw new HostError("closed"); if (busy) throw new HostError("busy"); };
     const ref = (entryId: string): HostEntryReference => Object.freeze({ session: reference, entryId });
     const handle: HostSession = {
@@ -142,7 +153,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           const inputReference = ref(id);
           let outcome: HostRunResult["outcome"] = "error";
           for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
-            maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, signal, webSearch: "off" })) {
+            maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, signal, webSearch: "off", exactTools: true })) {
             if (event.type === "agent.finished") outcome = event.reason;
           }
           try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }

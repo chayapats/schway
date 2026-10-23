@@ -10,7 +10,7 @@ async function options(dir: string): Promise<HostOptions> {
   await mkdir(workspaceRoot, { recursive: true }); await mkdir(homeDirectory, { recursive: true });
   return { workspaceRoot, homeDirectory, sessionDirectory: join(dir, "sessions"),
     context: { policy: "workspace-discovery", systemPrompt: "Trusted fixture operator", sections: [{ name: "host-evidence", content: "fixture-source" }] },
-    tools: { policy: "include-skill-activation", definitions: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
     limits: { maxTurns: 3, maxConcurrentTools: 2, contextWindow: 32768, maxInputChars: 4096 } };
 }
 
@@ -65,7 +65,9 @@ test("malformed options and unsupported requested restrictions fail before a ses
     const config = await options(dir);
     for (const altered of [
       { ...config, context: { ...config.context, policy: "unsupported-profile" } },
-      { ...config, tools: { ...config.tools, policy: "exact" } },
+      { ...config, tools: { ...config.tools, policy: "include-skill-activation" } },
+      { ...config, tools: { policy: "exact", definitions: [] } },
+      { ...config, tools: { ...config.tools, hostedLookup: "auto" } },
       { ...config, context: { ...config.context, skills: false } },
       { ...config, limits: { ...config.limits, maxTurns: Infinity } },
       { ...config, limits: { ...config.limits, maxConcurrentTools: 0 } },
@@ -75,7 +77,7 @@ test("malformed options and unsupported requested restrictions fail before a ses
   });
 });
 
-test("base policy is explicit about discovered context and implicit skill activation", async () => {
+test("exact registry stays empty when workspace discovery would otherwise permit activation", async () => {
   await withTempDir(async dir => {
     const config = await options(dir);
     await Bun.write(join(config.workspaceRoot, "AGENTS.md"), "Trusted workspace fixture instructions");
@@ -85,7 +87,8 @@ test("base policy is explicit about discovered context and implicit skill activa
       expect(request.systemPrompt).toBe("Trusted fixture operator");
       expect(request.context.some(s => s.name === "project-instructions" && s.content.includes("Trusted workspace fixture"))).toBe(true);
       expect(request.context.some(s => s.name === "host-evidence")).toBe(true);
-      expect(request.tools?.map(t => t.name)).toEqual(["activate_skill"]);
+      expect(request.tools ?? []).toEqual([]);
+      expect(request.hostedTools ?? []).toEqual([]);
       return { text: "base behavior" };
     }] }));
     expect(result.outcome).toBe("completed");

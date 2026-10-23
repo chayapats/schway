@@ -44,6 +44,8 @@ export interface AgentLoopOptions {
   undo?: UndoStore;
   /** Configured hosted web search preference; absent sends no hosted tools, as evals and smoke runs expect. */
   webSearch?: WebSearchSetting;
+  /** Enforce the supplied registry exactly; never inject skill activation or built-ins even when permitted. */
+  exactTools?: boolean;
 }
 
 /** Internal protocol-fixture dependencies, separate from config and extension-visible options. */
@@ -218,7 +220,7 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
 
   try {
     yield { type: "agent.started" };
-    if (options.workspace && options.contextManager.skillActivationAllowed !== false) {
+    if (!options.exactTools && options.workspace && options.contextManager.skillActivationAllowed !== false) {
       tools = createToolRegistry([
         ...(options.tools?.definitions() ?? []),
         createActivateSkillTool(options.contextManager),

@@ -84,13 +84,17 @@ export interface HostCapabilities {
     // (undocumented)
     readonly features: readonly ["host-supplied-model", "native-result-reference", "explicit-compaction"];
     // (undocumented)
+    readonly hostedLookup: "disabled-only";
+    // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
     readonly sessionContract: "schway.host.durable-sessions/v1";
     // (undocumented)
     readonly sessionOwnership: "exclusive-local-process-lease";
     // (undocumented)
-    readonly toolPolicies: readonly ["include-skill-activation"];
+    readonly toolContract: "schway.host.tool-policy/v1";
+    // (undocumented)
+    readonly toolPolicies: readonly ["exact"];
 }
 
 // @public
@@ -158,8 +162,9 @@ export interface HostOptions {
     sessionDirectory: string;
     // (undocumented)
     tools: {
-        policy: "include-skill-activation";
+        policy: "exact";
         definitions: readonly ToolDefinition[];
+        hostedLookup: "off";
     };
     // (undocumented)
     workspaceRoot: string;
