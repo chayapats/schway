@@ -223,6 +223,9 @@ async function storeExists(root: string): Promise<boolean> {
   catch (error) { if (isErrno(error, "ENOENT")) return false; throw error; }
 }
 
+/** Error code for lock contention that rejects immediately instead of waiting. */
+export const UNDO_STORE_BUSY = "UNDO_STORE_BUSY";
+
 /** Exclude mutations with an OS-released lock, rejecting contention immediately with UNDO_STORE_BUSY. */
 async function withStoreLock<T>(home: string, operation: () => Promise<T>): Promise<T> {
   const directory = join(home, ".schway");
@@ -236,7 +239,7 @@ async function withStoreLock<T>(home: string, operation: () => Promise<T>): Prom
   try {
     try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
     catch (error) {
-      if (isErrno(error, "SQLITE_BUSY") || isErrno(error, "SQLITE_LOCKED")) throw Object.assign(new Error("Undo store busy"), { code: "UNDO_STORE_BUSY" });
+      if (isErrno(error, "SQLITE_BUSY") || isErrno(error, "SQLITE_LOCKED")) throw Object.assign(new Error("Undo store busy"), { code: UNDO_STORE_BUSY });
       throw error;
     }
     return await operation();

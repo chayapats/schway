@@ -195,9 +195,9 @@ export interface HostRuntime {
   createSession(): Promise<HostSession>;
   /** Reopen the exact saved native branch within this configured workspace and store. */
   openSession(reference: HostSessionReference): Promise<HostSession>;
-  /** Retire one exact managed reference so later reopen cannot silently reintroduce it. */
+  /** Retire one managed session id across branches so later reopen cannot silently reintroduce it. Ownership verdicts report busy; unreadable stores throw storage. */
   retireSession(reference: HostSessionReference): Promise<void>;
-  /** Delete owned native artifacts for one exact managed reference with honest status. */
+  /** Delete owned native artifacts for one managed session id across branches with honest status. Busy owners and replaced aliases report blocked; unreadable stores and workspace mismatch throw. */
   deleteSession(reference: HostSessionReference): Promise<HostSessionDeletion>;
   /** Close idle handles and refuse disposal while session creation or a run is in progress. Cancel admitted runs first; close never aborts or settles them. */
   close(): Promise<void>;

@@ -1,5 +1,4 @@
 import { mkdir, realpath, stat } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { runAgentLoop } from "../agent/loop.ts";
 import { MAX_TRANSIENT_ATTEMPTS } from "../agent/retry.ts";
@@ -16,14 +15,33 @@ import { HostError, hostCapabilities, type HostClock, type HostOptions, type Hos
 import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, credentialReferenceForRoute, validateAuthSelection,
   type HostAuthReadiness, type HostAuthRunResult, type HostAuthSelection } from "./auth-routes.ts";
 import { acquireSessionLease, type SessionLease } from "./lease.ts";
-import { deleteManagedSession, isManagedRetired, markManagedRetired, retiredFilePath } from "./managed-data.ts";
+import { deleteManagedSession, isManagedRetired, isManagedRetiredSync, markManagedRetired, readManagedHeader } from "./managed-data.ts";
 import type { Model, ModelRequest } from "../model/model.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
-/** Retired managed contexts that cannot silently reopen in this process. */
-const retiredSessions = new Set<string>();
+/** Retired managed contexts that cannot silently reopen in this process (file tombstone stays authoritative). */
+const retiredSessions = new Map<string, true>();
+/** Bound on the retired-context cache; eviction only drops the fast path, never the tombstone. */
+const MAX_RETIRED_SESSIONS = 1024;
+/** Record one retired context, evicting the oldest entry past the bound. */
+function rememberRetired(key: string): void {
+  retiredSessions.delete(key);
+  retiredSessions.set(key, true);
+  while (retiredSessions.size > MAX_RETIRED_SESSIONS) {
+    const oldest = retiredSessions.keys().next();
+    if (oldest.done) break;
+    retiredSessions.delete(oldest.value);
+  }
+}
+/** Whether one context retired, refreshing its recency without touching the tombstone. */
+function isRetired(key: string): boolean {
+  if (!retiredSessions.has(key)) return false;
+  retiredSessions.delete(key);
+  retiredSessions.set(key, true);
+  return true;
+}
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** Default wall-clock bound for one host run, including retries and compaction. */
@@ -111,7 +129,7 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
 
 function validateReference(reference: HostSessionReference): void {
   if (!record(reference) || Object.keys(reference).some(key => !["id", "branchId"].includes(key)) ||
-      typeof reference.id !== "string" || !/^[a-f0-9]{8}-[a-f0-9-]{27}$/.test(reference.id) ||
+      typeof reference.id !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(reference.id) ||
       typeof reference.branchId !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(reference.branchId)) throw new HostError("invalid-reference");
 }
 
@@ -236,15 +254,12 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
   const requireOpen = () => { if (closed) throw new HostError("closed"); };
 
   function bind(native: JsonlSession, key: string, lease: SessionLease): HostSession {
-    let conflict = false;
+    let conflict = false, retiredClosed = false;
     const check = () => {
       if (conflict) throw new HostError("conflict");
-      if (retiredSessions.has(key)) { conflict = true; throw new HostError("closed"); }
-      try {
-        if (existsSync(retiredFilePath(directory, native.header.id))) { retiredSessions.add(key); conflict = true; throw new HostError("closed"); }
-      } catch (error) {
-        if (error instanceof HostError) throw error;
-      }
+      // A retired context stays closed; retirement never flips the conflict latch.
+      if (retiredClosed || isRetired(key)) { retiredClosed = true; throw new HostError("closed"); }
+      if (isManagedRetiredSync(directory, native.header.id)) { rememberRetired(key); retiredClosed = true; throw new HostError("closed"); }
       try { lease.assertOwned(); native.assertCurrent(); }
       catch (error) { if (error instanceof SessionConflictError || error instanceof HostError && error.code === "conflict") { conflict = true; throw new HostError("conflict"); } throw new HostError("storage"); }
       if (native.activeBranchId !== reference.branchId) { conflict = true; throw new HostError("conflict"); }
@@ -556,17 +571,21 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       async close() {
         if (disposed) return;
         requireIdle();
-        lease.release();
-        disposed = true;
-        ownedSessions.delete(key);
-        handles.delete(handle);
+        try {
+          lease.release();
+        } finally {
+          disposed = true;
+          ownedSessions.delete(key);
+          handles.delete(handle);
+        }
       },
       async retire() {
         if (disposed) return;
         requireIdle();
         check();
         await markManagedRetired(directory, reference.id, root);
-        retiredSessions.add(key);
+        rememberRetired(key);
+        retiredClosed = true;
         try { lease.release(); } finally {
           disposed = true;
           ownedSessions.delete(key);
@@ -598,13 +617,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       requireOpen(); validateReference(reference);
       const selected = { ...reference };
       const key = `${directory}/${selected.id}`;
-      if (retiredSessions.has(key)) throw new HostError("closed");
-      try {
-        if (await isManagedRetired(directory, selected.id)) { retiredSessions.add(key); throw new HostError("closed"); }
-      } catch (error) {
-        if (error instanceof HostError && error.code === "closed") throw error;
-        if (error instanceof HostError) throw error;
-      }
+      if (isRetired(key)) throw new HostError("closed");
+      if (await isManagedRetired(directory, selected.id)) { rememberRetired(key); throw new HostError("closed"); }
       if (ownedSessions.has(key)) throw new HostError("busy");
       ownedSessions.add(key); opening++;
       let lease: SessionLease | undefined;
@@ -614,12 +628,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           validateIdentity: (workspaceRoot, extraRoots) => {
             if (workspaceRoot !== root || extraRoots.length) throw new HostError("workspace-mismatch");
           } });
-        try {
-          if (await isManagedRetired(directory, selected.id)) { retiredSessions.add(key); throw new HostError("closed"); }
-        } catch (error) {
-          if (error instanceof HostError && error.code === "closed") throw error;
-          if (error instanceof HostError) throw error;
-        }
+        if (await isManagedRetired(directory, selected.id)) { rememberRetired(key); throw new HostError("closed"); }
         return bind(native, key, lease);
       } catch (error) {
         ownedSessions.delete(key);
@@ -633,8 +642,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
     async retireSession(reference: HostSessionReference) {
       requireOpen(); validateReference(reference);
       const key = `${directory}/${reference.id}`;
-      if (retiredSessions.has(key)) return;
-      if (await isManagedRetired(directory, reference.id).catch(() => false)) { retiredSessions.add(key); return; }
+      if (isRetired(key)) return;
+      if (await isManagedRetired(directory, reference.id)) { rememberRetired(key); return; }
       if (ownedSessions.has(key)) throw new HostError("busy");
       opening++;
       let lease: SessionLease | undefined;
@@ -642,32 +651,20 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         try { lease = acquireSessionLease(directory, reference.id); }
         catch (error) { if (error instanceof HostError && error.code === "busy") throw new HostError("busy"); throw new HostError("storage"); }
         try {
-          const { readFile } = await import("node:fs/promises");
-          const { join } = await import("node:path");
-          const { lstat } = await import("node:fs/promises");
-          const path = join(directory, `${reference.id}.jsonl`);
-          let headerText: string;
-          try {
-            const info = await lstat(path);
-            if (!info.isFile() || info.nlink !== 1) throw new HostError("conflict");
-            headerText = await readFile(path, "utf8");
-          } catch (error) {
-            if (error instanceof HostError) throw error;
-            if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new HostError("storage");
-            throw new HostError("storage");
-          }
-          let header: unknown;
-          try { header = JSON.parse(headerText.split("\n", 1)[0] ?? ""); } catch { throw new HostError("conflict"); }
-          if (!header || typeof header !== "object" || (header as { id?: unknown }).id !== reference.id) throw new HostError("conflict");
-          if ((header as { workspaceRoot?: unknown }).workspaceRoot !== root || !Array.isArray((header as { extraRoots?: unknown }).extraRoots) || ((header as { extraRoots: unknown[] }).extraRoots.length !== 0)) {
-            throw new HostError("workspace-mismatch");
-          }
-          await markManagedRetired(directory, reference.id, root);
-          retiredSessions.add(key);
-        } finally {
-          try { lease.release(); } catch { /* Preserve retirement when release races a moved store. */ }
+          const header = await readManagedHeader(directory, reference.id);
+          if (header.workspaceRoot !== root || header.extraRoots.length !== 0) throw new HostError("workspace-mismatch");
+        } catch (error) {
+          // A missing conversation stays storage; an alias stays conflict; faults already throw storage.
+          if (error instanceof HostError) throw error;
+          if ((error as { code?: string }).code === "missing") throw new HostError("storage");
+          throw new HostError("conflict");
         }
-      } finally { opening--; }
+        await markManagedRetired(directory, reference.id, root);
+        rememberRetired(key);
+      } finally {
+        try { lease?.release(); } catch { /* Preserve retirement when release races a moved store. */ }
+        opening--;
+      }
     },
     async deleteSession(reference: HostSessionReference): Promise<HostSessionDeletion> {
       requireOpen(); validateReference(reference);
@@ -675,30 +672,13 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       if (ownedSessions.has(key)) {
         return { status: "blocked", session: Object.freeze({ id: reference.id, branchId: reference.branchId }), reason: "busy", nextAction: "Session is busy. Cancel admitted work, close the open session, then retry deletion." };
       }
-      let lease: SessionLease | undefined;
+      // The delete lease is owned inside deleteManagedSession, which inventories before admitting
+      // ownership so the self-created lease never appears in the removed set.
+      const result = await deleteManagedSession({ directory, home, workspaceRoot: root, reference: { id: reference.id, branchId: reference.branchId } });
       try {
-        lease = acquireSessionLease(directory, reference.id);
-      } catch (error) {
-        if (error instanceof HostError && error.code === "busy") {
-          return { status: "blocked", session: Object.freeze({ id: reference.id, branchId: reference.branchId }), reason: "busy", nextAction: "Session is busy. Cancel admitted work, close the open session, then retry deletion." };
-        }
-        throw new HostError("storage");
-      }
-      try {
-        const result = await deleteManagedSession({ directory, home, workspaceRoot: root, reference: { id: reference.id, branchId: reference.branchId }, releaseLease: () => lease.release() });
-        try {
-          if (result.status !== "blocked" && await isManagedRetired(directory, reference.id)) retiredSessions.add(key);
-        } catch { /* In-memory retirement stays best-effort when the store moved. */ }
-        try { lease.release(); } catch { /* Deletion already recorded its honest status. */ }
-        return result;
-      } catch (error) {
-        try { lease.release(); } catch { /* Preserve the original rejection. */ }
-        if (error instanceof HostError) throw error;
-        if (error instanceof SessionConflictError) {
-          return { status: "blocked", session: Object.freeze({ id: reference.id, branchId: reference.branchId }), reason: "conflict", nextAction: "Session ownership changed. Reopen under exclusive ownership, close it, then retry deletion." };
-        }
-        throw new HostError("storage");
-      }
+        if (result.status !== "blocked" && await isManagedRetired(directory, reference.id)) rememberRetired(key);
+      } catch { /* In-memory retirement stays best-effort when the store moved. */ }
+      return result;
     },
     async close() {
       if (closing) return closing;

@@ -1,19 +1,23 @@
-import { lstat, readFile, unlink } from "node:fs/promises";
-import { openSync, closeSync, fsyncSync } from "node:fs";
+import { lstat, open, unlink } from "node:fs/promises";
+import { closeSync, constants, fsyncSync, lstatSync, openSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { deleteJsonlSession } from "../session/jsonl.ts";
-import { deleteHistorySession, HISTORY_STORE_BUSY } from "../history/store.ts";
-import { deleteUndoSession } from "../undo/store.ts";
+import { deleteHistorySession, HISTORY_STORE_BUSY, historyFilePath } from "../history/store.ts";
+import { deleteUndoSession, UNDO_STORE_BUSY } from "../undo/store.ts";
 import { openDraftStore } from "../drafts/store.ts";
+import { acquireSessionLease } from "./lease.ts";
 import { HostError, type HostDeletedArtifact, type HostSessionDeletion, type HostSessionReference } from "./index.ts";
 
 /** Tombstone suffix marking a retired managed session; reopen stays closed. */
 const RETIRED_SUFFIX = ".host-retired";
 
+/** Strict UUID shape for opaque managed references; traversal and multi-component paths never pass. */
+const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /** Validate a managed session id without accepting traversal or multi-component paths. */
 function validId(id: string): void {
   if (typeof id !== "string" || id.length === 0 || id !== basename(id) || id === "." || id === "..") throw new HostError("invalid-reference");
-  if (!/^[a-f0-9]{8}-[a-f0-9-]{27}$/.test(id)) throw new HostError("invalid-reference");
+  if (!ID_PATTERN.test(id)) throw new HostError("invalid-reference");
 }
 
 /** Resolve a validated artifact path under the canonical managed store. */
@@ -40,13 +44,25 @@ export async function isManagedRetired(directory: string, id: string): Promise<b
   }
 }
 
+/** Sync tombstone check for admitted-handle fencing; only ENOENT reads as absent. */
+export function isManagedRetiredSync(directory: string, id: string): boolean {
+  validId(id);
+  try {
+    lstatSync(join(directory, `${id}${RETIRED_SUFFIX}`));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw new HostError("storage");
+  }
+}
+
 /** Create a retirement tombstone idempotently without rewriting native history. */
 export async function markManagedRetired(directory: string, id: string, workspaceRoot: string): Promise<void> {
   validId(id);
   const path = join(directory, `${id}${RETIRED_SUFFIX}`);
   const body = JSON.stringify({ version: 1, id, workspaceRoot, retiredAt: new Date().toISOString() });
   try {
-    const file = await import("node:fs/promises").then(m => m.open(path, "wx", 0o600));
+    const file = await open(path, "wx", 0o600);
     try {
       await file.writeFile(body, "utf8");
       await file.sync();
@@ -65,86 +81,85 @@ export async function markManagedRetired(directory: string, id: string, workspac
   }
 }
 
-/** Check one artifact without following unexpected replacements. */
+/** Check one artifact; only ENOENT reads as absent, every other fault throws storage. */
 async function exists(path: string): Promise<boolean> {
   try {
     await lstat(path);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
+    throw new HostError("storage");
   }
 }
 
-/** Whether the history sidecar exists for one validated session id. */
+/** Whether the history sidecar exists; faults other than ENOENT throw storage, never absent. */
 async function historyExists(home: string, id: string): Promise<boolean> {
   try {
-    const { historyFilePath } = await import("../history/store.ts");
-    return exists(historyFilePath(home, id));
-  } catch {
-    return false;
+    await lstat(historyFilePath(home, id));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw new HostError("storage");
   }
 }
 
-/** Whether undo data remains for one validated session id. */
+/** Whether undo data remains; faults other than ENOENT throw storage, never absent. */
 async function undoExists(home: string, id: string): Promise<boolean> {
   try {
     await lstat(join(home, ".schway", "undo", id));
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
+    throw new HostError("storage");
   }
 }
 
-/** Whether a draft checkpoint remains for one validated workspace and session. */
+/** Whether a draft checkpoint remains; any store fault throws storage, never absent. */
 function draftExists(home: string, workspaceRoot: string, id: string): boolean {
   try {
     return openDraftStore({ home, workspaceRoot, sessionId: id }).checkpoint !== undefined;
-  } catch {
-    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw new HostError("storage");
   }
 }
 
-/** Inventory existing managed artifacts without repairing or rewriting them. */
+/** Inventory existing managed artifacts; storage faults throw, only ENOENT reads as absent. */
 async function inventory(directory: string, home: string, workspaceRoot: string, id: string): Promise<Set<HostDeletedArtifact>> {
   const found = new Set<HostDeletedArtifact>();
   if (await exists(sessionPath(directory, id))) found.add("conversation");
   if (await exists(`${sessionPath(directory, id)}.meta`)) found.add("metadata");
   if (await exists(join(directory, `${id}.host-lease`))) found.add("lease");
-  try {
-    if (await historyExists(home, id)) found.add("history");
-  } catch {
-    found.add("history");
-  }
-  try {
-    if (await undoExists(home, id)) found.add("undo");
-  } catch {
-    found.add("undo");
-  }
-  try {
-    if (draftExists(home, workspaceRoot, id)) found.add("draft");
-  } catch {
-    found.add("draft");
-  }
+  if (await historyExists(home, id)) found.add("history");
+  if (await undoExists(home, id)) found.add("undo");
+  if (draftExists(home, workspaceRoot, id)) found.add("draft");
   return found;
 }
 
-/** Read and validate the managed header without following a symlink alias. */
-async function readManagedHeader(directory: string, id: string): Promise<{ workspaceRoot: string; extraRoots: readonly string[] }> {
+/** Read and validate the managed header through a pinned descriptor that never follows a symlink. */
+export async function readManagedHeader(directory: string, id: string): Promise<{ workspaceRoot: string; extraRoots: readonly string[] }> {
   const path = sessionPath(directory, id);
-  const info = await lstat(path).catch(error => {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw Object.assign(new Error("missing"), { code: "missing" });
-    throw error;
-  });
-  if (!info.isFile() || info.nlink !== 1) throw Object.assign(new Error("alias"), { code: "alias" });
+  let file;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") throw Object.assign(new Error("missing"), { code: "missing" });
+    if (code === "ELOOP") throw Object.assign(new Error("alias"), { code: "alias" });
+    throw new HostError("storage");
+  }
   let first: string;
   try {
-    const text = await readFile(path, "utf8");
+    const info = await file.stat();
+    if (!info.isFile() || info.nlink !== 1) throw Object.assign(new Error("alias"), { code: "alias" });
+    const text = await file.readFile("utf8");
     first = text.split("\n", 1)[0] ?? "";
   } catch (error) {
+    if ((error as { code?: string }).code === "alias") throw error;
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw Object.assign(new Error("missing"), { code: "missing" });
-    throw error;
+    throw new HostError("storage");
+  } finally {
+    await file.close();
   }
   let header: unknown;
   try {
@@ -159,7 +174,7 @@ async function readManagedHeader(directory: string, id: string): Promise<{ works
   return { workspaceRoot: root, extraRoots: extra as readonly string[] };
 }
 
-/** Sanitized retry guidance that never carries paths, tokens, or provider payloads. */
+/** Sanitized retry guidance that never carries paths, tokens or provider payloads. */
 function guidance(kind: "deleted" | "already" | "partial" | "busy" | "conflict"): string {
   switch (kind) {
     case "deleted":
@@ -175,149 +190,197 @@ function guidance(kind: "deleted" | "already" | "partial" | "busy" | "conflict")
   }
 }
 
-/** Delete owned managed artifacts for an exact validated reference with honest status. */
+/** Delete owned managed artifacts for one session id with honest status.
+ *
+ * Retire and delete are scoped to the session id across branches: the tombstone and the
+ * conversation file are per id, so a reference carrying any valid branchId deletes the same
+ * underlying session. Ownership verdicts (busy owner, replaced alias) report blocked status;
+ * programming and configuration faults (unreadable store, workspace mismatch) throw.
+ * This function owns the delete lease: it inventories before admitting ownership so the
+ * self-created lease never appears in the removed set, and it releases on every path.
+ */
 export async function deleteManagedSession(options: {
   directory: string;
   home: string;
   workspaceRoot: string;
   reference: HostSessionReference;
-  /** Current lease release; called after conversation cleanup to drop ownership. */
-  releaseLease: () => void;
 }): Promise<HostSessionDeletion> {
   const { directory, home, workspaceRoot, reference } = options;
   validId(reference.id);
   const session = Object.freeze({ id: reference.id, branchId: reference.branchId });
-  const before = await inventory(directory, home, workspaceRoot, reference.id).catch(() => new Set<HostDeletedArtifact>());
+  const before = await inventory(directory, home, workspaceRoot, reference.id);
   const isMissing = !before.has("conversation");
 
-  if (isMissing) {
-    const retired = await isManagedRetired(directory, reference.id).catch(() => false);
-    if (!retired) {
-      return { status: "already-deleted", session, nextAction: guidance("already") };
-    }
-    const remaining = await cleanRemaining(directory, home, workspaceRoot, reference.id, options.releaseLease);
-    if (remaining.length === 0) return { status: "already-deleted", session, nextAction: guidance("already") };
-    if (remainingBlocked(remaining)) return { status: "blocked", session, reason: "busy", nextAction: guidance("busy") };
-    const removed = [...before].filter(a => !remaining.includes(a));
-    return { status: "partial", session, removed: Object.freeze(removed) as readonly HostDeletedArtifact[], remaining: Object.freeze(remaining) as readonly HostDeletedArtifact[], nextAction: guidance("partial") };
-  }
-
-  let header: { workspaceRoot: string; extraRoots: readonly string[] };
+  let lease;
   try {
-    header = await readManagedHeader(directory, reference.id);
+    lease = acquireSessionLease(directory, reference.id);
   } catch (error) {
-    if ((error as { code?: string }).code === "missing") {
-      const retired = await isManagedRetired(directory, reference.id).catch(() => false);
-      if (!retired) return { status: "already-deleted", session, nextAction: guidance("already") };
-      const remaining = await cleanRemaining(directory, home, workspaceRoot, reference.id, options.releaseLease);
-      if (remaining.length === 0) return { status: "already-deleted", session, nextAction: guidance("already") };
-      return { status: "partial", session, removed: Object.freeze([]) as readonly HostDeletedArtifact[], remaining: Object.freeze(remaining) as readonly HostDeletedArtifact[], nextAction: guidance("partial") };
+    if (error instanceof HostError && error.code === "busy") {
+      return { status: "blocked", session, reason: "busy", nextAction: guidance("busy") };
     }
-    options.releaseLease();
-    return { status: "blocked", session, reason: "conflict", nextAction: guidance("conflict") };
+    throw new HostError("storage");
   }
-  if (header.workspaceRoot !== workspaceRoot || header.extraRoots.length !== 0) {
-    options.releaseLease();
-    throw new HostError("workspace-mismatch");
-  }
+  let released = false;
+  const release = (): void => {
+    if (released) return;
+    released = true;
+    // Best-effort: a fault here already surfaces as storage from the surrounding path.
+    try { lease.release(); } catch { /* Preserve the deletion verdict. */ }
+  };
 
   try {
-    await deleteJsonlSession({ directory, home, id: reference.id });
-  } catch (error) {
-    if (isBusyStore(error)) {
-      const after = await inventory(directory, home, workspaceRoot, reference.id).catch(() => before);
-      const removed = [...before].filter(a => !after.has(a));
-      if (removed.length === 0) {
-        options.releaseLease();
+    if (isMissing) {
+      if (!(await isManagedRetired(directory, reference.id))) {
+        release();
+        return { status: "already-deleted", session, nextAction: guidance("already") };
+      }
+      const remaining = await cleanRemaining(directory, home, workspaceRoot, reference.id, release);
+      if (remaining.length === 0) {
+        release();
+        return { status: "already-deleted", session, nextAction: guidance("already") };
+      }
+      if (remainingBlocked(remaining)) {
+        release();
         return { status: "blocked", session, reason: "busy", nextAction: guidance("busy") };
       }
-      await markManagedRetired(directory, reference.id, workspaceRoot).catch(() => undefined);
-      options.releaseLease();
-      const remaining = [...after];
-      return { status: "partial", session, removed: Object.freeze(removed) as readonly HostDeletedArtifact[], remaining: Object.freeze(remaining) as readonly HostDeletedArtifact[], nextAction: guidance("partial") };
+      const removed = [...before].filter(a => !remaining.includes(a));
+      release();
+      return { status: "partial", session, removed: Object.freeze(removed), remaining: Object.freeze(remaining), nextAction: guidance("partial") };
     }
-    await markManagedRetired(directory, reference.id, workspaceRoot).catch(() => undefined);
-    options.releaseLease();
-    const after = await inventory(directory, home, workspaceRoot, reference.id).catch(() => new Set<HostDeletedArtifact>());
+
+    let header: { workspaceRoot: string; extraRoots: readonly string[] };
+    try {
+      header = await readManagedHeader(directory, reference.id);
+    } catch (error) {
+      if ((error as { code?: string }).code === "missing") {
+        if (!(await isManagedRetired(directory, reference.id))) {
+          release();
+          return { status: "already-deleted", session, nextAction: guidance("already") };
+        }
+        const remaining = await cleanRemaining(directory, home, workspaceRoot, reference.id, release);
+        if (remaining.length === 0) {
+          release();
+          return { status: "already-deleted", session, nextAction: guidance("already") };
+        }
+        release();
+        return { status: "partial", session, removed: Object.freeze([] as HostDeletedArtifact[]), remaining: Object.freeze(remaining), nextAction: guidance("partial") };
+      }
+      if (error instanceof HostError) {
+        release();
+        throw error;
+      }
+      release();
+      return { status: "blocked", session, reason: "conflict", nextAction: guidance("conflict") };
+    }
+    if (header.workspaceRoot !== workspaceRoot || header.extraRoots.length !== 0) {
+      release();
+      throw new HostError("workspace-mismatch");
+    }
+
+    try {
+      await deleteJsonlSession({ directory, home, id: reference.id });
+    } catch (error) {
+      if (isBusyStore(error)) {
+        const after = await inventory(directory, home, workspaceRoot, reference.id);
+        const removed = [...before].filter(a => !after.has(a));
+        if (removed.length === 0) {
+          release();
+          return { status: "blocked", session, reason: "busy", nextAction: guidance("busy") };
+        }
+        await markManagedRetired(directory, reference.id, workspaceRoot);
+        release();
+        const remaining = [...after];
+        return { status: "partial", session, removed: Object.freeze(removed), remaining: Object.freeze(remaining), nextAction: guidance("partial") };
+      }
+      await markManagedRetired(directory, reference.id, workspaceRoot);
+      release();
+      const after = await inventory(directory, home, workspaceRoot, reference.id);
+      const removed = [...before].filter(a => !after.has(a));
+      const remaining = [...after];
+      if (remaining.length === 0) {
+        return { status: "deleted", session, removed: Object.freeze(removed), nextAction: guidance("deleted") };
+      }
+      return { status: "partial", session, removed: Object.freeze(removed), remaining: Object.freeze(remaining), nextAction: guidance("partial") };
+    }
+
+    await markManagedRetired(directory, reference.id, workspaceRoot);
+    release();
+    const after = await inventory(directory, home, workspaceRoot, reference.id);
     const removed = [...before].filter(a => !after.has(a));
     const remaining = [...after];
     if (remaining.length === 0) {
-      return { status: "deleted", session, removed: Object.freeze(removed.length ? removed : [...before]) as readonly HostDeletedArtifact[], nextAction: guidance("deleted") };
+      return { status: "deleted", session, removed: Object.freeze(removed), nextAction: guidance("deleted") };
     }
-    return { status: "partial", session, removed: Object.freeze(removed) as readonly HostDeletedArtifact[], remaining: Object.freeze(remaining) as readonly HostDeletedArtifact[], nextAction: guidance("partial") };
+    return { status: "partial", session, removed: Object.freeze(removed), remaining: Object.freeze(remaining), nextAction: guidance("partial") };
+  } finally {
+    release();
   }
-
-  await markManagedRetired(directory, reference.id, workspaceRoot).catch(() => undefined);
-  options.releaseLease();
-  const after = await inventory(directory, home, workspaceRoot, reference.id).catch(() => new Set<HostDeletedArtifact>());
-  const removed = [...before].filter(a => !after.has(a));
-  const remaining = [...after];
-  if (remaining.length === 0) {
-    return { status: "deleted", session, removed: Object.freeze(removed.length ? removed : [...before]) as readonly HostDeletedArtifact[], nextAction: guidance("deleted") };
-  }
-  return { status: "partial", session, removed: Object.freeze(removed) as readonly HostDeletedArtifact[], remaining: Object.freeze(remaining) as readonly HostDeletedArtifact[], nextAction: guidance("partial") };
 }
 
-/** Whether remaining artifacts indicate lock contention rather than partial writes. */
+/** Whether remaining artifacts indicate lock contention rather than partial writes.
+ *
+ * History or undo contention blocks the delete with those artifacts remaining; a remaining
+ * conversation or metadata means the delete itself failed and reports partial for retry.
+ * Busy paths always retain history or undo, so draft-only residue without contention stays partial.
+ */
 function remainingBlocked(remaining: readonly HostDeletedArtifact[]): boolean {
   return remaining.includes("history") || remaining.includes("undo");
 }
 
-/** True for history/undo lock contention that leaves every artifact intact. */
+/** True only for the exact history/undo lock-contention codes; message text never implies busyness. */
 function isBusyStore(error: unknown): boolean {
   const code = (error as { code?: unknown }).code;
-  if (code === HISTORY_STORE_BUSY || code === "UNDO_STORE_BUSY") return true;
-  return /busy/i.test(error instanceof Error ? error.message : String(error ?? ""));
+  return code === HISTORY_STORE_BUSY || code === UNDO_STORE_BUSY;
 }
 
-/** Clean sidecars that remain after the conversation file is already gone. */
-async function cleanRemaining(directory: string, home: string, workspaceRoot: string, id: string, releaseLease: () => void): Promise<HostDeletedArtifact[]> {
+/** Clean sidecars that remain after the conversation file is already gone.
+ *
+ * Every path runs the lease release and the conversation recheck, including lock contention,
+ * so a late writer racing cleanup is still reported instead of silently dropped.
+ */
+async function cleanRemaining(directory: string, home: string, workspaceRoot: string, id: string, releaseLease: () => void): Promise<readonly HostDeletedArtifact[]> {
   const remaining: HostDeletedArtifact[] = [];
-  try {
-    if (await exists(`${sessionPath(directory, id)}.meta`)) {
-      try {
-        await unlink(`${sessionPath(directory, id)}.meta`);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") remaining.push("metadata");
-      }
+  const pushUnique = (artifact: HostDeletedArtifact): void => {
+    if (!remaining.includes(artifact)) remaining.push(artifact);
+  };
+  if (await exists(`${sessionPath(directory, id)}.meta`)) {
+    try {
+      await unlink(`${sessionPath(directory, id)}.meta`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") pushUnique("metadata");
     }
-  } catch {
-    remaining.push("metadata");
   }
   try {
     await deleteHistorySession({ home, sessionId: id }, async () => undefined);
   } catch (error) {
-    if (isBusyStore(error)) return ["history", "undo", "draft"];
-    remaining.push("history");
+    // History contention runs before any sidecar changes, so the history artifact stays remaining.
+    pushUnique("history");
   }
   try {
     await deleteUndoSession({ home, sessionId: id });
   } catch (error) {
-    if (isBusyStore(error)) return [...new Set([...remaining, "history" as const, "undo" as const])];
-    remaining.push("undo");
+    if (isBusyStore(error)) {
+      // Undo contention may race another deleter mid-flight, so history stays conservatively remaining.
+      pushUnique("history");
+      pushUnique("undo");
+    } else {
+      pushUnique("undo");
+    }
   }
   try {
     openDraftStore({ home, workspaceRoot, sessionId: id }).clear(Number.MAX_SAFE_INTEGER);
   } catch {
-    remaining.push("draft");
+    pushUnique("draft");
   }
   try {
     releaseLease();
   } catch {
-    remaining.push("lease");
+    pushUnique("lease");
   }
   try {
-    if (await exists(sessionPath(directory, id))) remaining.push("conversation");
+    if (await exists(sessionPath(directory, id))) pushUnique("conversation");
   } catch {
-    remaining.push("conversation");
+    pushUnique("conversation");
   }
-  return Object.freeze(remaining) as unknown as HostDeletedArtifact[];
-}
-
-/** Remove one validated tombstone path without touching unrelated files. */
-export async function removeRetiredMarker(directory: string, id: string): Promise<void> {
-  validId(id);
-  await unlink(join(directory, `${id}${RETIRED_SUFFIX}`)).catch(error => {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new HostError("storage");
-  });
+  return Object.freeze(remaining);
 }
