@@ -17,6 +17,12 @@ export type {
   HostAuthDescription, HostAuthFetch, HostAuthReadiness, HostAuthRoute, HostAuthRunResult, HostAuthSelection, HostAuthStatusCode, HostCredentialReference, HostCredentialStore,
 } from "./auth-routes.ts";
 export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute } from "./auth-routes.ts";
+/** Quiesced native-state snapshot and validated restore for owned managed sessions. */
+export type {
+  HostSessionSnapshot, HostSnapshotArtifact, HostSnapshotArtifactKind, HostSnapshotOptions, HostSnapshotQuarantineReason,
+  HostSnapshotRestoreOptions, HostSnapshotRestoreResult, HostSnapshotSession, HostSnapshotValidation,
+} from "./snapshot.ts";
+export { SNAPSHOT_CONTRACT, SNAPSHOT_NATIVE_FORMAT_VERSION, MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_SNAPSHOT_SESSIONS, hashSnapshotBytes, validateSnapshotShape } from "./snapshot.ts";
 /** Named host-supplied context sent separately from durable conversation messages. */
 export type { ContextSection } from "../context/manager.ts";
 /** Complete discovery controls and explicitly versioned untrusted evidence for host-managed context. */
@@ -45,6 +51,7 @@ export interface HostCapabilities {
   readonly authRoutes: readonly ["codex", "grok"];
   readonly runContract: "schway.host.run-control/v1";
   readonly dataContract: "schway.host.managed-session-data/v1";
+  readonly snapshotContract: "schway.host.session-snapshot/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -199,6 +206,12 @@ export interface HostRuntime {
   retireSession(reference: HostSessionReference): Promise<void>;
   /** Delete owned native artifacts for one managed session id across branches with honest status. Busy owners and replaced aliases report blocked; unreadable stores and workspace mismatch throw. */
   deleteSession(reference: HostSessionReference): Promise<HostSessionDeletion>;
+  /** Capture a coherent snapshot of closed managed sessions under one quiesced lease set. Open or admitted writers reject busy; replaced aliases reject conflict. */
+  snapshotSessions(references: readonly HostSessionReference[], options?: import("./snapshot.ts").HostSnapshotOptions): Promise<import("./snapshot.ts").HostSessionSnapshot>;
+  /** Validate a snapshot without touching the store; quarantined snapshots must not restore or run. */
+  validateSessionSnapshot(snapshot: unknown): import("./snapshot.ts").HostSnapshotValidation;
+  /** Restore validated native artifacts into this store without running models or tools. Existing or busy targets quarantine; corrupt sets never partly activate. */
+  restoreSessionSnapshot(snapshot: unknown, options?: import("./snapshot.ts").HostSnapshotRestoreOptions): Promise<import("./snapshot.ts").HostSnapshotRestoreResult>;
   /** Close idle handles and refuse disposal while session creation or a run is in progress. Cancel admitted runs first; close never aborts or settles them. */
   close(): Promise<void>;
 }
@@ -228,6 +241,7 @@ const capabilities: HostCapabilities = Object.freeze({
   authRoutes: Object.freeze(["codex", "grok"] as const),
   runContract: "schway.host.run-control/v1",
   dataContract: "schway.host.managed-session-data/v1",
+  snapshotContract: "schway.host.session-snapshot/v1",
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */

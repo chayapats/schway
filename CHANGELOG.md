@@ -4,6 +4,26 @@
 
 ### Added
 
+- Add quiesced host snapshots and validated restore for owned native sessions.
+  `HostRuntime.snapshotSessions()` captures a coherent set under one copy
+  lease per session id after open handles close and admitted runs settle, so
+  open or foreign writers reject `busy` and replaced aliases reject
+  `conflict` before any mixed-generation manifest reports success.
+  `HostRuntime.validateSessionSnapshot()` checks shape, hashes, sizes and
+  supported versions without touching the store, and
+  `HostRuntime.restoreSessionSnapshot()` restores owned conversation and
+  metadata artifacts into a fresh matching-workspace store through
+  Schway-owned validation and forward-only migration without running models
+  or tools. Manifests carry stable refs, ancestry, native and contract
+  versions plus SHA-256 inventory without credentials or unowned files.
+  Missing, corrupt, incompatible, incomplete, conflicting and
+  workspace-mismatched sets quarantine with safe diagnostics; partial keeps
+  coherent writes without auto-running. Retired tombstones restore closed
+  unless `excludeRetired` filters them for the application deletion ledger.
+  History, draft and undo sidecars stay outside the snapshot. The host lease
+  makes the native set coherent; Jit coordinates its own app store and
+  generations with no distributed atomicity (#402).
+
 - Add narrow host retirement and deletion for owned native session data.
   `HostSession.retire()` and `HostRuntime.retireSession()` stop new work for
   an exact managed reference with a validated tombstone so later reopen,

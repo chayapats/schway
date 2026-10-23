@@ -2,7 +2,7 @@
 
 `schway/host` is the semver-governed application-host entry. It composes Schway's existing loop, context preparation, tool scheduler, retries and native JSONL persistence. It does not import the CLI or construct a provider. Discovery and scripted tests need no account or paid request.
 
-This implements `schway.host.base/v1` from [ENG01 #395](https://github.com/chayapats/schway/issues/395), `schway.host.context-policy/v1` from [ENG02 #396](https://github.com/chayapats/schway/issues/396), `schway.host.durable-sessions/v1` from [ENG04 #397](https://github.com/chayapats/schway/issues/397), `schway.host.tool-policy/v1` from [ENG03 #399](https://github.com/chayapats/schway/issues/399), `schway.host.auth-routes/v1` from [ENG05 #398](https://github.com/chayapats/schway/issues/398), `schway.host.run-control/v1` from [ENG06 #400](https://github.com/chayapats/schway/issues/400), and `schway.host.managed-session-data/v1` from [ENG07 #401](https://github.com/chayapats/schway/issues/401), slices of [S02 #393](https://github.com/chayapats/schway/issues/393). Strict context discovery, exclusive durable sessions, exact tool registries, explicit Grok/Codex route lifecycles, bounded run controls with honest terminal outcomes, and narrow retire/delete for owned native session data are supported; the production bridge remains a later capability. Unsupported policies/fields fail before input acceptance or inference. CLI context defaults are unchanged.
+This implements `schway.host.base/v1` from [ENG01 #395](https://github.com/chayapats/schway/issues/395), `schway.host.context-policy/v1` from [ENG02 #396](https://github.com/chayapats/schway/issues/396), `schway.host.durable-sessions/v1` from [ENG04 #397](https://github.com/chayapats/schway/issues/397), `schway.host.tool-policy/v1` from [ENG03 #399](https://github.com/chayapats/schway/issues/399), `schway.host.auth-routes/v1` from [ENG05 #398](https://github.com/chayapats/schway/issues/398), `schway.host.run-control/v1` from [ENG06 #400](https://github.com/chayapats/schway/issues/400), `schway.host.managed-session-data/v1` from [ENG07 #401](https://github.com/chayapats/schway/issues/401), and `schway.host.session-snapshot/v1` from [ENG08 #402](https://github.com/chayapats/schway/issues/402), slices of [S02 #393](https://github.com/chayapats/schway/issues/393). Strict context discovery, exclusive durable sessions, exact tool registries, explicit Grok/Codex route lifecycles, bounded run controls with honest terminal outcomes, and narrow retire/delete for owned native session data are supported; the production bridge remains a later capability. Unsupported policies/fields fail before input acceptance or inference. CLI context defaults are unchanged.
 
 ```ts
 import { createHost, hostCapabilities, type Model } from "schway/host";
@@ -60,7 +60,7 @@ Each accepted run captures its selected branch, model identity/method, host cont
 
 Native managed appends flush before in-memory publication; creation and torn-tail repair also flush file/directory state. A failed input append rejects storage without a model request or accepted reference. After accepted provider/tool progress, unsuccessful appends return `error` with the input reference and no final result. An uncertain write can leave bytes on disk: close and reopen to let Schway validate/repair/settle them before continuing. An executed tool whose result was not committed is settled as interrupted, never rerun; this records uncertainty rather than proving that its effect did or did not happen. Only committed native entry IDs identify inputs/results, independent of provisional stream events. A foreign session/branch result reference is rejected.
 
-Reopen selects the exact requested saved ancestry, preserves opaque provider metadata and retains sibling branches. Native corruption checks, torn-tail recovery, interrupted-call settlement and forward-only migrations remain Schway-owned; applications do not parse or rewrite JSONL. The native format stays at version 4. No distributed transaction or automatic acceptance/retry reconciliation with the application's database is introduced. Managed retirement/deletion and snapshot/restore are ENG07/08. Supplied models/tools are trusted executable code, not a sandbox.
+Reopen selects the exact requested saved ancestry, preserves opaque provider metadata and retains sibling branches. Native corruption checks, torn-tail recovery, interrupted-call settlement and forward-only migrations remain Schway-owned; applications do not parse or rewrite JSONL. The native format stays at version 4. No distributed transaction or automatic acceptance/retry reconciliation with the application's database is introduced. Managed retirement/deletion is ENG07; quiesced snapshots and validated restore are ENG08. Supplied models/tools are trusted executable code, not a sandbox.
 
 Schway completion/persistence is not Jit task acceptance, verified project completion or an atomic commit with Jit's app database. The application owns authorization, job fencing, task decisions and cross-store reconciliation.
 
@@ -129,6 +129,14 @@ Deletion reuses Schway-owned native cleanup for conversation, history, draft, un
 
 Jit owns authorization, memory and source lineage, deletion generations, backup retention and external copies. This API neither accepts model-issued deletion authority nor promises to erase remote provider copies. See ADR0015 and `tests/host-managed-session-data.test.ts`.
 
+## Session snapshots and validated restore
+
+`schway.host.session-snapshot/v1` is the supported native-state half of an application backup/restore. A trusted host quiesces managed writers, exports a manifest with opaque native artifacts, then validates and restores the set through supported host operations. Jit never parses or rewrites session schema.
+
+`HostRuntime.snapshotSessions(references, options?)` captures one coherent set after closing open handles and settling admitted runs. It acquires one copy lease per session id, so an open handle rejects `busy` before any copy and a foreign writer or replaced alias rejects `busy` or `conflict` before a mixed-generation manifest can report success. The manifest holds stable native refs and captured branch ancestry, the native format version, the snapshot contract version, the required managed artifact inventory and integrity metadata (SHA-256 and sizes for owned conversation and metadata artifacts); it holds no credentials, credential-store bodies or unowned host files. Leases are never captured. Retirement concurrent with the copy has explicit ordering: the lease makes the set coherent, a retirement that lands mid-copy rejects `conflict`, and `excludeRetired` lets the application deletion ledger filter retired refs before export. Only closed sessions can snapshot; the host lease makes the native set coherent while Jit coordinates its own app DB, tombstones, deletion ledger and outbox generations. There is no distributed atomicity with the application store.
+
+`HostRuntime.validateSessionSnapshot(snapshot)` checks shape, hashes, sizes and supported versions without touching the store. `HostRuntime.restoreSessionSnapshot(snapshot, options?)` restores into a fresh store with the matching workspace root, revalidates hashes, quarantines missing, corrupt, incompatible or incomplete sets with safe diagnostics, and resumes one captured ancestry through Schway-owned validation and forward-only migration. Restore never overwrites an existing target (existing conversation or tombstone quarantines as `conflict`), never runs model calls or tools, and never auto-activates a quarantined set. Partial restore keeps coherent writes and reports restored and remaining refs without running anything. Retired snapshots restore their tombstones and stay closed unless `excludeRetired` filters them before activation. History, draft and undo sidecars are not part of the snapshot; Jit coordinates them separately. See ADR0016 and `tests/host-session-snapshot.test.ts`.
+
 ## Public API
 
 The checked API report is `api/host.api.md`. Only this inventory and `schway/extensions` are semver-governed; private source/deep imports remain unsupported. Native types below are shared with the extension surface instead of introducing provider wire or TUI contracts.
@@ -177,10 +185,25 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostRunError` | Sanitized failure detail with effective policy and model. |
 | `HostOptions` | Trusted paths, context, tool policy and limits. |
 | `HostRunResult` | Terminal outcome with a durable result only on completion. |
-| `HostRuntime` | Create, open, retire, delete and close managed native handles. |
-| `HostSession` | Submit, retire and inspect one exact native ancestry. |
+| `HostRuntime` | Create, open, retire, delete, snapshot, validate, restore and close managed native handles. |
+| `HostSession` | Submit, compact, retire and inspect one exact native ancestry. |
 | `HostSessionDeletion` | Honest deletion outcome with retry guidance. |
 | `HostSessionReference` | Stable native session and branch identity. |
+| `HostSessionSnapshot` | Coherent native-state snapshot with contract versions and sessions. |
+| `HostSnapshotArtifact` | Opaque native artifact with size, hash and base64 bytes. |
+| `HostSnapshotArtifactKind` | Owned artifact kind captured in a snapshot. |
+| `HostSnapshotOptions` | Retired filter for snapshot export. |
+| `HostSnapshotQuarantineReason` | Safe quarantine category for unrestorable snapshots. |
+| `HostSnapshotRestoreOptions` | Retired filter for snapshot restore. |
+| `HostSnapshotRestoreResult` | Restored, quarantined or partial restore outcome. |
+| `HostSnapshotSession` | Captured session refs, ancestry, versions and inventory. |
+| `HostSnapshotValidation` | Offline snapshot validation verdict. |
+| `MAX_SNAPSHOT_ARTIFACT_BYTES` | Per-artifact byte bound for snapshots. |
+| `MAX_SNAPSHOT_SESSIONS` | Per-snapshot session bound. |
+| `SNAPSHOT_CONTRACT` | Snapshot contract version. |
+| `SNAPSHOT_NATIVE_FORMAT_VERSION` | Native format version for snapshots. |
+| `hashSnapshotBytes` | SHA-256 helper for snapshot integrity. |
+| `validateSnapshotShape` | Offline snapshot shape and integrity check. |
 | `JsonSchema` | Provider-independent tool input schema. |
 | `Model` | Host-supplied normalized model stream. |
 | `ModelCallOptions` | Schway-owned model-call settings. |
@@ -206,6 +229,8 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `Workspace` | Canonical root/launch/attached-root identity. |
 
 ## Validation
+
+`bun test tests/host-session-snapshot.test.ts` proves quiesced two-session snapshot, fresh-store restore and ancestry resume without tool replay, busy/conflict fencing for open writers and replaced aliases, retired ledger filtering on export and restore, quarantine for missing/corrupt/incompatible/incomplete sets, forward-only migration for older supported native versions, conflict on existing targets and workspace mismatch, and sanitized manifests.
 
 `bun test tests/host.test.ts` exercises a disposable external consumer that imports only `schway/host`, executes a scripted native tool round and reopens/continues in a fresh process. `bun test tests/host-tool-policy.test.ts` proves empty/narrow registries stay authoritative across retry/overflow/reopen, hook-mutated calls pass approval on effective arguments, and selected-provider bodies carry no hosted search even where an allowlist would admit it. `bun test tests/host-auth-routes.test.ts` proves explicit Grok/Codex route binding with opaque credential references, safe readiness and failure categories, shared single-flight renewal with cancellation/logout fencing, route isolation with API-key bait, lazy selected-adapter loading and disabled SDK retries, all with protocol fixtures and fake stores. `bun test tests/host-run-control.test.ts` proves finite deadline/retry bounds, transient progress, honest usage, terminal `completed`/`error`/`cancelled`/`max_turns`/`limit_exceeded` outcomes, cooperative cancel/settle, late-callback fencing and released ownership, all with scripted models and fake clocks. `bun test tests/host-managed-session-data.test.ts` proves retire blocks reopen, deletion removes only owned conversation, history, draft, undo, metadata and lease artifacts with honest `deleted`, `already-deleted`, `partial` and `blocked` status, busy and unknown writers delete nothing, symlink and traversal sentinels never escape, delayed completions never resurrect history, and CLI deletion, history and undo behavior is preserved. Preload sentinels reject provider/TUI initialization and runtime loading during static discovery, and only the selected adapter loads for route-bound runs. Other fixtures cover unsupported policies/options, durable input before inference, write failures, busy handles, cancellation, detached result reads and native terminal outcomes.
 
