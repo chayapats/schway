@@ -19,9 +19,10 @@
   `schway.host.auth-routes/v1`, `schway.host.run-control/v1`,
   `schway.host.managed-session-data/v1`, `schway.host.session-snapshot/v1`,
   and `schway.host.release/v1`. This branch stays at `1.0.0-rc.2`; the next
-  `1.0.0-rc.3` publish carries these contracts. Candidate HEAD at review time
-  is `ef66890f940c546a548e2f6c8532dbf70239c02d`; the coordinator replaces it
-  with the merge commit SHA before downstream pinning. Jit pins either the
+  `1.0.0-rc.3` publish carries these contracts. Tested revision is
+  `b1d00aa4b93ea7d50f4692b0eebb0132083ad4b8` (PR head); integration
+  squash-merges tree-identically (coordinator verifies an empty tree diff
+  against the merge commit). Jit pins either the
   tested tarball SHA (reproduce with `bun pm pack --destination <dir>` then
   `shasum -a 256 <tarball>`) or `schway@^1.0.0-rc.3`; actual npm/GitHub
   publication still requires existing repository authorization (#403).
