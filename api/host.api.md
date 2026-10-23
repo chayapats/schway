@@ -32,6 +32,15 @@ export interface AssistantTelemetry {
 }
 
 // @public
+export function checkAuthReadiness(selection: HostAuthSelection): Promise<HostAuthReadiness>;
+
+// @public
+export function classifyAuthError(error: unknown, selection: HostAuthSelection): HostAuthReadiness;
+
+// @public
+export function containsNoSecrets(value: unknown, sentinels: readonly string[]): boolean;
+
+// @public
 export interface ContextSection {
     // (undocumented)
     content: string;
@@ -69,10 +78,99 @@ export interface ContextSourcePolicy {
 export type ConversationItem = UserMessage | AssistantMessage | ToolResult;
 
 // @public
+export function createAuthRouteModel(selection: HostAuthSelection): Promise<Model>;
+
+// @public
 export function createHost(options: HostOptions): Promise<HostRuntime>;
 
 // @public
+export function credentialReferenceForRoute(route: HostAuthRoute): HostCredentialReference;
+
+// @public
+export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescription;
+
+// @public
+export interface HostAuthBinding {
+    checkReadiness(): Promise<HostAuthReadiness>;
+    createModel(): Promise<Model>;
+    // (undocumented)
+    readonly credential: HostCredentialReference;
+    // (undocumented)
+    readonly model: string;
+    // (undocumented)
+    readonly route: HostAuthRoute;
+}
+
+// @public
+export interface HostAuthDescription {
+    // (undocumented)
+    readonly credential: HostCredentialReference;
+    // (undocumented)
+    readonly model: string;
+    // (undocumented)
+    readonly route: HostAuthRoute;
+    // (undocumented)
+    readonly supported: true;
+}
+
+// @public
+export type HostAuthFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
+// @public
+export interface HostAuthReadiness {
+    // (undocumented)
+    readonly credential: HostCredentialReference;
+    // (undocumented)
+    readonly model: string;
+    // (undocumented)
+    readonly nextAction: string;
+    // (undocumented)
+    readonly observedInference: "not-checked" | "observed";
+    // (undocumented)
+    readonly route: HostAuthRoute;
+    // (undocumented)
+    readonly status: HostAuthStatusCode;
+}
+
+// @public
+export type HostAuthRoute = "codex" | "grok";
+
+// @public
+export type HostAuthRunResult = {
+    outcome: "completed";
+    input: HostEntryReference;
+    result: HostEntryReference;
+    message: AssistantMessage;
+    observedInference: "observed";
+} | {
+    outcome: "error" | "cancelled" | "max_turns";
+    input: HostEntryReference;
+    auth: HostAuthReadiness;
+};
+
+// @public
+export interface HostAuthSelection {
+    // (undocumented)
+    env?: Record<string, string | undefined>;
+    // (undocumented)
+    fetch?: HostAuthFetch;
+    // (undocumented)
+    model: string;
+    // (undocumented)
+    route: HostAuthRoute;
+    // (undocumented)
+    store?: HostCredentialStore;
+}
+
+// @public
+export type HostAuthStatusCode = "configured-unverified" | "needs-login" | "store-unavailable" | "invalid-store" | "rejected" | "quota-exceeded" | "model-unavailable" | "integration-unavailable";
+
+// @public
 export interface HostCapabilities {
+    // (undocumented)
+    readonly authContract: "schway.host.auth-routes/v1";
+    // (undocumented)
+    readonly authRoutes: readonly ["codex", "grok"];
     // (undocumented)
     readonly contextContract: "schway.host.context-policy/v1";
     // (undocumented)
@@ -107,6 +205,21 @@ export type HostCompactionResult = {
 } | {
     outcome: "noop" | "error" | "cancelled";
 };
+
+// @public
+export interface HostCredentialReference {
+    // (undocumented)
+    readonly account: string;
+    // (undocumented)
+    readonly label: string;
+}
+
+// @public
+export interface HostCredentialStore {
+    delete(identity: HostCredentialReference): Promise<boolean>;
+    get(identity: HostCredentialReference): Promise<string | null>;
+    set(identity: HostCredentialReference, value: string): Promise<void>;
+}
 
 // @public
 export type HostedTool = "web_search";
@@ -147,6 +260,8 @@ export interface HostLimits {
 // @public
 export interface HostOptions {
     // (undocumented)
+    auth?: HostAuthSelection;
+    // (undocumented)
     context: {
         policy: "workspace-discovery" | "strict" | "controlled";
         systemPrompt: string;
@@ -184,6 +299,8 @@ export type HostRunResult = {
 // @public
 export interface HostRuntime {
     // (undocumented)
+    readonly auth?: HostAuthBinding;
+    // (undocumented)
     readonly capabilities: HostCapabilities;
     close(): Promise<void>;
     createSession(): Promise<HostSession>;
@@ -198,6 +315,7 @@ export interface HostSession {
     // (undocumented)
     readonly reference: HostSessionReference;
     submit(input: HostInput, model: Model, signal?: AbortSignal): Promise<HostRunResult>;
+    submitWithRoute(input: HostInput, signal?: AbortSignal): Promise<HostAuthRunResult>;
 }
 
 // @public
