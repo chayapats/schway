@@ -11,10 +11,13 @@ import {
 
 /** Packed-install conformance consumer: public imports only, no private source access. */
 
+/** Runtime globals only: Buffer, Bun, and crypto come from the Bun runtime, so this file keeps no node: or bun: import. */
+
 type Input =
   | { action: "capabilities" }
   | { action: "release"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string; restoreDirectory: string }
-  | { action: "codex-route" | "grok-route"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
+  | { action: "codex-route" | "grok-route"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
+  | { action: "renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
 
 function fakeStore() {
   const values = new Map<string, string>();
@@ -307,6 +310,65 @@ if (input.action === "capabilities") {
     restored: restored.status,
     executions: state.executions,
   }));
+} else if (input.action === "renewal") {
+  const { route, workspaceRoot, homeDirectory, sessionDirectory } = input;
+  const modelId = route === "codex" ? "gpt-5.4" : "grok-4.7";
+  const account = route === "codex" ? "codex-subscription:chatgpt" : "grok-subscription:xai";
+  const other = route === "codex" ? "grok" : "codex";
+  const otherAccount = other === "codex" ? "codex-subscription:chatgpt" : "grok-subscription:xai";
+  const store = fakeStore();
+  await store.set({ account }, JSON.stringify({
+    accessToken: `${route}-stale-token`,
+    refreshToken: `${route}-shared-refresh`,
+    obtainedAt: 1,
+    expiresAt: 1,
+  }));
+  await store.set({ account: otherAccount }, JSON.stringify({
+    accessToken: `${other}-untouched-token`,
+    refreshToken: `${other}-refresh`,
+    obtainedAt: Date.now(),
+    expiresAt: Date.now() + 3_600_000,
+  }));
+  let refreshes = 0;
+  let inferences = 0;
+  const fetch = (async (url: string | URL | Request) => {
+    const target = String(url);
+    if (target.includes("/oauth/token") || target.includes("auth.x.ai")) {
+      refreshes++;
+      await Bun.sleep(20);
+      return Response.json({ access_token: `${route}-fresh-token`, refresh_token: `${route}-shared-refresh`, expires_in: 3600 });
+    }
+    inferences++;
+    return route === "codex" ? codexOk() : grokOk();
+  }) as never;
+  const host = await createHost({
+    workspaceRoot,
+    homeDirectory,
+    sessionDirectory,
+    context: { policy: "strict", systemPrompt: "Release renewal probe", sections: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
+    limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 },
+    auth: { route, model: modelId, store, fetch },
+  } as unknown as HostOptions);
+  const first = await host.createSession();
+  const second = await host.createSession();
+  const [one, two] = await Promise.all([
+    first.submitWithRoute({ text: "renewal one" }),
+    second.submitWithRoute({ text: "renewal two" }),
+  ]);
+  if (one.outcome !== "completed" || two.outcome !== "completed") throw new Error("Expected concurrent renewal to complete");
+  if (refreshes !== 1) throw new Error(`Expected one shared refresh, got ${refreshes}`);
+  if (inferences !== 2) throw new Error(`Expected two route inferences, got ${inferences}`);
+  const combined = JSON.stringify([one, two]);
+  if (combined.includes(`${route}-stale-token`)) throw new Error("Stale token leaked into renewal result");
+  if (combined.includes(`${route}-fresh-token`)) throw new Error("Fresh token leaked into renewal result");
+  if (combined.includes(`${other}-untouched-token`)) throw new Error("Cross-route token leaked into renewal result");
+  const otherRaw = await store.get({ account: otherAccount });
+  if (!otherRaw?.includes(`${other}-untouched-token`)) throw new Error("Cross-route credential changed during renewal");
+  await first.close();
+  await second.close();
+  await host.close();
+  console.log(JSON.stringify({ outcome: "completed", refreshes, inferences }));
 } else {
   throw new Error(`Unknown action: ${(input as { action: string }).action}`);
 }

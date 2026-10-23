@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile, realpath, stat } from "node:fs/promises";
+import { lstat, mkdir, readFile, readlink, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -34,10 +34,13 @@ async function packAndInstall(dir: string): Promise<{ consumer: string; tarball:
 
   const installed = join(consumer, "node_modules/schway");
   expect((await stat(installed)).isDirectory()).toBe(true);
-  expect((await stat(installed)).isSymbolicLink()).toBe(false);
+  expect((await lstat(installed)).isSymbolicLink()).toBe(false);
+  await expect(readlink(installed)).rejects.toThrow();
   expect(await Bun.file(join(installed, "package.json")).exists()).toBe(true);
   expect(await Bun.file(join(installed, "dist/types/host/index.d.ts")).exists()).toBe(true);
   expect(await Bun.file(join(installed, "src/host/index.ts")).exists()).toBe(true);
+  expect(await Bun.file(join(installed, "examples/host/review.ts")).exists()).toBe(true);
+  expect(await Bun.file(join(installed, "docs/host.md")).exists()).toBe(true);
   const manifest = JSON.parse(await readFile(join(installed, "package.json"), "utf8"));
   expect(manifest.exports["./host"]).toEqual({
     types: "./dist/types/host/index.d.ts", default: "./src/host/index.ts",
@@ -138,11 +141,11 @@ test("packed release consumer proves codex route isolation without fallback", as
     const result = await packedConsumer(consumer,
       { action: "codex-route", workspaceRoot, homeDirectory, sessionDirectory },
       `await Bun.plugin({name:'release-codex-guard',setup(builder){
-        builder.onLoad({filter:/providers\\/grok-subscription/},()=>{throw new Error('unselected grok loaded');});
-        builder.onLoad({filter:/providers\\/xai\\.ts/},()=>{throw new Error('unselected xai loaded');});
-        builder.onLoad({filter:/providers\\/openai\\.ts/},()=>{throw new Error('native openai loaded');});
-        builder.onLoad({filter:/providers\\/openai-compatible/},()=>{throw new Error('unselected compatible loaded');});
-        builder.onLoad({filter:/\\/tui\\//},()=>{throw new Error('TUI loaded');});
+        builder.onLoad({filter:/providers[/\\\\]grok-subscription/},()=>{throw new Error('unselected grok loaded');});
+        builder.onLoad({filter:/providers[/\\\\]xai\\.ts/},()=>{throw new Error('unselected xai loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai\\.ts/},()=>{throw new Error('native openai loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai-compatible/},()=>{throw new Error('unselected compatible loaded');});
+        builder.onLoad({filter:/[/\\\\]tui[/\\\\]/},()=>{throw new Error('TUI loaded');});
         builder.onLoad({filter:/@opentui/},()=>{throw new Error('renderer loaded');});
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({ outcome: "completed", observed: "observed" });
@@ -163,10 +166,10 @@ test("packed release consumer proves grok route isolation without fallback", asy
     const result = await packedConsumer(consumer,
       { action: "grok-route", workspaceRoot, homeDirectory, sessionDirectory },
       `await Bun.plugin({name:'release-grok-guard',setup(builder){
-        builder.onLoad({filter:/providers\\/codex-subscription/},()=>{throw new Error('unselected codex loaded');});
-        builder.onLoad({filter:/providers\\/openai\\.ts/},()=>{throw new Error('native openai loaded');});
-        builder.onLoad({filter:/providers\\/openai-compatible/},()=>{throw new Error('unselected compatible loaded');});
-        builder.onLoad({filter:/\\/tui\\//},()=>{throw new Error('TUI loaded');});
+        builder.onLoad({filter:/providers[/\\\\]codex-subscription/},()=>{throw new Error('unselected codex loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai\\.ts/},()=>{throw new Error('native openai loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai-compatible/},()=>{throw new Error('unselected compatible loaded');});
+        builder.onLoad({filter:/[/\\\\]tui[/\\\\]/},()=>{throw new Error('TUI loaded');});
         builder.onLoad({filter:/@opentui/},()=>{throw new Error('renderer loaded');});
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({ outcome: "completed", observed: "observed" });
@@ -175,15 +178,70 @@ test("packed release consumer proves grok route isolation without fallback", asy
   }
 }, 120_000);
 
+for (const route of ["codex", "grok"] as const) {
+  test(`packed release consumer shares one ${route} renewal without cross-route reads`, async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+    try {
+      const { consumer } = await packAndInstall(dir);
+      const workspaceRoot = join(consumer, `work-renewal-${route}`);
+      const homeDirectory = join(consumer, `home-renewal-${route}`);
+      const sessionDirectory = join(consumer, `sessions-renewal-${route}`);
+      await mkdir(workspaceRoot, { recursive: true });
+      await mkdir(homeDirectory, { recursive: true });
+      const guard = route === "codex"
+        ? `await Bun.plugin({name:'release-renewal-guard',setup(builder){
+        builder.onLoad({filter:/providers[/\\\\]grok-subscription/},()=>{throw new Error('unselected grok loaded');});
+        builder.onLoad({filter:/providers[/\\\\]xai\\.ts/},()=>{throw new Error('unselected xai loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai\\.ts/},()=>{throw new Error('native openai loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai-compatible/},()=>{throw new Error('unselected compatible loaded');});
+        builder.onLoad({filter:/[/\\\\]tui[/\\\\]/},()=>{throw new Error('TUI loaded');});
+        builder.onLoad({filter:/@opentui/},()=>{throw new Error('renderer loaded');});
+      }});`
+        : `await Bun.plugin({name:'release-renewal-guard',setup(builder){
+        builder.onLoad({filter:/providers[/\\\\]codex-subscription/},()=>{throw new Error('unselected codex loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai\\.ts/},()=>{throw new Error('native openai loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai-compatible/},()=>{throw new Error('unselected compatible loaded');});
+        builder.onLoad({filter:/[/\\\\]tui[/\\\\]/},()=>{throw new Error('TUI loaded');});
+        builder.onLoad({filter:/@opentui/},()=>{throw new Error('renderer loaded');});
+      }});`;
+      const result = await packedConsumer(consumer,
+        { action: "renewal", route, workspaceRoot, homeDirectory, sessionDirectory },
+        guard) as Record<string, unknown>;
+      expect(result).toMatchObject({ outcome: "completed", refreshes: 1, inferences: 2 });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }, 120_000);
+}
+
 test("packed release consumer fixture imports only the public host entry", async () => {
   await withTempDir(async () => {
     const fixture = await Bun.file(join(root, "tests/fixtures/host-release-consumer.ts")).text();
     const specifiers = [...fixture.matchAll(/\b(?:from\s*|import\s*(?:\(\s*)?|require\s*\(\s*)["']([^"']+)["']/g)].map((match) => match[1]!);
+    expect(specifiers).toContain("schway/host");
     for (const specifier of specifiers) {
-      if (specifier === "schway" || specifier.startsWith("schway/")) expect(specifier).toBe("schway/host");
       expect(specifier.startsWith("."), `${specifier} must not use a relative import`).toBe(false);
+      expect(specifier.startsWith("/"), `${specifier} must not use an absolute import`).toBe(false);
       expect(specifier).not.toContain("src/host");
+      if (specifier === "schway/host") continue;
+      expect(specifier.startsWith("node:"), `${specifier} must not use a node import`).toBe(false);
+      expect(specifier.startsWith("bun:"), `${specifier} must not use a bun import`).toBe(false);
+      expect(specifier, `${specifier} is not the public host entry`).toBe("schway/host");
     }
-    expect(fixture).not.toContain("node:fs");
+    expect(fixture).not.toMatch(/["']node:/);
+    expect(fixture).not.toMatch(/["']bun:/);
+  });
+});
+
+test("packed release example builds against the public host entry", async () => {
+  await withTempDir(async (dir) => {
+    const outfile = join(dir, "review-bundle.js");
+    const child = Bun.spawn(["bun", "build", join(root, "examples/host/review.ts"), "--external", "schway/host", "--outfile", outfile],
+      { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
+    ]);
+    expect(code, stdout + stderr).toBe(0);
+    expect(await Bun.file(outfile).exists()).toBe(true);
   });
 });

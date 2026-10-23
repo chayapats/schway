@@ -12,10 +12,19 @@
   consumer, and host docs. An external temporary consumer installs that tarball
   without private source access and proves strict review, narrow tools,
   independent sessions, normalized usage, cancellation, retire/delete, snapshot
-  restore, and Grok/Codex route isolation through public imports only.
-  Downstream pins the tested revision plus `schway.host.release/v1`; actual
-  npm/GitHub publication still requires existing repository authorization
-  (#403).
+  restore, Grok/Codex route isolation, and concurrent renewal sharing one
+  refresh without cross-route reads through public imports only. The supported
+  set is `schway.host.base/v1`, `schway.host.context-policy/v1`,
+  `schway.host.tool-policy/v1`, `schway.host.durable-sessions/v1`,
+  `schway.host.auth-routes/v1`, `schway.host.run-control/v1`,
+  `schway.host.managed-session-data/v1`, `schway.host.session-snapshot/v1`,
+  and `schway.host.release/v1`. This branch stays at `1.0.0-rc.2`; the next
+  `1.0.0-rc.3` publish carries these contracts. Candidate HEAD at review time
+  is `ef66890f940c546a548e2f6c8532dbf70239c02d`; the coordinator replaces it
+  with the merge commit SHA before downstream pinning. Jit pins either the
+  tested tarball SHA (reproduce with `bun pm pack --destination <dir>` then
+  `shasum -a 256 <tarball>`) or `schway@^1.0.0-rc.3`; actual npm/GitHub
+  publication still requires existing repository authorization (#403).
 
 - Add quiesced host snapshots and validated restore for owned native sessions.
   `HostRuntime.snapshotSessions()` captures a coherent set under one copy
