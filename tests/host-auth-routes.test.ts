@@ -421,6 +421,54 @@ test("classifyAuthError never includes native secrets and never switches route",
   expect(JSON.stringify(plan)).not.toContain("sentinel-x");
 });
 
+test("status-less refusal and rate-limit bodies hit their documented categories", () => {
+  for (const route of ["codex", "grok"] as const) {
+    const selection = { route, model: route === "codex" ? "gpt-5.4" : "grok-4.7", store: fakeCredentialStore() };
+    // Sanitized provider errors carry no status, so classification stays message-based.
+    expect(classifyAuthError(new Error("request failed (HTTP 402)"), selection).status).toBe("rejected");
+    expect(classifyAuthError(new Error("request failed (HTTP 403)"), selection).status).toBe("rejected");
+    expect(classifyAuthError(new Error("request failed (HTTP 429)"), selection).status).toBe("quota-exceeded");
+    expect(classifyAuthError(new Error("request failed (HTTP 500)"), selection).status).toBe("integration-unavailable");
+  }
+});
+
+test("default native store is memoized per selection identity", async () => {
+  const { effectiveStore } = await import("../src/host/auth-routes.ts");
+  const selection = { route: "codex" as const, model: "gpt-5.4" };
+  expect(effectiveStore(selection)).toBe(effectiveStore(selection));
+  expect(effectiveStore({ route: "codex" as const, model: "gpt-5.4" })).not.toBe(effectiveStore(selection));
+  const explicit = fakeCredentialStore();
+  expect(effectiveStore({ route: "codex" as const, model: "gpt-5.4", store: explicit })).toBe(explicit);
+});
+
+test("containsNoSecrets covers values and circular input without throwing", async () => {
+  const { containsNoSecrets } = await import("../src/host/auth-routes.ts");
+  expect(containsNoSecrets("clean text", ["s3cr3t"])).toBe(true);
+  expect(containsNoSecrets("has s3cr3t inside", ["s3cr3t"])).toBe(false);
+  expect(containsNoSecrets({ nested: ["s3cr3t"] }, ["s3cr3t"])).toBe(false);
+  expect(containsNoSecrets({ nested: ["clean"] }, ["s3cr3t"])).toBe(true);
+  expect(containsNoSecrets({ anything: 1 }, [])).toBe(true);
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  expect(containsNoSecrets(circular, ["s3cr3t"])).toBe(false);
+});
+
+test("direct API users get the same env rejection as host construction", async () => {
+  const store = fakeCredentialStore();
+  const base = { route: "codex" as const, model: "gpt-5.4", store };
+  await expect(checkAuthReadiness({ ...base, env: { lowercase: "x" } })).rejects.toThrow("invalid");
+  await expect(checkAuthReadiness({ ...base, env: { GOOD: 1 as unknown as string } })).rejects.toThrow("invalid");
+  expect(() => describeAuthRoute({ ...base, env: { "has-dash": "x" } })).toThrow("invalid");
+  const oversized: Record<string, string> = {};
+  for (let i = 0; i < 65; i++) oversized[`K${i}`] = "v";
+  expect(() => describeAuthRoute({ ...base, env: oversized })).toThrow("invalid");
+  expect(describeAuthRoute({ ...base, env: { GOOD: "v", EMPTY: undefined } }).supported).toBe(true);
+  await withTempDir(async dir => {
+    const config = await options(dir);
+    await expect(createHost({ ...config, auth: { ...base, env: { lowercase: "x" } } })).rejects.toMatchObject({ code: "invalid-options" });
+  });
+});
+
 test("SDK retries stay disabled; transport refresh and bounded core retries stay authoritative", async () => {
   await withTempDir(async dir => {
     // Persistent 401 is never retried by the SDK or the loop.

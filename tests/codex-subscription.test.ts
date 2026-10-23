@@ -681,6 +681,90 @@ test("racing turns share one serialized refresh before expiry", async () => {
   expect((await loadSubscriptionTokens(store))?.accessToken).toBe("fresh-token");
 });
 
+test("a concurrent fresh save wins over a stale in-flight read without refreshing", async () => {
+  let current = JSON.stringify({
+    accessToken: "s1-stale",
+    refreshToken: "s1-refresh",
+    expiresAt: 1,
+    obtainedAt: 1,
+  });
+  const store: CredentialStore = {
+    async get() {
+      await Bun.sleep(5);
+      return current;
+    },
+    async set(_identity, value) {
+      await Bun.sleep(50);
+      current = value;
+    },
+    async delete() {
+      return false;
+    },
+  };
+  let refreshes = 0;
+  const refresher = createSubscriptionTokenRefresher({
+    store,
+    fetch: (async () => {
+      refreshes += 1;
+      return new Response(
+        JSON.stringify({ access_token: "refreshed-from-s1", refresh_token: "s1-refresh", expires_in: 3600 }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    }) satisfies CodexFetchLike,
+  });
+  const [credential] = await Promise.all([
+    refresher.getValidAccessToken(),
+    saveSubscriptionTokens(store, {
+      accessToken: "s2-valid",
+      refreshToken: "s2-refresh",
+      expiresAt: Date.now() + 3_600_000,
+    }),
+  ]);
+  expect(refreshes).toBe(0);
+  expect(credential.accessToken).toBe("s2-valid");
+  expect(JSON.parse(current).accessToken).toBe("s2-valid");
+});
+
+test("a failed save does not poison a concurrent refresh as revoked", async () => {
+  const raw = JSON.stringify({ accessToken: "stale", refreshToken: "r", expiresAt: 1, obtainedAt: 1 });
+  let failSet = false;
+  const store: CredentialStore = {
+    async get() {
+      return raw;
+    },
+    async set() {
+      if (failSet) throw new Error("disk locked");
+    },
+    async delete() {
+      return false;
+    },
+  };
+  const release = Promise.withResolvers<void>();
+  const refresher = createSubscriptionTokenRefresher({
+    store,
+    fetch: (async () => {
+      await release.promise;
+      return new Response(
+        JSON.stringify({ access_token: "fresh", refresh_token: "r", expires_in: 3600 }),
+        { headers: { "Content-Type": "application/json" } },
+      );
+    }) satisfies CodexFetchLike,
+  });
+  const pending = refresher.getValidAccessToken();
+  await Bun.sleep(10);
+  failSet = true;
+  await expect(
+    saveSubscriptionTokens(store, { accessToken: "new", obtainedAt: Date.now() }),
+  ).rejects.toThrow(/Cannot save credential/);
+  release.resolve();
+  const error = await pending.then(
+    () => new Error("expected refresh to fail"),
+    (failure: unknown) => failure,
+  );
+  expect(String(error)).toMatch(/Cannot save credential/);
+  expect(String(error)).not.toMatch(/revoked/i);
+});
+
 test("valid access tokens skip renewal without touching the transport", async () => {
   const store = fakeCredentialStore();
   await saveSubscriptionTokens(store, {

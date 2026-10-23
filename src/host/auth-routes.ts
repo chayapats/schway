@@ -75,7 +75,9 @@ export function credentialReferenceForRoute(route: HostAuthRoute): HostCredentia
   return { account: identity.account, label: identity.label };
 }
 
-/** Validate an explicit route/model binding; raw tokens and API keys are never accepted. */
+/** Validate an explicit route/model binding; raw tokens and API keys are never accepted.
+ * @internal Host composition only; external callers use createHost validation instead.
+ */
 export function validateAuthSelection(input: unknown): HostAuthSelection {
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw new Error("invalid");
   const record = input as Record<string, unknown>;
@@ -91,7 +93,13 @@ export function validateAuthSelection(input: unknown): HostAuthSelection {
         typeof (store as HostCredentialStore).set !== "function" || typeof (store as HostCredentialStore).delete !== "function") throw new Error("invalid");
   }
   const env = record["env"];
-  if (env !== undefined && (typeof env !== "object" || env === null || Array.isArray(env))) throw new Error("invalid");
+  if (env !== undefined) {
+    if (typeof env !== "object" || env === null || Array.isArray(env)) throw new Error("invalid");
+    if (Object.keys(env).length > 64) throw new Error("invalid");
+    for (const [key, value] of Object.entries(env)) {
+      if (!/^[A-Z][A-Z0-9_]*$/.test(key) || (value !== undefined && typeof value !== "string")) throw new Error("invalid");
+    }
+  }
   const fetch = record["fetch"];
   if (fetch !== undefined && typeof fetch !== "function") throw new Error("invalid");
   return { route, model: (model as string).trim(), ...(store !== undefined ? { store: store as HostCredentialStore } : {}),
@@ -105,9 +113,20 @@ export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescrip
   return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), supported: true as const };
 }
 
-/** Resolve the effective store without exposing native errors or creating plaintext fallback. */
-function effectiveStore(selection: HostAuthSelection): CredentialStore {
-  return (selection.store ?? createNativeCredentialStore()) as CredentialStore;
+const defaultNativeStores = new WeakMap<object, CredentialStore>();
+
+/** Resolve the effective store without exposing native errors or creating plaintext fallback.
+ * @internal Host composition only; keyed by caller selection identity so concurrent
+ * route runs on one runtime share one renewal lifecycle for the default native store.
+ */
+export function effectiveStore(selection: HostAuthSelection): CredentialStore {
+  if (selection.store) return selection.store as CredentialStore;
+  let cached = defaultNativeStores.get(selection);
+  if (!cached) {
+    cached = createNativeCredentialStore();
+    defaultNativeStores.set(selection, cached);
+  }
+  return cached;
 }
 
 function needsLoginAction(route: HostAuthRoute): string {
@@ -117,7 +136,7 @@ function needsLoginAction(route: HostAuthRoute): string {
 }
 
 function storeUnavailableAction(): string {
-  return "Cannot read credential in the OS secure store. Unlock or allow access to your OS credential store; on Linux install libsecret and start a Secret Service. Retry after restoring access. For reads, --api-key or the provider API-key environment variable bypasses the store. No plaintext fallback is used.";
+  return "Cannot read credential in the OS secure store. Unlock or allow access to your OS credential store; on Linux install libsecret and start a Secret Service. Retry after restoring access. No plaintext fallback is used.";
 }
 
 function invalidStoreAction(route: HostAuthRoute): string {
@@ -131,7 +150,9 @@ export async function checkAuthReadiness(selection: HostAuthSelection): Promise<
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
   const base = { route: valid.route, model: valid.model, credential, observedInference: "not-checked" as const };
-  const store = effectiveStore(valid);
+  // Memoize on the caller selection identity, not the validated copy, so one
+  // runtime shares one default native store across readiness and model runs.
+  const store = effectiveStore(selection);
   const identity = valid.route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
   let raw: string | null;
   try {
@@ -159,7 +180,7 @@ export async function checkAuthReadiness(selection: HostAuthSelection): Promise<
 /** Create only the selected subscription adapter; the unselected route and TUI never load. */
 export async function createAuthRouteModel(selection: HostAuthSelection): Promise<Model> {
   const valid = validateAuthSelection(selection);
-  const store = effectiveStore(valid);
+  const store = effectiveStore(selection);
   const { loadProviderModel } = await import("../model/loader.ts");
   if (valid.route === "codex") {
     return loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store }, valid.fetch);
@@ -186,7 +207,10 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "");
 }
 
-/** Map a route-bound failure to a stable safe category without leaking secrets or switching routes. */
+/** Map a route-bound failure to a stable safe category without leaking secrets or switching routes.
+ * Classification is message- and category-based: provider adapters throw sanitized
+ * plain messages (and the loop drops transport status), so status-less bodies must
+ * still hit their documented category through these patterns. */
 export function classifyAuthError(error: unknown, selection: HostAuthSelection): HostAuthReadiness {
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
@@ -199,7 +223,7 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
   if (/No ChatGPT subscription login|No Grok subscription login|expired.*no refresh token|no refresh token/i.test(text)) {
     return { ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) };
   }
-  if (/Stored .* subscription login is invalid|revoked|rejected by the provider|rejected by xAI|denied|Plus\/Pro|membership|seat|entitlement|Your Grok plan doesn't include API access/i.test(text) ||
+  if (/Stored .* subscription login is invalid|revoked|rejected by the provider|rejected by xAI|denied|Plus\/Pro|membership|seat|entitlement|Your Grok plan doesn't include API access|HTTP 40[123]\b/i.test(text) ||
       status === 401 || status === 402 || status === 403) {
     const nextAction = valid.route === "codex"
       ? "The ChatGPT subscription session was rejected. Sign in again in interactive mode with /login chatgpt; stored API keys are never used as a silent fallback."
@@ -229,6 +253,15 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
 /** True when a value contains none of the supplied secret sentinels. */
 export function containsNoSecrets(value: unknown, sentinels: readonly string[]): boolean {
   if (sentinels.length === 0) return true;
-  const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+  if (typeof value === "string") {
+    return sentinels.every(sentinel => sentinel.length === 0 || !value.includes(sentinel));
+  }
+  // Unserializable input cannot prove it holds no secrets.
+  let text: string;
+  try {
+    text = JSON.stringify(value) ?? "";
+  } catch {
+    return false;
+  }
   return sentinels.every(sentinel => sentinel.length === 0 || !text.includes(sentinel));
 }

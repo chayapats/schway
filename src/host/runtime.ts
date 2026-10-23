@@ -79,13 +79,7 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
       if (error instanceof Error && error.message === "unsupported") throw new HostError("unsupported-policy");
       throw new HostError("invalid-options");
     }
-    if (authSelection.env !== undefined) {
-      const env = authSelection.env;
-      if (Object.keys(env).length > 64) throw new HostError("invalid-options");
-      for (const [key, value] of Object.entries(env)) {
-        if (!/^[A-Z][A-Z0-9_]*$/.test(key) || (value !== undefined && typeof value !== "string")) throw new HostError("invalid-options");
-      }
-    }
+    // Env key/value rules live in validateAuthSelection so direct API users get the same rejection.
   }
   return { sourcePolicy, workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
     context: { policy: input.context.policy, systemPrompt: input.context.systemPrompt, sections: structuredClone(input.context.sections), sources: structuredClone(sources) },
@@ -254,12 +248,11 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, signal, webSearch: "off", exactTools: true })) {
             if (event.type === "agent.finished") outcome = event.reason;
             if (event.type === "error") {
+              // Provider errors arrive as sanitized plain messages without status,
+              // so route classification stays message- and category-based (see classifyAuthError).
               lastError = new Error(event.message);
               const category = (event as { category?: unknown }).category;
               if (category !== undefined) lastCategory = category;
-              if (typeof (event as { status?: unknown }).status === "number") {
-                (lastError as { status?: unknown }).status = (event as { status?: unknown }).status;
-              }
               if (typeof lastCategory === "string") {
                 (lastError as { category?: unknown }).category = lastCategory;
               }

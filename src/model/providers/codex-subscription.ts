@@ -278,8 +278,10 @@ export async function saveSubscriptionTokens(
   tokens: CodexTokens,
 ): Promise<void> {
   const state = codexLifecycle(store);
-  state.generation++;
+  // Bump only after the serialized write lands: a throwing store must not
+  // invalidate a concurrent refresh, which would then misreport as revoked.
   await serializeCodexWrite(state, () => writeCodexTokens(store, tokens));
+  state.generation++;
 }
 
 /** Persist a completed sign-in, reporting the write-start boundary and successful secure-store commit. */
@@ -298,11 +300,13 @@ export async function clearSubscriptionTokens(
   store: CredentialStore,
 ): Promise<boolean> {
   const state = codexLifecycle(store);
-  state.generation++;
-  return serializeCodexWrite(state, async () => {
+  // Bump only after the serialized delete lands, matching saveSubscriptionTokens.
+  const existed = await serializeCodexWrite(state, async () => {
     try { return await store.delete(codexSubscriptionIdentity()); }
     catch { throw new Error(credentialStoreError("delete")); }
   });
+  state.generation++;
+  return existed;
 }
 
 /** Parse stored subscription tokens, rejecting malformed or secretless payloads. */
@@ -464,8 +468,12 @@ export function createSubscriptionTokenRefresher(input: {
     async getValidAccessToken(signal?: AbortSignal): Promise<{ accessToken: string; accountId?: string }> {
       throwIfAborted(signal);
       const state = codexLifecycle(input.store);
-      await state.writes;
+      const pendingWrites = state.writes;
+      await pendingWrites;
       throwIfAborted(signal);
+      if (pendingWrites !== state.writes) {
+        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal);
+      }
       const generation = state.generation;
       let stored: CodexTokens | null;
       try {
