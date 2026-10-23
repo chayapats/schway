@@ -62,7 +62,14 @@ transient progress distinct from durable results, honest null-preserving usage,
 `completed`/`error`/`cancelled`/`max_turns`/`limit_exceeded` terminal outcomes
 with selected route/session/run references, and cooperative cancel/settle with
 late-callback fencing before ownership release. It composes the existing loop,
-retry and scheduler without a competing durable job scheduler.
+retry and scheduler without a competing durable job scheduler. The
+managed-session-data contract adds narrow retire and delete for exact
+host-owned native references: retirement tombstones block silent reopen,
+deletion reuses Schway-owned conversation, history, draft, undo, metadata and
+lease cleanup with honest `deleted`, `already-deleted`, `partial` and `blocked`
+status, and busy, unknown, symlink, traversal and unrelated-store writers
+delete nothing. It promises no remote provider erasure, no JSONL rewrite and
+no general filesystem removal.
 
 Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing

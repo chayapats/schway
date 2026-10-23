@@ -180,6 +180,8 @@ export interface HostCapabilities {
     // (undocumented)
     readonly contract: "schway.host.base/v1";
     // (undocumented)
+    readonly dataContract: "schway.host.managed-session-data/v1";
+    // (undocumented)
     readonly extensionDiscovery: "disabled-only";
     // (undocumented)
     readonly features: readonly ["host-supplied-model", "native-result-reference", "explicit-compaction"];
@@ -233,6 +235,9 @@ export interface HostCredentialStore {
     get(identity: HostCredentialReference): Promise<string | null>;
     set(identity: HostCredentialReference, value: string): Promise<void>;
 }
+
+// @public
+export type HostDeletedArtifact = "conversation" | "metadata" | "history" | "draft" | "undo" | "lease";
 
 // @public
 export type HostedTool = "web_search";
@@ -398,7 +403,9 @@ export interface HostRuntime {
     readonly capabilities: HostCapabilities;
     close(): Promise<void>;
     createSession(): Promise<HostSession>;
+    deleteSession(reference: HostSessionReference): Promise<HostSessionDeletion>;
     openSession(reference: HostSessionReference): Promise<HostSession>;
+    retireSession(reference: HostSessionReference): Promise<void>;
 }
 
 // @public
@@ -419,9 +426,33 @@ export interface HostSession {
     readResult(reference: HostEntryReference): AssistantMessage;
     // (undocumented)
     readonly reference: HostSessionReference;
+    retire(): Promise<void>;
     submit(input: HostInput, model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostRunResult>;
     submitWithRoute(input: HostInput, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostAuthRunResult>;
 }
+
+// @public
+export type HostSessionDeletion = {
+    status: "deleted";
+    session: HostSessionReference;
+    removed: readonly HostDeletedArtifact[];
+    nextAction: string;
+} | {
+    status: "already-deleted";
+    session: HostSessionReference;
+    nextAction: string;
+} | {
+    status: "partial";
+    session: HostSessionReference;
+    removed: readonly HostDeletedArtifact[];
+    remaining: readonly HostDeletedArtifact[];
+    nextAction: string;
+} | {
+    status: "blocked";
+    session: HostSessionReference;
+    reason: "busy" | "conflict";
+    nextAction: string;
+};
 
 // @public
 export interface HostSessionReference {

@@ -44,6 +44,7 @@ export interface HostCapabilities {
   readonly authContract: "schway.host.auth-routes/v1";
   readonly authRoutes: readonly ["codex", "grok"];
   readonly runContract: "schway.host.run-control/v1";
+  readonly dataContract: "schway.host.managed-session-data/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -161,7 +162,19 @@ export interface HostSession {
   cancel(): void;
   /** Release this idle handle; busy handles reject with busy instead of aborting. Cancel first, await settlement, then close. */
   close(): Promise<void>;
+  /** Retire this idle handle so its context cannot silently reopen; busy handles reject with busy. */
+  retire(): Promise<void>;
 }
+
+/** Sanitized managed artifact inventory for deletion reporting. */
+export type HostDeletedArtifact = "conversation" | "metadata" | "history" | "draft" | "undo" | "lease";
+
+/** Managed native-data deletion outcome; partial never reports success. */
+export type HostSessionDeletion =
+  | { status: "deleted"; session: HostSessionReference; removed: readonly HostDeletedArtifact[]; nextAction: string }
+  | { status: "already-deleted"; session: HostSessionReference; nextAction: string }
+  | { status: "partial"; session: HostSessionReference; removed: readonly HostDeletedArtifact[]; remaining: readonly HostDeletedArtifact[]; nextAction: string }
+  | { status: "blocked"; session: HostSessionReference; reason: "busy" | "conflict"; nextAction: string };
 
 /** Route-bound host composition; the selected Grok/Codex identity is fixed at creation. */
 export interface HostAuthBinding {
@@ -182,6 +195,10 @@ export interface HostRuntime {
   createSession(): Promise<HostSession>;
   /** Reopen the exact saved native branch within this configured workspace and store. */
   openSession(reference: HostSessionReference): Promise<HostSession>;
+  /** Retire one exact managed reference so later reopen cannot silently reintroduce it. */
+  retireSession(reference: HostSessionReference): Promise<void>;
+  /** Delete owned native artifacts for one exact managed reference with honest status. */
+  deleteSession(reference: HostSessionReference): Promise<HostSessionDeletion>;
   /** Close idle handles and refuse disposal while session creation or a run is in progress. Cancel admitted runs first; close never aborts or settles them. */
   close(): Promise<void>;
 }
@@ -210,6 +227,7 @@ const capabilities: HostCapabilities = Object.freeze({
   authContract: "schway.host.auth-routes/v1",
   authRoutes: Object.freeze(["codex", "grok"] as const),
   runContract: "schway.host.run-control/v1",
+  dataContract: "schway.host.managed-session-data/v1",
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */
