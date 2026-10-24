@@ -2079,3 +2079,22 @@ test("successful browser callback clears only the owning attempt", async () => {
   expect(getPendingBrowserAttempt()).toBeUndefined();
   clearPendingBrowserAttempt();
 });
+
+test("empty and truncated subscription streams fail closed instead of completing", async () => {
+  const truncated = TEXT_EVENTS.filter(event => (event as { type: string }).type !== "response.completed");
+  for (const [label, response] of [
+    ["empty", new Response("", { headers: { "Content-Type": "text/event-stream" } })],
+    ["truncated", sseResponse(truncated)],
+  ] as const) {
+    const model = createCodexSubscriptionModel({
+      model: "gpt-6-astra",
+      tokens: { accessToken: jwtWithAccount("acct-truncated"), expiresAt: Date.now() + 3_600_000 },
+      fetch: (async () => response) as never,
+    });
+    const error = await collect(model.stream(sampleRequest())).then(
+      () => null,
+      (failure: unknown) => failure,
+    );
+    expect(error, label).toMatchObject({ message: expect.stringContaining("ended before completion") });
+  }
+});

@@ -327,3 +327,22 @@ test("the Grok subscription route sends the web_search entry on the first reques
   expect(bodies[1]).toBe(bodies[0]!);
   expect((JSON.parse(bodies[0]!) as { tools: Array<{ type: string; name?: string }> }).tools.map(tool => tool.name ?? tool.type)).toEqual(["read", "web_search"]);
 });
+
+test("empty and truncated 200 streams fail closed instead of completing", async () => {
+  const truncated = XAI_TEXT_EVENTS.filter(event => event.type !== "response.completed");
+  for (const [label, body] of [["empty", ""], ["truncated", encodeXaiSse(truncated)]] as const) {
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
+    });
+    try {
+      const model = createXaiModel({ apiKey: "xai-test-key", model: "grok-4.7", baseUrl: `http://127.0.0.1:${server.port}/v1` });
+      const error = await collect(model.stream(sampleRequest())).then(
+        () => null,
+        (failure: unknown) => failure,
+      );
+      expect(error, label).toMatchObject({ message: expect.stringContaining("ended before completion") });
+    } finally { server.stop(true); }
+  }
+});
