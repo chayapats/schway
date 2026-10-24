@@ -1,5 +1,5 @@
 import type { Model } from "../model/model.ts";
-import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCredentialWriteRefused, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 
 export { isCredentialWriteRefused };
 
@@ -181,6 +181,9 @@ export function effectiveStore(selection: HostAuthSelection): CredentialStore {
       // guarantee against fenced writers, best effort against unfenced
       // cross-process writers). A concurrent legitimate write is never
       // touched. Reads stay unfenced; only persisted writes are fenced.
+      // Cleanup backend failures propagate distinctly: the refusal still
+      // terminalizes, but marked uncertain instead of claiming the value
+      // is gone.
       try {
         await runGuard(identity);
       } catch (refusal) {
@@ -191,7 +194,9 @@ export function effectiveStore(selection: HostAuthSelection): CredentialStore {
             const current = await base.get(identity);
             if (current === value) await base.delete(identity);
           }
-        } catch { /* Best-effort cleanup; the refusal still propagates. */ }
+        } catch (cleanupError) {
+          throw markCleanupUncertain(refusal, cleanupError);
+        }
         throw refusal;
       }
     },

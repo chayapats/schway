@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { withCredentialStoreLock } from "./store-lock.ts";
 
 /** Stable account identifier and safe display label for one provider credential. */
 export interface CredentialIdentity {
@@ -100,6 +101,14 @@ export function isCredentialWriteRefused(error: unknown): error is Error {
   return error.message.includes("refused by the embedding-application fence");
 }
 
+/** Marks a fence refusal whose post-write cleanup could not be verified. */
+export function markCleanupUncertain(refusal: unknown, cleanup: unknown): Error {
+  const error = refusal instanceof Error ? refusal : credentialWriteRefusedError(refusal);
+  (error as { cleanupUncertain?: unknown }).cleanupUncertain = true;
+  (error as { cause?: unknown }).cause = cleanup;
+  return error;
+}
+
 /** Preserve a fence refusal unchanged; convert any other write failure to a sanitized store error. */
 export function preserveRefusal(operation: "save" | "delete", error: unknown): Error {
   if (isCredentialWriteRefused(error)) return error;
@@ -116,24 +125,30 @@ export function createNativeCredentialStore(native?: typeof Bun.secrets): Creden
       catch { throw new Error(credentialStoreError("read")); }
     },
     async set(identity, value) {
-      try { await backend.set({ ...address(identity), value }); }
-      catch { throw new Error(credentialStoreError("save")); }
+      return withCredentialStoreLock(async () => {
+        try { await backend.set({ ...address(identity), value }); }
+        catch { throw new Error(credentialStoreError("save")); }
+      });
     },
     async delete(identity) {
-      try { return await backend.delete(address(identity)); }
-      catch { throw new Error(credentialStoreError("delete")); }
+      return withCredentialStoreLock(async () => {
+        try { return await backend.delete(address(identity)); }
+        catch { throw new Error(credentialStoreError("delete")); }
+      });
     },
-    // Best effort only: the OS keychain offers no atomic compare-and-swap,
-    // so a cross-process writer can still interleave. Same-process writers
-    // are serialized through the caller's lifecycle chain instead.
+    // Serialized by the cross-process credential-store lock, so every
+    // Schway-mediated writer in any local process takes its turn. Writers
+    // outside Schway (raw keychain tools) stay outside this guarantee.
     async compareAndDelete(identity, expectedValue) {
-      try {
-        const current = await backend.get(address(identity));
-        if (current !== expectedValue) return false;
-        return await backend.delete(address(identity));
-      } catch {
-        return false;
-      }
+      return withCredentialStoreLock(async () => {
+        try {
+          const current = await backend.get(address(identity));
+          if (current !== expectedValue) return false;
+          return await backend.delete(address(identity));
+        } catch {
+          return false;
+        }
+      });
     },
   };
 }
