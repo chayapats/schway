@@ -768,3 +768,22 @@ test("native store compare-and-delete is best-effort on the injected backend", a
   expect(await store.compareAndDelete!({ account: "a", label: "a" }, "v1")).toBe(true);
   expect(backend.has("a")).toBe(false);
 });
+
+test("uncertain cleanup errors survive preserveRefusal and classify distinctly", async () => {
+  const { isCleanupUncertain, markCleanupUncertain, preserveRefusal, credentialWriteRefusedError } = await import("../src/auth/store.ts");
+  const { classifyAuthError } = await import("../src/host/auth-routes.ts");
+  const uncertain = markCleanupUncertain(credentialWriteRefusedError(new Error("owner stopped")), new Error("keychain down"));
+  expect(isCleanupUncertain(uncertain)).toBe(true);
+  // preserveRefusal never sanitizes uncertainty into a clean refusal.
+  expect(preserveRefusal("save", uncertain)).toBe(uncertain);
+  const selection = { route: "grok" as const, model: "grok-4.7" };
+  const classified = classifyAuthError(uncertain, selection);
+  expect(classified.status).toBe("store-unavailable");
+  // Must not claim a clean fence: the late value may still be visible.
+  expect(classified.nextAction).not.toMatch(/No credential was changed/);
+  expect(classified.nextAction).toMatch(/may still be visible/);
+  // A clean refusal keeps its existing guidance.
+  const clean = credentialWriteRefusedError(new Error("owner stopped"));
+  expect(isCleanupUncertain(clean)).toBe(false);
+  expect(classifyAuthError(clean, selection).nextAction).toMatch(/No credential was changed/);
+});

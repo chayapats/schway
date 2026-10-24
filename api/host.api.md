@@ -548,6 +548,9 @@ export type HostSnapshotValidation = {
 };
 
 // @public
+export function isCleanupUncertain(error: unknown): boolean;
+
+// @public
 export function isCredentialWriteRefused(error: unknown): error is Error;
 
 // @public

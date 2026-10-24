@@ -16,7 +16,7 @@ export type {
 export type {
   HostAuthDescription, HostAuthFetch, HostAuthReadiness, HostAuthRoute, HostAuthRunResult, HostAuthSelection, HostAuthStatusCode, HostCredentialReference, HostCredentialStore, HostCredentialWriteGuard,
 } from "./auth-routes.ts";
-export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute, isCredentialWriteRefused } from "./auth-routes.ts";
+export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute, isCleanupUncertain, isCredentialWriteRefused } from "./auth-routes.ts";
 /** Quiesced native-state snapshot and validated restore for owned managed sessions. */
 export type {
   HostSessionSnapshot, HostSnapshotArtifact, HostSnapshotArtifactKind, HostSnapshotOptions, HostSnapshotQuarantineReason,

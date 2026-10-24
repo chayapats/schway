@@ -17,8 +17,10 @@ export interface CredentialStore {
   delete(identity: CredentialIdentity): Promise<boolean>;
   /**
    * Atomically delete exactly the expected value, reporting whether anything
-   * was removed. Optional: stores without backend compare-and-swap use a
-   * serialized read-then-delete instead. In-process Map-backed stores must
+   * was removed. Returns false only on a proven value mismatch; backend
+   * failures reject so callers never mistake an uncertain cleanup for a
+   * clean one. Optional: callers fall back to a serialized read-then-delete
+   * where the primitive is absent. In-process Map-backed stores must
    * compare and delete with no await in between.
    */
   compareAndDelete?(identity: CredentialIdentity, expectedValue: string): Promise<boolean>;
@@ -109,9 +111,23 @@ export function markCleanupUncertain(refusal: unknown, cleanup: unknown): Error 
   return error;
 }
 
-/** Preserve a fence refusal unchanged; convert any other write failure to a sanitized store error. */
+/** True when an error marks a post-write cleanup that could not be verified.
+ * Brand-first for direct callers; message fallback survives the agent loop,
+ * which rethrows provider failures as sanitized plain messages. */
+export function isCleanupUncertain(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if ((error as { cleanupUncertain?: unknown }).cleanupUncertain === true) return true;
+  if ((error as { code?: unknown }).code === "credential-cleanup-uncertain") return true;
+  return /credential cleanup (could not be verified|uncertain)/i.test(error.message);
+}
+
+/** Preserve a fence refusal unchanged; convert any other write failure to a sanitized store error.
+ * A cleanup-uncertain error is preserved, never sanitized into a clean
+ * refusal: callers must be able to tell "maybe still visible" apart from
+ * "no credential was changed". */
 export function preserveRefusal(operation: "save" | "delete", error: unknown): Error {
   if (isCredentialWriteRefused(error)) return error;
+  if (isCleanupUncertain(error)) return error instanceof Error ? error : new Error(credentialStoreError(operation));
   return new Error(credentialStoreError(operation));
 }
 
@@ -128,27 +144,35 @@ export function createNativeCredentialStore(native?: typeof Bun.secrets): Creden
       return withCredentialStoreLock(async () => {
         try { await backend.set({ ...address(identity), value }); }
         catch { throw new Error(credentialStoreError("save")); }
-      });
+      }, { operation: "save" });
     },
     async delete(identity) {
       return withCredentialStoreLock(async () => {
         try { return await backend.delete(address(identity)); }
         catch { throw new Error(credentialStoreError("delete")); }
-      });
+      }, { operation: "delete" });
     },
     // Serialized by the cross-process credential-store lock, so every
     // Schway-mediated writer in any local process takes its turn. Writers
     // outside Schway (raw keychain tools) stay outside this guarantee.
+    // Returns false only on a proven value mismatch; backend failures
+    // reject with sanitized store errors so callers never mistake an
+    // uncertain cleanup for a clean one.
     async compareAndDelete(identity, expectedValue) {
       return withCredentialStoreLock(async () => {
+        let current: string | null;
         try {
-          const current = await backend.get(address(identity));
-          if (current !== expectedValue) return false;
+          current = await backend.get(address(identity));
+        } catch {
+          throw new Error(credentialStoreError("read"));
+        }
+        if (current !== expectedValue) return false;
+        try {
           return await backend.delete(address(identity));
         } catch {
-          return false;
+          throw new Error(credentialStoreError("delete"));
         }
-      });
+      }, { operation: "delete" });
     },
   };
 }
