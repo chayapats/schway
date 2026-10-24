@@ -1,7 +1,7 @@
 import type { Model } from "../model/model.ts";
-import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 
-export { isCredentialWriteRefused };
+export { isCleanupUncertain, isCredentialWriteRefused };
 
 /** Selected subscription route; billing and endpoint identity stay with this choice. */
 export type HostAuthRoute = "codex" | "grok";
@@ -22,8 +22,10 @@ export interface HostCredentialStore {
   delete(identity: HostCredentialReference): Promise<boolean>;
   /**
    * Atomically delete exactly the expected value, reporting whether anything
-   * was removed. Optional: the guarded wrapper prefers it and falls back to
-   * a serialized read-then-delete otherwise.
+   * was removed. Returns false only on a proven value mismatch; backend
+   * failures reject so the guarded wrapper never mistakes an uncertain
+   * cleanup for a clean one. Optional: the guarded wrapper prefers it and
+   * falls back to a serialized read-then-delete otherwise.
    */
   compareAndDelete?(identity: HostCredentialReference, expectedValue: string): Promise<boolean>;
 }
@@ -298,6 +300,12 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
   const text = errorText(error);
   const status = httpStatusOf(error);
   if (isCredentialWriteRefused(error)) {
+    // An uncertain cleanup never claims a clean fence: the late value may
+    // still be visible, so the guidance says verify instead of retrying.
+    if (isCleanupUncertain(error)) {
+      return { ...base, status: "store-unavailable",
+        nextAction: "A credential write was refused after it may have landed, and its removal could not be verified. A late credential may still be visible: verify the OS credential store before retrying the turn." };
+    }
     return { ...base, status: "store-unavailable",
       nextAction: "The embedding application's credential fence refused a credential write. No credential was changed. Retry the turn after the fence allows writes." };
   }

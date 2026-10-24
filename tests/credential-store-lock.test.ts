@@ -26,25 +26,102 @@ test("concurrent holders serialize through the shared lock", async () => {
   expect(order).toEqual(["first-start", "first-end", "second"]);
 });
 
-test("a wedged holder degrades to unserialized progress instead of hanging", async () => {
+test("a wedged holder fails closed instead of mutating without the lock", async () => {
   mkdirSync(credentialStoreLockDir(), { mode: 0o700, recursive: true });
-  const startedAt = Date.now();
-  // No owner file and no live holder can be proven: after the bounded wait
-  // the waiter proceeds rather than hanging forever.
-  await withCredentialStoreLock(async () => {}, { timeoutMs: 100 });
-  expect(Date.now() - startedAt).toBeLessThan(5000);
-  rmSync(credentialStoreLockDir(), { recursive: true, force: true });
+  try {
+    const startedAt = Date.now();
+    // No owner can be proven stopped (no owner file at all): after the
+    // bounded wait the waiter fails closed with a sanitized store error
+    // instead of hanging forever or mutating without the lock.
+    let ran = false;
+    const failure = await withCredentialStoreLock(async () => { ran = true; }, { timeoutMs: 100 }).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(Date.now() - startedAt).toBeLessThan(5000);
+    expect(ran).toBe(false);
+    expect(String((failure as Error)?.message ?? failure)).toMatch(/Cannot (save|read|delete) credential/);
+  } finally {
+    rmSync(credentialStoreLockDir(), { recursive: true, force: true });
+  }
 });
 
 test("a dead owner is collected without waiting out the timeout", async () => {
   const dir = credentialStoreLockDir();
   mkdirSync(dir, { mode: 0o700, recursive: true });
-  // A fabricated owner with a PID that cannot exist proves stopped ownership.
-  writeFileSync(join(dir, "owner.json"), JSON.stringify({ host: hostname(), pid: 2147483647 }));
-  const startedAt = Date.now();
-  await withCredentialStoreLock(async () => {}, { timeoutMs: 5000 });
-  expect(Date.now() - startedAt).toBeLessThan(2000);
-  rmSync(dir, { recursive: true, force: true });
+  try {
+    // A fabricated owner with a PID that cannot exist proves stopped
+    // ownership; the token makes the stale read attributable.
+    const { randomUUID } = await import("node:crypto");
+    writeFileSync(join(dir, "owner.json"), JSON.stringify({ host: hostname(), pid: 2147483647, token: randomUUID() }));
+    const startedAt = Date.now();
+    await withCredentialStoreLock(async () => {}, { timeoutMs: 5000 });
+    expect(Date.now() - startedAt).toBeLessThan(2000);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a mutation racing a held lock fails closed without backend contact", async () => {
+  const { createNativeCredentialStore } = await import("../src/auth/store.ts");
+  const backend = new Map<string, string>();
+  let backendCalls = 0;
+  const secrets = {
+    get: async ({ name }: { service: string; name: string }) => { backendCalls++; return backend.get(name) ?? null; },
+    set: async ({ name, value }: { service: string; name: string; value: string }) => { backendCalls++; backend.set(name, value); },
+    delete: async ({ name }: { service: string; name: string }) => { backendCalls++; return backend.delete(name); },
+  };
+  const native = createNativeCredentialStore(secrets as never);
+  // Hold the shared lock past the contender's bound from this same process:
+  // the directory mutex is process-agnostic, so this exercises the exact
+  // cross-process contention path.
+  let releaseHolder!: () => void;
+  const holderGate = new Promise<void>(resolve => { releaseHolder = resolve; });
+  const holder = withCredentialStoreLock(async () => { await holderGate; }, { timeoutMs: 5000 });
+  await new Promise(resolve => setTimeout(resolve, 50));
+  try {
+    const failure = await native.set({ account: "a", label: "a" }, "late").then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(String((failure as Error)?.message ?? failure)).toMatch(/Cannot save credential/);
+    // Failed closed before any backend contact: nothing was written.
+    expect(backendCalls).toBe(0);
+    expect(backend.size).toBe(0);
+  } finally {
+    releaseHolder();
+    await holder;
+    rmSync(credentialStoreLockDir(), { recursive: true, force: true });
+  }
+});
+
+test("native compare-and-delete rejects on backend failure, false only on mismatch", async () => {
+  const { createNativeCredentialStore } = await import("../src/auth/store.ts");
+  const backend = new Map<string, string>([["a", "v1"]]);
+  const flaky = {
+    get: async ({ name }: { service: string; name: string }) => {
+      if (name === "boom-read") throw new Error("locked");
+      return backend.get(name) ?? null;
+    },
+    set: async ({ name, value }: { service: string; name: string; value: string }) => { backend.set(name, value); },
+    delete: async ({ name }: { service: string; name: string }) => {
+      if (name === "boom-delete") throw new Error("locked");
+      return backend.delete(name);
+    },
+  };
+  const store = createNativeCredentialStore(flaky as never);
+  try {
+    // Proven mismatch reads clean: no removal, explicit false.
+    expect(await store.compareAndDelete!({ account: "a", label: "a" }, "other")).toBe(false);
+    expect(backend.get("a")).toBe("v1");
+    // Backend failures reject with sanitized errors, never a silent false.
+    await expect(store.compareAndDelete!({ account: "boom-read", label: "x" }, "v")).rejects.toThrow(/Cannot read credential/);
+    backend.set("boom-delete", "v");
+    await expect(store.compareAndDelete!({ account: "boom-delete", label: "x" }, "v")).rejects.toThrow(/Cannot delete credential/);
+    expect(backend.get("boom-delete")).toBe("v");
+  } finally {
+    rmSync(credentialStoreLockDir(), { recursive: true, force: true });
+  }
 });
 
 test("cleanup backend failure propagates as uncertain refusal, not silent success", async () => {
