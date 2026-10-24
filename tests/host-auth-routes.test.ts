@@ -645,3 +645,20 @@ test("credential-write guard validation rejects non-function guards", async () =
   expect(() => describeAuthRoute({ ...base, credentialWriteGuard: "nope" as never })).toThrow("invalid");
   await expect(checkAuthReadiness({ ...base, credentialWriteGuard: 42 as never })).rejects.toThrow("invalid");
 });
+
+test("refusal marker is brand-stable and preserves the guard cause", async () => {
+  const { credentialWriteRefusedError, isCredentialWriteRefused, preserveRefusal } = await import("../src/auth/store.ts");
+  const cause = new Error("owner-cancelled");
+  const refused = credentialWriteRefusedError(cause);
+  expect(isCredentialWriteRefused(refused)).toBe(true);
+  expect(refused.cause).toBe(cause);
+  // Message fallback survives agent-loop sanitization, which rethrows provider
+  // failures as plain messages; brand stays the primary direct-path signal.
+  expect(isCredentialWriteRefused(new Error("Credential store write refused by the embedding-application fence. No credential was changed."))).toBe(true);
+  expect(isCredentialWriteRefused(null)).toBe(false);
+  // Preservation passes refusals through and sanitizes anything else.
+  expect(preserveRefusal("save", refused)).toBe(refused);
+  const converted = preserveRefusal("save", new Error("disk gone")) as Error;
+  expect(isCredentialWriteRefused(converted)).toBe(false);
+  expect(converted.message).toContain("Cannot save credential");
+});

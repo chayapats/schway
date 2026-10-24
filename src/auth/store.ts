@@ -76,14 +76,27 @@ export function credentialStoreError(operation: "read" | "save" | "delete"): str
   return `Cannot ${operation} credential in the OS secure store. Unlock or allow access to your OS credential store; on Linux install libsecret and start a Secret Service. Retry after restoring access. For reads, --api-key or the provider API-key environment variable bypasses the store. No plaintext fallback is used.`;
 }
 
-/** Refusal message for an embedding-application credential-write fence; never carries secret material. */
-export function credentialWriteRefusedError(): string {
-  return "Credential store write refused by the embedding-application fence. No credential was changed.";
+/** Refusal marker for an embedding-application credential-write fence; never carries secret material. */
+export function credentialWriteRefusedError(cause?: unknown): Error {
+  const error = new Error("Credential store write refused by the embedding-application fence. No credential was changed.",
+    cause === undefined ? undefined : { cause });
+  (error as { code?: unknown }).code = "credential-write-refused";
+  return error;
 }
 
-/** True when an error is an embedding-application fence refusal rather than a store failure. */
-export function isCredentialWriteRefused(error: unknown): boolean {
-  return error instanceof Error && error.message.includes("refused by the embedding-application fence");
+/** True when an error is an embedding-application fence refusal rather than a store failure.
+ * Brand-first for direct callers; message fallback survives the agent loop, which
+ * rethrows provider failures as sanitized plain messages (see classifyAuthError). */
+export function isCredentialWriteRefused(error: unknown): error is Error {
+  if (!(error instanceof Error)) return false;
+  if ((error as { code?: unknown }).code === "credential-write-refused") return true;
+  return error.message.includes("refused by the embedding-application fence");
+}
+
+/** Preserve a fence refusal unchanged; convert any other write failure to a sanitized store error. */
+export function preserveRefusal(operation: "save" | "delete", error: unknown): Error {
+  if (isCredentialWriteRefused(error)) return error;
+  return new Error(credentialStoreError(operation));
 }
 
 /** Adapt Bun's OS secure storage without exposing native errors or enabling unrestricted access. */

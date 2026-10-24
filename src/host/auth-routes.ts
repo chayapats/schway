@@ -25,7 +25,9 @@ export interface HostCredentialStore {
 /** Fetch override used by deterministic protocol fixtures; production uses global fetch. */
 export type HostAuthFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
-/** Embedding-application fence for credential-store mutations; throwing refuses the write. */
+/** Embedding-application fence for credential-store mutations; throwing refuses the write.
+ * Applies to host route writes resolved through the effective store; interactive
+ * management flows use raw stores outside any embedding attempt. */
 export type HostCredentialWriteGuard = (identity: HostCredentialReference) => Promise<void> | void;
 
 /** Explicit route/model binding without raw tokens or API-key material. */
@@ -154,7 +156,7 @@ export function effectiveStore(selection: HostAuthSelection): CredentialStore {
       await guard({ account: identity.account, label: identity.label });
     } catch (error) {
       if (isCredentialWriteRefused(error)) throw error;
-      throw new Error(credentialWriteRefusedError());
+      throw credentialWriteRefusedError(error);
     }
   };
   const store: CredentialStore = {

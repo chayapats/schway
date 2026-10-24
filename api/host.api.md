@@ -547,7 +547,7 @@ export type HostSnapshotValidation = {
 };
 
 // @public
-export function isCredentialWriteRefused(error: unknown): boolean;
+export function isCredentialWriteRefused(error: unknown): error is Error;
 
 // @public
 export type JsonSchema = Record<string, unknown>;
