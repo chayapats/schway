@@ -27,7 +27,10 @@ export type HostAuthFetch = (input: string | URL | Request, init?: RequestInit) 
 
 /** Embedding-application fence for credential-store mutations; throwing refuses the write.
  * Applies to host route writes resolved through the effective store; interactive
- * management flows use raw stores outside any embedding attempt. */
+ * management flows use raw stores outside any embedding attempt. The guard runs
+ * before every write and is rechecked after the backend write completes: a
+ * refusal after the write removes exactly the value just written (compare and
+ * delete), so no post-terminal credential stays visible. */
 export type HostCredentialWriteGuard = (identity: HostCredentialReference) => Promise<void> | void;
 
 /** Explicit route/model binding without raw tokens or API-key material. */
@@ -164,6 +167,20 @@ export function effectiveStore(selection: HostAuthSelection): CredentialStore {
     set: async (identity, value) => {
       await runGuard(identity);
       await base.set(identity, value);
+      // Final visibility is generation-fenced: a stop that lands while the
+      // backend write is in flight makes the post-write guard fail, and the
+      // just-written value is removed again when it is still exactly what
+      // was written. A concurrent legitimate write is never touched. Reads
+      // stay unfenced; only persisted writes are fenced this way.
+      try {
+        await runGuard(identity);
+      } catch (refusal) {
+        try {
+          const current = await base.get(identity);
+          if (current === value) await base.delete(identity);
+        } catch { /* Best-effort cleanup; the refusal still propagates. */ }
+        throw refusal;
+      }
     },
     delete: async identity => {
       await runGuard(identity);

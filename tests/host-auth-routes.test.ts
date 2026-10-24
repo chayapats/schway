@@ -593,9 +593,10 @@ for (const route of ["codex", "grok"] as const) {
     // Reads stay unfenced and undisturbed.
     expect(await guarded.get(identity)).toContain("v");
     expect(seen).toEqual([]);
-    // Mutations invoke the guard first with the opaque identity only.
+    // Mutations invoke the guard before the write (opaque identity only)
+    // and recheck it after the backend write completes.
     await guarded.set(identity, "next");
-    expect(seen).toEqual([identity.account]);
+    expect(seen).toEqual([identity.account, identity.account]);
     expect(await base.get(identity)).toBe("next");
     expect(JSON.stringify(seen)).not.toMatch(/v|next/);
     // A refusing guard blocks the backend write and reports a stable refusal.
@@ -661,4 +662,60 @@ test("refusal marker is brand-stable and preserves the guard cause", async () =>
   const converted = preserveRefusal("save", new Error("disk gone")) as Error;
   expect(isCredentialWriteRefused(converted)).toBe(false);
   expect(converted.message).toContain("Cannot save credential");
+});
+
+test("post-write guard failure removes exactly the late value", async () => {
+  const { effectiveStore } = await import("../src/host/auth-routes.ts");
+  const { isCredentialWriteRefused } = await import("schway/host");
+  const values = new Map<string, string>();
+  let releaseBackend!: () => void;
+  const backendGate = new Promise<void>(resolve => { releaseBackend = resolve; });
+  let refusing = false;
+  const base = {
+    get: async (identity: { account: string }) => values.get(identity.account) ?? null,
+    set: async (identity: { account: string }, value: string) => {
+      await backendGate;
+      values.set(identity.account, value);
+    },
+    delete: async (identity: { account: string }) => values.delete(identity.account),
+  };
+  const selection = { route: "grok" as const, model: "grok-4.7", store: base,
+    credentialWriteGuard: async () => { if (refusing) throw new Error("owner stopped"); } };
+  const guarded = effectiveStore(selection);
+  const pending = guarded.set({ account: "grok-subscription:xai", label: "Grok subscription" }, "late-token");
+  // The stop lands while the backend write is still in flight.
+  refusing = true;
+  releaseBackend();
+  const error = await pending.then(() => null, (failure: unknown) => failure);
+  expect(isCredentialWriteRefused(error)).toBe(true);
+  // Final visibility is fenced: nothing the stop did not allow stays stored.
+  expect(values.size).toBe(0);
+});
+
+test("post-write invalidation never removes a concurrent legitimate value", async () => {
+  const { effectiveStore } = await import("../src/host/auth-routes.ts");
+  const { isCredentialWriteRefused } = await import("schway/host");
+  const values = new Map<string, string>();
+  let refusing = false;
+  const base = {
+    get: async (identity: { account: string }) => values.get(identity.account) ?? null,
+    set: async (identity: { account: string }, value: string) => { values.set(identity.account, value); },
+    delete: async (identity: { account: string }) => values.delete(identity.account),
+  };
+  const selection = { route: "grok" as const, model: "grok-4.7", store: base,
+    credentialWriteGuard: async () => { if (refusing) throw new Error("owner stopped"); } };
+  const guarded = effectiveStore(selection);
+  await guarded.set({ account: "grok-subscription:xai", label: "x" }, "first-token");
+  expect(values.get("grok-subscription:xai")).toBe("first-token");
+  // A concurrent legitimate login replaces the value after our write but
+  // before the post-write recheck observes the stop.
+  refusing = true;
+  const overwrite = (async () => {
+    values.set("grok-subscription:xai", "fresh-login");
+  })();
+  const error = await guarded.set({ account: "grok-subscription:xai", label: "x" }, "stale-token")
+    .then(() => null, (failure: unknown) => failure);
+  await overwrite;
+  expect(isCredentialWriteRefused(error)).toBe(true);
+  expect(values.get("grok-subscription:xai")).toBe("fresh-login");
 });
