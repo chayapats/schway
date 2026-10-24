@@ -1,5 +1,7 @@
 import type { Model } from "../model/model.ts";
-import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCredentialWriteRefused, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
+
+export { isCredentialWriteRefused };
 
 /** Selected subscription route; billing and endpoint identity stay with this choice. */
 export type HostAuthRoute = "codex" | "grok";
@@ -23,6 +25,9 @@ export interface HostCredentialStore {
 /** Fetch override used by deterministic protocol fixtures; production uses global fetch. */
 export type HostAuthFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
+/** Embedding-application fence for credential-store mutations; throwing refuses the write. */
+export type HostCredentialWriteGuard = (identity: HostCredentialReference) => Promise<void> | void;
+
 /** Explicit route/model binding without raw tokens or API-key material. */
 export interface HostAuthSelection {
   route: HostAuthRoute;
@@ -30,6 +35,8 @@ export interface HostAuthSelection {
   store?: HostCredentialStore;
   env?: Record<string, string | undefined>;
   fetch?: HostAuthFetch;
+  /** Optional fence invoked before every credential-store write; reads stay unfenced. */
+  credentialWriteGuard?: HostCredentialWriteGuard;
 }
 
 /** Stable safe categories for selected-route readiness and inference failures. */
@@ -82,7 +89,7 @@ export function validateAuthSelection(input: unknown): HostAuthSelection {
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw new Error("invalid");
   const record = input as Record<string, unknown>;
   const keys = Object.keys(record);
-  if (keys.some(key => !["route", "model", "store", "env", "fetch"].includes(key))) throw new Error("invalid");
+  if (keys.some(key => !["route", "model", "store", "env", "fetch", "credentialWriteGuard"].includes(key))) throw new Error("invalid");
   const route = record["route"];
   if (route !== "codex" && route !== "grok") throw new Error("unsupported");
   const model = record["model"];
@@ -102,9 +109,12 @@ export function validateAuthSelection(input: unknown): HostAuthSelection {
   }
   const fetch = record["fetch"];
   if (fetch !== undefined && typeof fetch !== "function") throw new Error("invalid");
+  const credentialWriteGuard = record["credentialWriteGuard"];
+  if (credentialWriteGuard !== undefined && typeof credentialWriteGuard !== "function") throw new Error("invalid");
   return { route, model: (model as string).trim(), ...(store !== undefined ? { store: store as HostCredentialStore } : {}),
     ...(env !== undefined ? { env: env as Record<string, string | undefined> } : {}),
-    ...(fetch !== undefined ? { fetch: fetch as HostAuthFetch } : {}) };
+    ...(fetch !== undefined ? { fetch: fetch as HostAuthFetch } : {}),
+    ...(credentialWriteGuard !== undefined ? { credentialWriteGuard: credentialWriteGuard as HostCredentialWriteGuard } : {}) };
 }
 
 /** Describe the selected route statically without store, network, or provider loading. */
@@ -114,19 +124,52 @@ export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescrip
 }
 
 const defaultNativeStores = new WeakMap<object, CredentialStore>();
+const guardedStores = new WeakMap<object, { guard: HostCredentialWriteGuard; store: CredentialStore }>();
 
 /** Resolve the effective store without exposing native errors or creating plaintext fallback.
  * @internal Host composition only; keyed by caller selection identity so concurrent
  * route runs on one runtime share one renewal lifecycle for the default native store.
  */
 export function effectiveStore(selection: HostAuthSelection): CredentialStore {
-  if (selection.store) return selection.store as CredentialStore;
-  let cached = defaultNativeStores.get(selection);
-  if (!cached) {
-    cached = createNativeCredentialStore();
-    defaultNativeStores.set(selection, cached);
-  }
-  return cached;
+  const base = (() => {
+    if (selection.store) return selection.store as CredentialStore;
+    let cached = defaultNativeStores.get(selection);
+    if (!cached) {
+      cached = createNativeCredentialStore();
+      defaultNativeStores.set(selection, cached);
+    }
+    return cached;
+  })();
+  const guard = selection.credentialWriteGuard;
+  if (!guard) return base;
+  // Reads stay unfenced; every mutation invokes the guard first and a refusal
+  // throws before the backend is touched. Any guard throw normalizes to the
+  // refusal marker so providers and classifiers see one stable identity.
+  // The wrapper is memoized per selection and guard so concurrent runs keep
+  // one shared renewal lifecycle.
+  const cached = guardedStores.get(selection);
+  if (cached && cached.guard === guard) return cached.store;
+  const runGuard = async (identity: CredentialIdentity): Promise<void> => {
+    try {
+      await guard({ account: identity.account, label: identity.label });
+    } catch (error) {
+      if (isCredentialWriteRefused(error)) throw error;
+      throw new Error(credentialWriteRefusedError());
+    }
+  };
+  const store: CredentialStore = {
+    get: identity => base.get(identity),
+    set: async (identity, value) => {
+      await runGuard(identity);
+      await base.set(identity, value);
+    },
+    delete: async identity => {
+      await runGuard(identity);
+      return base.delete(identity);
+    },
+  };
+  guardedStores.set(selection, { guard, store });
+  return store;
 }
 
 function needsLoginAction(route: HostAuthRoute): string {
@@ -217,6 +260,10 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
   const base = { route: valid.route, model: valid.model, credential, observedInference: "not-checked" as const };
   const text = errorText(error);
   const status = httpStatusOf(error);
+  if (isCredentialWriteRefused(error)) {
+    return { ...base, status: "store-unavailable",
+      nextAction: "The embedding application's credential fence refused a credential write. No credential was changed. Retry the turn after the fence allows writes." };
+  }
   if (/Cannot (read|save|delete) credential|secure store|Secret Service|libsecret/i.test(text)) {
     return { ...base, status: "store-unavailable", nextAction: storeUnavailableAction() };
   }

@@ -14,9 +14,9 @@ export type {
 } from "../model/model.ts";
 /** Explicit Grok/Codex route lifecycle with opaque credential references and safe readiness. */
 export type {
-  HostAuthDescription, HostAuthFetch, HostAuthReadiness, HostAuthRoute, HostAuthRunResult, HostAuthSelection, HostAuthStatusCode, HostCredentialReference, HostCredentialStore,
+  HostAuthDescription, HostAuthFetch, HostAuthReadiness, HostAuthRoute, HostAuthRunResult, HostAuthSelection, HostAuthStatusCode, HostCredentialReference, HostCredentialStore, HostCredentialWriteGuard,
 } from "./auth-routes.ts";
-export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute } from "./auth-routes.ts";
+export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute, isCredentialWriteRefused } from "./auth-routes.ts";
 /** Quiesced native-state snapshot and validated restore for owned managed sessions. */
 export type {
   HostSessionSnapshot, HostSnapshotArtifact, HostSnapshotArtifactKind, HostSnapshotOptions, HostSnapshotQuarantineReason,

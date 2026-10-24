@@ -20,6 +20,7 @@ import {
   CODEX_SUBSCRIPTION_LABEL,
   codexSubscriptionIdentity,
   credentialStoreError,
+  isCredentialWriteRefused,
   type CredentialStore,
 } from "../../auth/store.ts";
 
@@ -269,7 +270,10 @@ function serializeCodexWrite<T>(state: CodexLifecycle, operation: () => Promise<
 }
 async function writeCodexTokens(store: CredentialStore, tokens: CodexTokens): Promise<void> {
   try { await store.set(codexSubscriptionIdentity(), JSON.stringify(serializeSubscriptionTokens(tokens))); }
-  catch { throw new Error(credentialStoreError("save")); }
+  catch (error) {
+    if (isCredentialWriteRefused(error)) throw error;
+    throw new Error(credentialStoreError("save"));
+  }
 }
 
 /** Persist the subscription tokens at exactly the subscription identity. */
@@ -290,7 +294,10 @@ async function commitInteractiveLogin(store: CredentialStore, tokens: CodexToken
   throwIfAborted(signal);
   deps.onSaving?.();
   try { await saveSubscriptionTokens(store, tokens); }
-  catch { throw new Error(credentialStoreError("save")); }
+  catch (error) {
+    if (isCredentialWriteRefused(error)) throw error;
+    throw new Error(credentialStoreError("save"));
+  }
   deps.onSaved?.();
   deps.onProgress?.(formatSubscriptionStatus(tokens));
 }
@@ -303,7 +310,10 @@ export async function clearSubscriptionTokens(
   // Bump only after the serialized delete lands, matching saveSubscriptionTokens.
   const existed = await serializeCodexWrite(state, async () => {
     try { return await store.delete(codexSubscriptionIdentity()); }
-    catch { throw new Error(credentialStoreError("delete")); }
+    catch (error) {
+      if (isCredentialWriteRefused(error)) throw error;
+      throw new Error(credentialStoreError("delete"));
+    }
   });
   state.generation++;
   return existed;

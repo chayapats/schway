@@ -76,6 +76,16 @@ export function credentialStoreError(operation: "read" | "save" | "delete"): str
   return `Cannot ${operation} credential in the OS secure store. Unlock or allow access to your OS credential store; on Linux install libsecret and start a Secret Service. Retry after restoring access. For reads, --api-key or the provider API-key environment variable bypasses the store. No plaintext fallback is used.`;
 }
 
+/** Refusal message for an embedding-application credential-write fence; never carries secret material. */
+export function credentialWriteRefusedError(): string {
+  return "Credential store write refused by the embedding-application fence. No credential was changed.";
+}
+
+/** True when an error is an embedding-application fence refusal rather than a store failure. */
+export function isCredentialWriteRefused(error: unknown): boolean {
+  return error instanceof Error && error.message.includes("refused by the embedding-application fence");
+}
+
 /** Adapt Bun's OS secure storage without exposing native errors or enabling unrestricted access. */
 export function createNativeCredentialStore(native?: typeof Bun.secrets): CredentialStore {
   const address = (identity: CredentialIdentity) => ({ service: "schway", name: identity.account });
