@@ -20,6 +20,12 @@ export interface HostCredentialStore {
   set(identity: HostCredentialReference, value: string): Promise<void>;
   /** Delete one identity, returning whether a credential existed. */
   delete(identity: HostCredentialReference): Promise<boolean>;
+  /**
+   * Atomically delete exactly the expected value, reporting whether anything
+   * was removed. Optional: the guarded wrapper prefers it and falls back to
+   * a serialized read-then-delete otherwise.
+   */
+  compareAndDelete?(identity: HostCredentialReference, expectedValue: string): Promise<boolean>;
 }
 
 /** Fetch override used by deterministic protocol fixtures; production uses global fetch. */
@@ -168,16 +174,23 @@ export function effectiveStore(selection: HostAuthSelection): CredentialStore {
       await runGuard(identity);
       await base.set(identity, value);
       // Final visibility is generation-fenced: a stop that lands while the
-      // backend write is in flight makes the post-write guard fail, and the
-      // just-written value is removed again when it is still exactly what
-      // was written. A concurrent legitimate write is never touched. Reads
-      // stay unfenced; only persisted writes are fenced this way.
+      // backend write is in flight makes the post-write guard fail, and
+      // exactly the late value is removed. Prefers the store's atomic
+      // compare-and-delete; without it, falls back to a serialized
+      // read-then-delete inside the caller's lifecycle chain (same
+      // guarantee against fenced writers, best effort against unfenced
+      // cross-process writers). A concurrent legitimate write is never
+      // touched. Reads stay unfenced; only persisted writes are fenced.
       try {
         await runGuard(identity);
       } catch (refusal) {
         try {
-          const current = await base.get(identity);
-          if (current === value) await base.delete(identity);
+          if (typeof base.compareAndDelete === "function") {
+            await base.compareAndDelete(identity, value);
+          } else {
+            const current = await base.get(identity);
+            if (current === value) await base.delete(identity);
+          }
         } catch { /* Best-effort cleanup; the refusal still propagates. */ }
         throw refusal;
       }
