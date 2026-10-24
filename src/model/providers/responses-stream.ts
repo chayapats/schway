@@ -65,8 +65,10 @@ export async function* assembleResponsesStream(input: {
   label: string;
 }): AsyncIterable<ModelStreamEvent> {
   const builder = createStreamBuilder(input.namespace);
+  let sawTerminal = false;
   for await (const event of input.stream) {
     if (event.type === "response.completed" || event.type === "response.incomplete" || event.type === "response.failed") {
+      sawTerminal = true;
       const usage = event.response.usage;
       // Searches are counted only from items Schway kept; nothing is inferred when none arrived.
       const searches = builder.hosted().filter(kept => kept.item.type === "web_search_call").length;
@@ -83,6 +85,9 @@ export async function* assembleResponsesStream(input: {
     }
     for (const delta of builder.accept(event)) yield delta;
   }
+  // A body that ends without a terminal frame is truncated, never complete:
+  // emitting message_complete here would certify partial evidence as success.
+  if (!sawTerminal) throw new Error(`${input.label} response ended before completion`);
   yield { type: "message_complete", message: builder.complete() };
 }
 

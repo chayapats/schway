@@ -1137,7 +1137,11 @@ export function createCodexSubscriptionModel(options: {
         throw new Error(redact(await mapResponsesError(response), secrets));
       }
       const builder = createCodexStreamBuilder();
+      let sawTerminal = false;
       for await (const event of readCodexStreamEvents(response, request.signal)) {
+        if (event.type === "response.completed" || event.type === "response.incomplete" || event.type === "response.failed") {
+          sawTerminal = true;
+        }
         if (["response.completed", "response.incomplete", "response.failed"].includes(event.type) && event.response?.usage && typeof event.response.usage === "object") {
           yield { type: "usage", usage: responsesUsage(event.response.usage) };
         }
@@ -1156,6 +1160,8 @@ export function createCodexSubscriptionModel(options: {
         }
       }
       throwIfAborted(request.signal, secrets);
+      // A body that ends without a terminal frame is truncated, never complete.
+      if (!sawTerminal) throw new Error(redact("ChatGPT subscription response ended before completion", secrets));
       yield { type: "message_complete", message: builder.complete() };
     },
   };
