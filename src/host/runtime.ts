@@ -132,7 +132,8 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
     ...(authSelection ? { auth: { route: authSelection.route, model: authSelection.model,
       ...(authSelection.store ? { store: authSelection.store } : {}),
       ...(authSelection.env ? { env: { ...authSelection.env } } : {}),
-      ...(authSelection.fetch ? { fetch: authSelection.fetch } : {}) } } : {}) };
+      ...(authSelection.fetch ? { fetch: authSelection.fetch } : {}),
+      ...(authSelection.credentialWriteGuard ? { credentialWriteGuard: authSelection.credentialWriteGuard } : {}) } } : {}) };
 }
 
 function validateReference(reference: HostSessionReference): void {
@@ -244,6 +245,10 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
   }
   if (authSelection && (options as { auth?: HostAuthSelection }).auth?.fetch) {
     authSelection.fetch = (options as { auth?: HostAuthSelection }).auth!.fetch;
+  }
+  // Preserve guard identity alongside store/fetch so the fence stays attached across runs.
+  if (authSelection && (options as { auth?: HostAuthSelection }).auth?.credentialWriteGuard) {
+    authSelection.credentialWriteGuard = (options as { auth?: HostAuthSelection }).auth!.credentialWriteGuard;
   }
   const authBinding = authSelection ? Object.freeze({
     route: authSelection.route,

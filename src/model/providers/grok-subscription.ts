@@ -1,4 +1,4 @@
-import { grokSubscriptionIdentity, credentialStoreError, type CredentialStore } from "../../auth/store.ts";
+import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, type CredentialStore } from "../../auth/store.ts";
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
 import { boundedCatalogFetch, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { createHash, randomBytes } from "node:crypto";
@@ -229,7 +229,8 @@ function serializeCredentialWrite<T>(state: CredentialLifecycle, operation: () =
   return next;
 }
 async function writeTokens(store: CredentialStore, tokens: GrokTokens): Promise<void> {
-  try { await store.set(grokSubscriptionIdentity(), JSON.stringify(tokens)); } catch { throw new Error(credentialStoreError("save")); }
+  try { await store.set(grokSubscriptionIdentity(), JSON.stringify(tokens)); }
+  catch (error) { throw preserveRefusal("save", error); }
 }
 /** Replace the dedicated login and invalidate older refreshes before serializing its secure-store write. */
 export async function saveSubscriptionTokens(store: CredentialStore, tokens: GrokTokens): Promise<void> {
@@ -240,7 +241,8 @@ export async function saveSubscriptionTokens(store: CredentialStore, tokens: Gro
 export async function deleteSubscriptionTokens(store: CredentialStore): Promise<boolean> {
   const state = credentialLifecycle(store); state.generation++;
   return serializeCredentialWrite(state, async () => {
-    try { return await store.delete(grokSubscriptionIdentity()); } catch { throw new Error(credentialStoreError("delete")); }
+    try { return await store.delete(grokSubscriptionIdentity()); }
+    catch (error) { throw preserveRefusal("delete", error); }
   });
 }
 /** Inputs retain the original lifecycle identity when discovery memoizes its first credential read. */

@@ -174,8 +174,10 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostCapabilities` | Static API features with no inference observation. |
 | `HostCompactionResult` | Durable native summary reference or explicit noop/error/cancelled/limit-exceeded result. |
 | `hostCapabilities` | Discover support without loading runtime or accounts. |
+| `isCredentialWriteRefused` | Test whether an error is a fence refusal, not a store failure. |
 | `HostCredentialReference` | Opaque credential account and label. |
 | `HostCredentialStore` | Secure-store boundary for a selected route. |
+| `HostCredentialWriteGuard` | Embedding-application fence for credential-store writes. |
 | `HostDeletedArtifact` | Owned artifact inventory for deletion reporting. |
 | `HostedTool` | Native closed hosted-lookup union; host sends none. |
 | `HostEntryReference` | Exact native entry in a selected session branch. |

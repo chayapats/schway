@@ -155,6 +155,7 @@ export type HostAuthRunResult = {
 
 // @public
 export interface HostAuthSelection {
+    credentialWriteGuard?: HostCredentialWriteGuard;
     // (undocumented)
     env?: Record<string, string | undefined>;
     // (undocumented)
@@ -242,6 +243,9 @@ export interface HostCredentialStore {
     get(identity: HostCredentialReference): Promise<string | null>;
     set(identity: HostCredentialReference, value: string): Promise<void>;
 }
+
+// @public
+export type HostCredentialWriteGuard = (identity: HostCredentialReference) => Promise<void> | void;
 
 // @public
 export type HostDeletedArtifact = "conversation" | "metadata" | "history" | "draft" | "undo" | "lease";
@@ -541,6 +545,9 @@ export type HostSnapshotValidation = {
     readonly reason: HostSnapshotQuarantineReason;
     readonly nextAction: string;
 };
+
+// @public
+export function isCredentialWriteRefused(error: unknown): error is Error;
 
 // @public
 export type JsonSchema = Record<string, unknown>;

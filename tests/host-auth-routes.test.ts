@@ -576,3 +576,89 @@ test("submitWithRoute without a bound route rejects as invalid options", async (
     await session.close(); await host.close();
   });
 });
+
+for (const route of ["codex", "grok"] as const) {
+  test(`${route} credential-write guard fences refresh writes without touching reads`, async () => {
+    const { effectiveStore } = await import("../src/host/auth-routes.ts");
+    const { isCredentialWriteRefused } = await import("schway/host");
+    const base = fakeCredentialStore();
+    const identity = route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
+    await base.set(identity, JSON.stringify({ accessToken: "v", refreshToken: "r", expiresAt: Date.now() + 3_600_000, obtainedAt: Date.now() }));
+    const seen: string[] = [];
+    const selection = { route, model: route === "codex" ? "gpt-5.4" : "grok-4.7", store: base,
+      credentialWriteGuard: async (ref: { account: string; label: string }) => { seen.push(ref.account); } };
+    const guarded = effectiveStore(selection);
+    // Memoized per selection and guard, so concurrent runs share one renewal lifecycle.
+    expect(effectiveStore(selection)).toBe(guarded);
+    // Reads stay unfenced and undisturbed.
+    expect(await guarded.get(identity)).toContain("v");
+    expect(seen).toEqual([]);
+    // Mutations invoke the guard first with the opaque identity only.
+    await guarded.set(identity, "next");
+    expect(seen).toEqual([identity.account]);
+    expect(await base.get(identity)).toBe("next");
+    expect(JSON.stringify(seen)).not.toMatch(/v|next/);
+    // A refusing guard blocks the backend write and reports a stable refusal.
+    const refusing = { ...selection, credentialWriteGuard: () => { throw new Error("owner-cancelled"); } };
+    const fenced = effectiveStore(refusing);
+    const setError = await fenced.set(identity, "blocked").then(() => null, (error: unknown) => error);
+    expect(isCredentialWriteRefused(setError)).toBe(true);
+    const deleteError = await fenced.delete(identity).then(() => null, (error: unknown) => error);
+    expect(isCredentialWriteRefused(deleteError)).toBe(true);
+    expect(await base.get(identity)).toBe("next");
+  });
+
+  test(`${route} guard refusal surfaces a terminal outcome with zero credential writes`, async () => {
+    const model = route === "codex" ? "gpt-5.4" : "grok-4.7";
+    const identity = route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
+    await withTempDir(async dir => {
+      const store = fakeCredentialStore();
+      await store.set(identity, JSON.stringify({ accessToken: "stale-token", refreshToken: "fixture-refresh", expiresAt: 1, obtainedAt: 1 }));
+      let writes = 0;
+      const counting = { ...store,
+        set: (async (id: never, value: never) => { writes++; return store.set(id, value); }) as typeof store.set,
+        delete: (async (id: never) => { writes++; return store.delete(id); }) as typeof store.delete };
+      let refreshes = 0;
+      const fetch = (async (url: string | URL | Request, _init?: RequestInit) => {
+        if (String(url).includes("/oauth/token") || String(url).includes("auth.x.ai")) {
+          refreshes++;
+          return Response.json({ access_token: "fresh-token", refresh_token: "fixture-refresh", expires_in: 3600 });
+        }
+        return route === "codex" ? codexSse() : xaiSse();
+      }) as never;
+      const host = await createHost(await options(dir, { route, model, store: counting, fetch,
+        credentialWriteGuard: () => { throw new Error("owner-cancelled"); } }));
+      const session = await host.createSession();
+      const run = await session.submitWithRoute({ text: "fenced refresh" });
+      expect(run.outcome).toBe("error");
+      if (run.outcome === "error") expect(run.auth.status).toBe("store-unavailable");
+      expect(refreshes).toBe(1);
+      expect(writes).toBe(0);
+      expect(JSON.stringify(run)).not.toMatch(/fresh-token|stale-token|fixture-refresh/);
+      await session.close(); await host.close();
+    });
+  });
+}
+
+test("credential-write guard validation rejects non-function guards", async () => {
+  const base = { route: "codex" as const, model: "gpt-5.4", store: fakeCredentialStore() };
+  expect(() => describeAuthRoute({ ...base, credentialWriteGuard: "nope" as never })).toThrow("invalid");
+  await expect(checkAuthReadiness({ ...base, credentialWriteGuard: 42 as never })).rejects.toThrow("invalid");
+});
+
+test("refusal marker is brand-stable and preserves the guard cause", async () => {
+  const { credentialWriteRefusedError, isCredentialWriteRefused, preserveRefusal } = await import("../src/auth/store.ts");
+  const cause = new Error("owner-cancelled");
+  const refused = credentialWriteRefusedError(cause);
+  expect(isCredentialWriteRefused(refused)).toBe(true);
+  expect(refused.cause).toBe(cause);
+  // Message fallback survives agent-loop sanitization, which rethrows provider
+  // failures as plain messages; brand stays the primary direct-path signal.
+  expect(isCredentialWriteRefused(new Error("Credential store write refused by the embedding-application fence. No credential was changed."))).toBe(true);
+  expect(isCredentialWriteRefused(null)).toBe(false);
+  // Preservation passes refusals through and sanitizes anything else.
+  expect(preserveRefusal("save", refused)).toBe(refused);
+  const converted = preserveRefusal("save", new Error("disk gone")) as Error;
+  expect(isCredentialWriteRefused(converted)).toBe(false);
+  expect(converted.message).toContain("Cannot save credential");
+});
