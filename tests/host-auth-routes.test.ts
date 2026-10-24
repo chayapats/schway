@@ -719,3 +719,52 @@ test("post-write invalidation never removes a concurrent legitimate value", asyn
   expect(isCredentialWriteRefused(error)).toBe(true);
   expect(values.get("grok-subscription:xai")).toBe("fresh-login");
 });
+
+test("post-write cleanup prefers atomic compare-and-delete when offered", async () => {
+  const { effectiveStore } = await import("../src/host/auth-routes.ts");
+  const { isCredentialWriteRefused } = await import("schway/host");
+  const calls: string[] = [];
+  const backend = new Map<string, string>();
+  const base = {
+    get: async (identity: { account: string }) => { calls.push("get"); return backend.get(identity.account) ?? null; },
+    set: async (identity: { account: string }, value: string) => { calls.push("set"); backend.set(identity.account, value); },
+    delete: async (identity: { account: string }) => { calls.push("delete"); return backend.delete(identity.account); },
+    compareAndDelete: async (identity: { account: string }, expected: string) => {
+      calls.push("compareAndDelete");
+      if (backend.get(identity.account) !== expected) return false;
+      backend.delete(identity.account);
+      return true;
+    },
+  };
+  const selection = { route: "grok" as const, model: "grok-4.7", store: base,
+    // Pass the pre-write check, refuse the post-write recheck: the late
+    // value must be removed atomically. First set passes both checks;
+    // the second set passes pre-write and fails post-write.
+    credentialWriteGuard: (() => { let calls = 0; return async () => { calls++; if (calls >= 4) throw new Error("owner stopped"); }; })() };
+  const guarded = effectiveStore(selection);
+  await guarded.set({ account: "grok-subscription:xai", label: "x" }, "fresh-token");
+  expect(backend.get("grok-subscription:xai")).toBe("fresh-token");
+  const error = await guarded.set({ account: "grok-subscription:xai", label: "x" }, "late-token")
+    .then(() => null, (failure: unknown) => failure);
+  expect(isCredentialWriteRefused(error)).toBe(true);
+  // Atomic path: no read-then-delete pair, exactly one guarded removal.
+  expect(calls.filter(call => call === "compareAndDelete")).toHaveLength(1);
+  expect(calls.filter(call => call === "get" || call === "delete")).toEqual([]);
+  expect(backend.size).toBe(0);
+});
+
+test("native store compare-and-delete is best-effort on the injected backend", async () => {
+  const { createNativeCredentialStore } = await import("../src/auth/store.ts");
+  const backend = new Map<string, string>();
+  const secrets = {
+    get: async ({ name }: { service: string; name: string }) => backend.get(name) ?? null,
+    set: async ({ name, value }: { service: string; name: string; value: string }) => { backend.set(name, value); },
+    delete: async ({ name }: { service: string; name: string }) => backend.delete(name),
+  };
+  const store = createNativeCredentialStore(secrets as never);
+  await store.set({ account: "a", label: "a" }, "v1");
+  expect(await store.compareAndDelete!({ account: "a", label: "a" }, "other")).toBe(false);
+  expect(backend.get("a")).toBe("v1");
+  expect(await store.compareAndDelete!({ account: "a", label: "a" }, "v1")).toBe(true);
+  expect(backend.has("a")).toBe(false);
+});

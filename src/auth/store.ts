@@ -14,6 +14,13 @@ export interface CredentialStore {
   set(identity: CredentialIdentity, value: string): Promise<void>;
   /** Delete one identity, returning whether a credential existed. */
   delete(identity: CredentialIdentity): Promise<boolean>;
+  /**
+   * Atomically delete exactly the expected value, reporting whether anything
+   * was removed. Optional: stores without backend compare-and-swap use a
+   * serialized read-then-delete instead. In-process Map-backed stores must
+   * compare and delete with no await in between.
+   */
+  compareAndDelete?(identity: CredentialIdentity, expectedValue: string): Promise<boolean>;
 }
 
 /** Provider and endpoint used to select a credential without including its secret. */
@@ -102,18 +109,31 @@ export function preserveRefusal(operation: "save" | "delete", error: unknown): E
 /** Adapt Bun's OS secure storage without exposing native errors or enabling unrestricted access. */
 export function createNativeCredentialStore(native?: typeof Bun.secrets): CredentialStore {
   const address = (identity: CredentialIdentity) => ({ service: "schway", name: identity.account });
+  const backend = native ?? Bun.secrets;
   return {
     async get(identity) {
-      try { return await (native ?? Bun.secrets).get(address(identity)); }
+      try { return await backend.get(address(identity)); }
       catch { throw new Error(credentialStoreError("read")); }
     },
     async set(identity, value) {
-      try { await (native ?? Bun.secrets).set({ ...address(identity), value }); }
+      try { await backend.set({ ...address(identity), value }); }
       catch { throw new Error(credentialStoreError("save")); }
     },
     async delete(identity) {
-      try { return await (native ?? Bun.secrets).delete(address(identity)); }
+      try { return await backend.delete(address(identity)); }
       catch { throw new Error(credentialStoreError("delete")); }
+    },
+    // Best effort only: the OS keychain offers no atomic compare-and-swap,
+    // so a cross-process writer can still interleave. Same-process writers
+    // are serialized through the caller's lifecycle chain instead.
+    async compareAndDelete(identity, expectedValue) {
+      try {
+        const current = await backend.get(address(identity));
+        if (current !== expectedValue) return false;
+        return await backend.delete(address(identity));
+      } catch {
+        return false;
+      }
     },
   };
 }
