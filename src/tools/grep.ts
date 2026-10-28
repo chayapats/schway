@@ -1,6 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { stat } from "node:fs/promises";
+import type { CoreToolAccess } from "./backend.ts";
 import { abortError, filesystemError, isAbortError, isErrno } from "./fs.ts";
+import { localToolAccess } from "./local-backend.ts";
 import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
 import { displayToolPath, resolveToolPath } from "./path.ts";
 import type {
@@ -73,32 +74,49 @@ export interface GrepDetails {
   matches?: GrepMatch[];
 }
 
-/** Ripgrep-backed content-search definition eligible for parallel scheduling. */
-export const grepTool: ToolDefinition<GrepInput> = {
-  name: "grep",
-  description:
-    "Search file contents with a regular expression. Returns path:line:text locations for follow-up reads. Relative paths resolve from the workspace root. Requires ripgrep (rg).",
-  inputSchema: grepInputSchema,
-  effect: "read-only",
-  execution: "parallel",
-  execute: executeGrep,
-};
+/** Build the content-search definition over a backend; it is eligible for parallel scheduling. */
+export function createGrepTool(access: CoreToolAccess): ToolDefinition<GrepInput> {
+  return {
+    name: "grep",
+    description:
+      "Search file contents with a regular expression. Returns path:line:text locations for follow-up reads. Relative paths resolve from the workspace root. Requires ripgrep (rg).",
+    inputSchema: grepInputSchema,
+    effect: "read-only",
+    execution: "parallel",
+    execute: (input, ctx) => runGrep(access, input, ctx),
+  };
+}
+
+/** Ripgrep-backed content-search definition for the CLI, searching in this process from the workspace root. */
+export const grepTool: ToolDefinition<GrepInput> = createGrepTool(localToolAccess);
 
 /**
  * Search file contents with ripgrep and return bounded path:line:text matches.
  * Relative paths resolve from the workspace root; missing ripgrep, inaccessible paths,
  * and search failures without matches return error results, while detected cancellation rejects.
  */
-export async function executeGrep(
+export function executeGrep(
+  input: GrepInput,
+  ctx: ToolContext,
+): Promise<ToolExecutionResult> {
+  return grepTool.execute(input, ctx);
+}
+
+async function runGrep(
+  access: CoreToolAccess,
   input: GrepInput,
   ctx: ToolContext,
 ): Promise<ToolExecutionResult> {
   const path = input.path ?? ".";
-  const resolvedPath = resolveToolPath(ctx.workspace.root, path);
+  const backend = access.backend(ctx);
+  const root = backend.workspaceRoot;
+  const resolved = await access.resolve(backend, path);
+  if (!resolved.ok) return resolved.result;
+  const resolvedPath = resolved.resolvedPath;
   const maxResults = input.maxResults ?? DEFAULT_GREP_MAX_RESULTS;
 
   try {
-    await stat(resolvedPath);
+    await backend.stat(resolvedPath);
   } catch (error) {
     return {
       content: filesystemError(path, error),
@@ -107,29 +125,30 @@ export async function executeGrep(
     };
   }
 
-  const rg = Bun.which("rg");
-  if (!rg) {
-    return {
-      content: RIPGREP_MISSING_GUIDANCE,
-      isError: true,
-      details: { path, resolvedPath, pattern: input.pattern },
-    };
-  }
-
-  if (ctx.signal?.aborted) {
-    throw abortError();
-  }
-
   let collected: Array<{ path: string; line: number; text: string }>;
   let truncated: boolean;
-  let stderr: string;
-  let exitCode: number;
+  let failure: string | undefined;
   try {
-    const ran = await runRipgrep(rg, input, path, maxResults, ctx);
-    collected = ran.matches;
+    // Ripgrep receives the model path relative to the workspace root, as it always has.
+    const ran = await backend.search({
+      pattern: input.pattern,
+      path,
+      cwd: root,
+      ...(input.glob !== undefined ? { glob: input.glob } : {}),
+      ...(input.ignoreCase !== undefined ? { ignoreCase: input.ignoreCase } : {}),
+      limit: maxResults + 1,
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+    });
+    if (ctx.signal?.aborted) {
+      throw abortError();
+    }
+    collected = ran.matches.map(match => ({
+      path: displayToolPath(root, resolveToolPath(root, match.path)),
+      line: match.line,
+      text: match.text,
+    }));
     truncated = ran.truncated;
-    stderr = ran.stderr;
-    exitCode = ran.exitCode;
+    failure = ran.failure;
     if (collected.length > maxResults) {
       collected = collected.slice(0, maxResults);
       truncated = true;
@@ -152,8 +171,8 @@ export async function executeGrep(
     };
   }
 
-  if (exitCode === 2 && collected.length === 0) {
-    const detail = stderr.trim() || "Invalid search pattern or inaccessible path";
+  if (failure !== undefined && collected.length === 0) {
+    const detail = failure.trim() || "Invalid search pattern or inaccessible path";
     return {
       content: detail,
       isError: true,
@@ -200,152 +219,3 @@ export async function executeGrep(
     } satisfies GrepDetails,
   };
 }
-
-/** Spawn ripgrep and collect up to `maxResults` JSON matches. */
-async function runRipgrep(
-  command: string,
-  input: GrepInput,
-  path: string,
-  maxResults: number,
-  ctx: ToolContext,
-): Promise<{
-  matches: Array<{ path: string; line: number; text: string }>;
-  truncated: boolean;
-  stderr: string;
-  exitCode: number;
-}> {
-  const args = ["--json", "--no-config"];
-  if (input.ignoreCase === true) {
-    args.push("-i");
-  }
-  if (input.glob !== undefined && input.glob.length > 0) {
-    args.push("-g", input.glob);
-  }
-  args.push("--", input.pattern, path);
-
-  const proc = Bun.spawn([command, ...args], {
-    cwd: ctx.workspace.root,
-    stdout: "pipe",
-    stderr: "pipe",
-    stdin: "ignore",
-    signal: ctx.signal,
-  });
-
-  const matches: Array<{ path: string; line: number; text: string }> = [];
-  let truncated = false;
-  const stdoutTask = readMatches(
-    proc.stdout,
-    ctx.workspace.root,
-    maxResults,
-    matches,
-    () => {
-      truncated = true;
-      proc.kill();
-    },
-    ctx.signal,
-  );
-  const stderrTask = proc.stderr.text().catch(() => "");
-
-  try {
-    await stdoutTask;
-  } catch (error) {
-    proc.kill();
-    if (ctx.signal?.aborted || isAbortError(error)) {
-      throw error instanceof Error ? error : abortError();
-    }
-    if (!truncated) {
-      throw error;
-    }
-  }
-
-  const exitCode = await proc.exited;
-  const stderr = await stderrTask;
-  return { matches, truncated, stderr, exitCode };
-}
-
-/** Parse ripgrep JSON lines until `maxResults` or the stream ends. */
-async function readMatches(
-  stream: ReadableStream<Uint8Array>,
-  workspaceRoot: string,
-  maxResults: number,
-  matches: Array<{ path: string; line: number; text: string }>,
-  onTruncate: () => void,
-  signal?: AbortSignal,
-): Promise<void> {
-  const decoder = new TextDecoder();
-  let buffer = "";
-  const limit = maxResults + 1;
-  for await (const chunk of stream) {
-    if (signal?.aborted) {
-      throw abortError();
-    }
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      const match = parseRipgrepMatch(line, workspaceRoot);
-      if (!match) {
-        continue;
-      }
-      matches.push(match);
-      if (matches.length >= limit) {
-        onTruncate();
-        return;
-      }
-    }
-  }
-  buffer += decoder.decode();
-  if (buffer.length > 0 && matches.length < limit) {
-    const match = parseRipgrepMatch(buffer, workspaceRoot);
-    if (match) {
-      matches.push(match);
-      if (matches.length >= limit) {
-        onTruncate();
-      }
-    }
-  }
-}
-
-/** Decode one ripgrep `--json` match line into a model-facing hit. */
-function parseRipgrepMatch(
-  line: string,
-  workspaceRoot: string,
-): { path: string; line: number; text: string } | undefined {
-  if (line.length === 0) {
-    return undefined;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    return undefined;
-  }
-  if (typeof parsed !== "object" || parsed === null) {
-    return undefined;
-  }
-  const object = parsed as {
-    type?: unknown;
-    data?: {
-      path?: { text?: unknown };
-      line_number?: unknown;
-      lines?: { text?: unknown };
-    };
-  };
-  if (object.type !== "match" || object.data === undefined) {
-    return undefined;
-  }
-  const rawPath = object.data.path?.text;
-  const lineNumber = object.data.line_number;
-  const text = object.data.lines?.text;
-  if (typeof rawPath !== "string" || typeof lineNumber !== "number") {
-    return undefined;
-  }
-  const body =
-    typeof text === "string" ? text.replace(/[\r\n]+$/, "") : "";
-  return {
-    path: displayToolPath(workspaceRoot, resolveToolPath(workspaceRoot, rawPath)),
-    line: lineNumber,
-    text: body,
-  };
-}
-

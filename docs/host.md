@@ -2,7 +2,7 @@
 
 `schway/host` is the semver-governed application-host entry. It composes Schway's existing loop, context preparation, tool scheduler, retries and native JSONL persistence. It does not import the CLI or construct a provider. Discovery and scripted tests need no account or paid request.
 
-This implements `schway.host.base/v1` from [ENG01 #395](https://github.com/chayapats/schway/issues/395), `schway.host.context-policy/v1` from [ENG02 #396](https://github.com/chayapats/schway/issues/396), `schway.host.durable-sessions/v1` from [ENG04 #397](https://github.com/chayapats/schway/issues/397), `schway.host.tool-policy/v1` from [ENG03 #399](https://github.com/chayapats/schway/issues/399), `schway.host.auth-routes/v1` from [ENG05 #398](https://github.com/chayapats/schway/issues/398), `schway.host.run-control/v1` from [ENG06 #400](https://github.com/chayapats/schway/issues/400), `schway.host.managed-session-data/v1` from [ENG07 #401](https://github.com/chayapats/schway/issues/401), `schway.host.session-snapshot/v1` from [ENG08 #402](https://github.com/chayapats/schway/issues/402), and the composed `schway.host.release/v1` from [ENG09 #403](https://github.com/chayapats/schway/issues/403), slices of [S02 #393](https://github.com/chayapats/schway/issues/393). Strict context discovery, exclusive durable sessions, exact tool registries, explicit Grok/Codex route lifecycles, bounded run controls with honest terminal outcomes, narrow retire/delete for owned native session data, quiesced snapshots with validated restore, and a packed installable artifact with a pinned release contract are supported; the production bridge remains a later capability. Unsupported policies/fields fail before input acceptance or inference. CLI context defaults are unchanged.
+This implements `schway.host.base/v1` from [ENG01 #395](https://github.com/chayapats/schway/issues/395), `schway.host.context-policy/v1` from [ENG02 #396](https://github.com/chayapats/schway/issues/396), `schway.host.durable-sessions/v1` from [ENG04 #397](https://github.com/chayapats/schway/issues/397), `schway.host.tool-policy/v1` from [ENG03 #399](https://github.com/chayapats/schway/issues/399), `schway.host.auth-routes/v1` from [ENG05 #398](https://github.com/chayapats/schway/issues/398), `schway.host.run-control/v1` from [ENG06 #400](https://github.com/chayapats/schway/issues/400), `schway.host.managed-session-data/v1` from [ENG07 #401](https://github.com/chayapats/schway/issues/401), `schway.host.session-snapshot/v1` from [ENG08 #402](https://github.com/chayapats/schway/issues/402), `schway.host.core-tools/v1` from [SCH01 #429](https://github.com/chayapats/schway/issues/429), and the composed `schway.host.release/v2` (first composed as `schway.host.release/v1` in [ENG09 #403](https://github.com/chayapats/schway/issues/403)), slices of [S02 #393](https://github.com/chayapats/schway/issues/393). Strict context discovery, exclusive durable sessions, exact tool registries, explicit Grok/Codex route lifecycles, bounded run controls with honest terminal outcomes, narrow retire/delete for owned native session data, quiesced snapshots with validated restore, core tools over a host-supplied execution backend, and a packed installable artifact with a pinned release contract are supported; the production bridge remains a later capability. Unsupported policies/fields fail before input acceptance or inference. CLI context defaults are unchanged.
 
 ```ts
 import { createHost, hostCapabilities, type Model } from "schway/host";
@@ -44,7 +44,7 @@ Every path is explicit and absolute. Workspace and home must already be readable
 
 Opening a managed reference validates its saved workspace and attached roots before native torn-tail repair, branch selection or interrupted-call settlement can write. A mismatched identity is rejected with the original artifact bytes preserved. A valid owner can still reopen through ordinary native recovery.
 
-`submit` accepts nonempty text up to `maxInputChars`, appends and flushes a native user entry before publishing acceptance, then calls the supplied provider-independent `Model` through the native loop. Tool definitions are cloned/validated at startup and use the existing scheduler. The registry is exact: an empty registry advertises and executes zero function tools, and a narrow registry exposes only admitted definitions. No shell/edit/write/fetch, `activate_skill` or provider adapter is added implicitly by loop startup, extensions, context preparation, retry, overflow recovery or reopened sessions. An explicitly admitted `activate_skill` is rebound per session to the current context manager so its policy still applies; unadmitted calls fail as `Unknown tool` without execution. Provider-hosted lookup is forced off (`hostedLookup: "off"`); request builders and adapters never attach search after hooks or during compaction/preflight/replay when off. Read-only approval applies after hooks to effective arguments but is not isolation; the trusted host owns resource-scoped connector implementations. Relative tool paths retain Schway canonical primary-workspace-root semantics; no independent Jit path model or alternative executor is introduced.
+`submit` accepts nonempty text up to `maxInputChars`, appends and flushes a native user entry before publishing acceptance, then calls the supplied provider-independent `Model` through the native loop. Tool definitions are cloned/validated at startup and use the existing scheduler. The registry is exact: an empty registry advertises and executes zero function tools, and a narrow registry exposes only admitted definitions. No shell/edit/write/fetch, `activate_skill` or provider adapter is added implicitly by loop startup, extensions, context preparation, retry, overflow recovery or reopened sessions. An explicitly admitted `activate_skill` is rebound per session to the current context manager so its policy still applies; unadmitted calls fail as `Unknown tool` without execution. Provider-hosted lookup is forced off (`hostedLookup: "off"`); request builders and adapters never attach search after hooks or during compaction/preflight/replay when off. Read-only approval applies after hooks to effective arguments but is not isolation; the trusted host owns resource-scoped connector implementations. Relative tool paths retain Schway canonical primary-workspace-root semantics; no independent Jit path model is introduced. Schway's own core tools are available only through the explicit core-tools contract below.
 
 `maxTurns` is an integer 1–100, `maxConcurrentTools` 1–32, `contextWindow` 1–2,000,000 and `maxInputChars` 1–1,000,000. `deadlineMs` is an integer 1–86,400,000 (default 300,000) and `maxAttempts` is an integer 1–10 (default 3). These are finite admission bounds; malformed, non-integer or unlimited values fail with `invalid-options` before any session or model call. Retry backoff and overflow/compaction recovery count against the run deadline. A supplied abort signal, `HostRunOptions.signal`, session `cancel()` and the deadline are cooperative; synchronous extension code stays outside hard-preemption guarantees. The base `close` methods reject `HostError` code `busy` during accepted work or session opening and never abort or settle an admitted run; call `cancel()` first, await settlement, then close. Close is idempotent; a closed handle cannot submit or read again. `cancel()` is safe to repeat and safe when idle.
 
@@ -137,11 +137,54 @@ Jit owns authorization, memory and source lineage, deletion generations, backup 
 
 `HostRuntime.validateSessionSnapshot(snapshot)` checks shape, hashes, sizes and supported versions without touching the store. `HostRuntime.restoreSessionSnapshot(snapshot, options?)` restores into a fresh store with the matching workspace root, revalidates hashes, quarantines missing, corrupt, incompatible or incomplete sets with safe diagnostics, and resumes one captured ancestry through Schway-owned validation and forward-only migration. Forward-only migration applies on open; the durable file migrates lazily on the next write, so restored raw bytes stay unchanged until the session appends. Restore never overwrites a mismatched target: an existing conversation or tombstone whose bytes differ quarantines as `conflict` with delete-first guidance, while an open handle or held lease quarantines as `conflict` with close-first guidance. An identical retry is resumable: already-restored refs whose bytes and hashes match are skipped, so a partial restore retries with `restoreSessionSnapshot` to resume. To retry a mismatched target, delete the restored refs with `deleteSession` first, then retry restore; to retry a busy target, close the open session first, then retry. Partial restore keeps coherent writes and reports restored and remaining refs without running anything. Retired snapshots restore their tombstones and stay closed unless `excludeRetired` filters them before activation. History, draft and undo sidecars are not part of the snapshot; Jit coordinates them separately. See ADR0016 and `tests/host-session-snapshot.test.ts`.
 
+## Core tools over a host execution backend
+
+`schway.host.core-tools/v1` exports Schway's core tools for a host that wants them to run somewhere other than its own process, such as a disposable container. `hostCapabilities()` advertises it as `coreToolsContract`, and `CORE_TOOLS_CONTRACT` exports the same string.
+
+```ts
+import { coreToolDefinitions, createHost, localExecutionBackend, type ExecutionBackend } from "schway/host";
+
+const backend: ExecutionBackend = myContainerBackend(); // or localExecutionBackend("/absolute/workspace")
+const host = await createHost({
+  // ...paths, context and limits as above
+  tools: { policy: "exact", hostedLookup: "off", definitions: coreToolDefinitions(backend, { env: { PATH: "/usr/bin:/bin" } }) },
+});
+```
+
+`coreToolDefinitions(backend, options?)` returns `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls` in the CLI's order, with the CLI's input schemas, descriptions, `execution` modes, `effect` declarations and output bounds. Nothing is admitted implicitly: the tools exist in a run only when the host passes them in `tools.definitions`, and the [tool policy](#tool-policy-and-hosted-lookup) still applies. An empty registry still exposes zero tools, an unadmitted `bash` call still settles as `Unknown tool: bash` without reaching the backend, and before-tool hooks and approval modes behave as for any other admitted definition. `options.env`, when set, is the complete `bash` environment; otherwise the backend's default applies. A malformed backend or option fails with `HostError("invalid-options")`.
+
+Every core tool reaches files and processes only through the `ExecutionBackend`, never through `node:fs` or `node:child_process` directly:
+
+| Member | Contract |
+| --- | --- |
+| `workspaceRoot` | Absolute backend path of the primary workspace. Relative model paths resolve from it. |
+| `temporaryDirectory` | Absolute backend directory for private `bash` spill files. |
+| `realpath(path)` | Resolve every symlink in an existing path; reject `ENOENT` when it is missing. |
+| `stat(path)` | Report `file`, `directory` or `other` after following symlinks. |
+| `readFile(path, { signal })` | Stream bytes; stopping iteration releases the file. |
+| `observeFile(path, { content, signal })` | Observe a path (and its bytes when `content` is set) for a later fenced write; `null` when absent. |
+| `writeFileAtomically(path, content, { observed, createParents, signal })` | Replace the path's own entry atomically, never following a final symlink; reject `ECHANGED` when the path no longer matches `observed` (`null` means it must still be absent). |
+| `writePrivateFile(path, content)` | Create an owner-only spill file in `temporaryDirectory`. |
+| `list(path)` | One directory level with each entry's own type, without following symlink entries. |
+| `glob(pattern, { cwd, signal })` | Regular files under `cwd`, relative to it, without following symlinks. |
+| `search(request)` | Regular-expression matches up to `limit`, with `truncated` and diagnostic `failure`; reject `ENOENT` when no search program is available. |
+| `spawn(request)` | Run `bash -c <command>` in `cwd` to completion with `env`, `timeoutMs`, `signal` and live `onOutput`; a non-zero exit is data. |
+
+Failures reject with a Node-style `code` (`ENOENT`, `EACCES`, `EPERM`, `EISDIR`, `ENOTDIR`, `ECHANGED`) so Schway can render the same model-visible errors as the CLI. A stale `edit` observation therefore reports `File changed before replacement: <path>` and writes nothing.
+
+Schway keeps ownership of everything model-facing. It resolves paths, applies the 50,000-byte output caps with code-point-safe cuts (Thai and emoji included), writes the `[Output truncated: showing N of M bytes. Full output: <path>. Use read with offset to see the rest.]` notice, spills full `bash` output through `writePrivateFile`, and returns a non-zero exit code as result data. `spawn` returns complete decoded streams, and Schway bounds them. A backend cannot bypass these bounds.
+
+Paths are confined to `workspaceRoot`. A `..` or absolute path that resolves outside it is refused with `Path is outside the workspace: <path>` before any backend call. A symlink that resolves outside it is refused after `realpath` and before any read, write, list, search or spawn. Writes to new files resolve symlinks through the deepest existing ancestor. The one exception is `read` of a spill file `schway-bash-<uuid>.log` directly inside `temporaryDirectory`, so the truncation notice stays actionable. Confinement is a Schway path check, not isolation: the backend is trusted host code, not a Schway sandbox. A container backend is still responsible for keeping its own process and filesystem boundary, and its own path checks are recommended.
+
+`signal` reaches `spawn` and every streaming operation. A backend should settle promptly after abort; a result that arrives after cancellation is never published, and the call settles as `cancelled`. Schway logs no command text or file content beyond what it logs today.
+
+`localExecutionBackend(workspaceRoot)` runs the tools in the host process exactly as the CLI does, including atomic writes, process-group termination and ripgrep search. The CLI and TUI keep their existing unconfined registry over the same local implementation, so their behavior and default tools are unchanged. See ADR0018 and `tests/host-core-tools.test.ts`.
+
 ## Release artifact and downstream pinning
 
-`schway.host.release/v1` is the composed downstream contract for Jit. `hostCapabilities()` advertises it as `releaseContract` alongside the eight sliced contracts (`base`, `context-policy`, `tool-policy`, `durable-sessions`, `auth-routes`, `run-control`, `managed-session-data`, `session-snapshot`); `RELEASE_CONTRACT` exports the same version string. The packed npm artifact (`bun pm pack`) ships `schway/host` with reachable `dist/types/host/index.d.ts` declarations, the `examples/host/review.ts` embedded consumer, and the host user docs. An external temporary consumer installs that tarball without private source access or local path aliases and imports only `schway/host` with no `node:` or `bun:` specifier.
+`schway.host.release/v2` is the composed downstream contract for Jit. `hostCapabilities()` advertises it as `releaseContract` alongside the nine sliced contracts (`base`, `context-policy`, `tool-policy`, `durable-sessions`, `auth-routes`, `run-control`, `managed-session-data`, `session-snapshot`, `core-tools`); `RELEASE_CONTRACT` exports the same version string. `release/v2` is `release/v1` plus `schway.host.core-tools/v1`; every `release/v1` behavior is unchanged. The packed npm artifact (`bun pm pack`) ships `schway/host` with reachable `dist/types/host/index.d.ts` declarations, the `examples/host/review.ts` embedded consumer, and the host user docs. An external temporary consumer installs that tarball without private source access or local path aliases and imports only `schway/host` with no `node:` or `bun:` specifier.
 
-The supported set is `schway.host.base/v1`, `schway.host.context-policy/v1`, `schway.host.tool-policy/v1`, `schway.host.durable-sessions/v1`, `schway.host.auth-routes/v1`, `schway.host.run-control/v1`, `schway.host.managed-session-data/v1`, `schway.host.session-snapshot/v1`, and composed `schway.host.release/v1`. Version selection stays repo-consistent: this branch keeps `package.json` at `1.0.0-rc.2`; the next `1.0.0-rc.3` npm publish under existing repository authorization will carry these contracts. Code-tested revision is `b1d00aa4b93ea7d50f4692b0eebb0132083ad4b8` (full suite green on that tree; heads after it are docs-only wording). Tested revision is this PR's code tree; integration squash-merges tree-identically (coordinator verifies an empty tree diff against the merge commit) before downstream pinning. Jit pins either the tested tarball SHA (reproduce with `bun pm pack --destination <dir>` then `shasum -a 256 <tarball>`) or `schway@^1.0.0-rc.3` once published, plus `schway.host.release/v1` as the behavior contract. Capability claims (`releaseContract`, route lists, policy lists) are distinct from S01 Pi/account support: `observedInference` stays `not-checked` until an actual route-bound run commits, and Linux store availability remains documented under credentials without claiming unattended support. Shared-renewal fencing is proved in the release seam and in `tests/host-auth-routes.test.ts`. See ADR0017 and `tests/host-release.test.ts`. Actual npm/GitHub publication still requires existing repository authorization; no automatic release is performed here.
+The supported set is `schway.host.base/v1`, `schway.host.context-policy/v1`, `schway.host.tool-policy/v1`, `schway.host.durable-sessions/v1`, `schway.host.auth-routes/v1`, `schway.host.run-control/v1`, `schway.host.managed-session-data/v1`, `schway.host.session-snapshot/v1`, `schway.host.core-tools/v1`, and composed `schway.host.release/v2`. Version selection stays repo-consistent: this branch keeps `package.json` at `1.0.0-rc.2`; the next `1.0.0-rc.3` npm publish under existing repository authorization will carry these contracts. The tested revision and tarball SHA are recorded in the pull request that introduces each contract; integration squash-merges tree-identically (coordinator verifies an empty tree diff against the merge commit) before downstream pinning. Jit pins either the tested tarball SHA (reproduce with `bun pm pack --destination <dir>` then `shasum -a 256 <tarball>`) or `schway@^1.0.0-rc.3` once published, plus `schway.host.release/v2` as the behavior contract. Capability claims (`releaseContract`, route lists, policy lists) are distinct from S01 Pi/account support: `observedInference` stays `not-checked` until an actual route-bound run commits, and Linux store availability remains documented under credentials without claiming unattended support. Shared-renewal fencing is proved in the release seam and in `tests/host-auth-routes.test.ts`. See ADR0017 and `tests/host-release.test.ts`. Actual npm/GitHub publication still requires existing repository authorization; no automatic release is performed here.
 
 ## Public API
 
@@ -152,17 +195,31 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `AssistantContent` | Native text, reasoning or tool-call block. |
 | `AssistantMessage` | Assembled native assistant response. |
 | `AssistantTelemetry` | Harness timing and reported model usage. |
+| `checkAuthReadiness` | Check selected-route store readiness without network or inference. |
+| `classifyAuthError` | Map a route-bound failure to a safe status without secrets. |
+| `containsNoSecrets` | Test helper confirming sentinels are absent from returned data. |
 | `ContextSection` | Named host/native dynamic context. |
 | `ContextSourceDocument` | Explicit versioned untrusted evidence, separate from operator instructions. |
 | `ContextSourcePolicy` | Complete discovery and activation permissions, captured before inference. |
 | `ConversationItem` | Provider-independent user, assistant or tool-result record. |
-| `checkAuthReadiness` | Check selected-route store readiness without network or inference. |
-| `classifyAuthError` | Map a route-bound failure to a safe status without secrets. |
-| `containsNoSecrets` | Test helper confirming sentinels are absent from returned data. |
+| `CORE_TOOLS_CONTRACT` | Core-tools contract version. |
+| `coreToolDefinitions` | Build the core tools over a backend, confined to its root. |
+| `CoreToolOptions` | Optional `bash` environment for host-built core tools. |
 | `createAuthRouteModel` | Create only the selected subscription adapter lazily. |
 | `createHost` | Validate and lazily compose an explicit host. |
 | `credentialReferenceForRoute` | Return the opaque credential address for a route. |
 | `describeAuthRoute` | Describe the static supported route without store or network. |
+| `ExecutionBackend` | Trusted host filesystem and process boundary for core tools. |
+| `ExecutionDirectoryEntry` | One directory entry with its own type. |
+| `ExecutionEntryType` | File, directory or other after following symlinks. |
+| `ExecutionFileObservation` | Backend-issued observation that fences a later write. |
+| `ExecutionSearchMatch` | One matching line with path and line number. |
+| `ExecutionSearchRequest` | Bounded regular-expression search request. |
+| `ExecutionSearchResult` | Search matches, truncation and failure text. |
+| `ExecutionSpawnRequest` | One `bash -c` command with cwd, env, timeout and cancellation. |
+| `ExecutionSpawnResult` | Complete decoded output, exit code and timeout flag. |
+| `ExecutionStat` | Followed-symlink metadata for one path. |
+| `hashSnapshotBytes` | SHA-256 helper for snapshot integrity. |
 | `HostAuthBinding` | Route-bound host composition with readiness and lazy model. |
 | `HostAuthDescription` | Static supported route with opaque credential. |
 | `HostAuthFetch` | Protocol-fixture fetch override for deterministic tests. |
@@ -172,10 +229,9 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostAuthSelection` | Explicit route/model binding without raw tokens. |
 | `HostAuthStatusCode` | Stable safe categories for readiness and failures. |
 | `HostCapabilities` | Static API features with no inference observation. |
-| `HostCompactionResult` | Durable native summary reference or explicit noop/error/cancelled/limit-exceeded result. |
 | `hostCapabilities` | Discover support without loading runtime or accounts. |
-| `isCredentialWriteRefused` | Test whether an error is a fence refusal, not a store failure. |
-| `isCleanupUncertain` | Test whether an error marks an unverified credential cleanup. |
+| `HostClock` | Injectable wall clock for deterministic backoff/deadline waits. |
+| `HostCompactionResult` | Durable native summary reference or explicit noop/error/cancelled/limit-exceeded result. |
 | `HostCredentialReference` | Opaque credential account and label. |
 | `HostCredentialStore` | Secure-store boundary for a selected route. |
 | `HostCredentialWriteGuard` | Embedding-application fence for credential-store writes. |
@@ -185,16 +241,15 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostError` | Safe typed startup/lifecycle/reference rejection. |
 | `HostInput` | Bounded plain user text accepted before inference. |
 | `HostLimits` | Explicit finite loop/context/input/deadline/retry bounds. |
-| `HostClock` | Injectable wall clock for deterministic backoff/deadline waits. |
 | `HostModelIdentity` | Selected model identity carried on terminal outcomes. |
-| `HostProgressEvent` | Transient progress observation that never creates durable output. |
-| `HostRunOptions` | Cooperative signal, fake clock and transient progress observer. |
-| `HostRunAttemptUsage` | One reported usage sample with its completeness flag. |
-| `HostRunUsage` | Honest run consumption with nulls preserved. |
-| `HostRunError` | Sanitized failure detail with effective policy and model. |
 | `HostOptions` | Trusted paths, context, tool policy and limits. |
+| `HostProgressEvent` | Transient progress observation that never creates durable output. |
+| `HostRunAttemptUsage` | One reported usage sample with its completeness flag. |
+| `HostRunError` | Sanitized failure detail with effective policy and model. |
+| `HostRunOptions` | Cooperative signal, fake clock and transient progress observer. |
 | `HostRunResult` | Terminal outcome with a durable result only on completion. |
 | `HostRuntime` | Create, open, retire, delete, snapshot, validate, restore and close managed native handles. |
+| `HostRunUsage` | Honest run consumption with nulls preserved. |
 | `HostSession` | Submit, compact, retire and inspect one exact native ancestry. |
 | `HostSessionDeletion` | Honest deletion outcome with retry guidance. |
 | `HostSessionReference` | Stable native session and branch identity. |
@@ -207,14 +262,13 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostSnapshotRestoreResult` | Restored, quarantined or partial restore outcome. |
 | `HostSnapshotSession` | Captured session refs, ancestry, versions and inventory. |
 | `HostSnapshotValidation` | Offline snapshot validation verdict. |
+| `isCleanupUncertain` | Test whether an error marks an unverified credential cleanup. |
+| `isCredentialWriteRefused` | Test whether an error is a fence refusal, not a store failure. |
+| `JsonSchema` | Provider-independent tool input schema. |
+| `localExecutionBackend` | Run core tools in this process with CLI behavior. |
 | `MAX_SNAPSHOT_ARTIFACT_BYTES` | Per-artifact byte bound for snapshots. |
 | `MAX_SNAPSHOT_SESSIONS` | Per-snapshot session bound. |
 | `MAX_SNAPSHOT_TOTAL_BYTES` | Total decoded byte bound for snapshots. |
-| `SNAPSHOT_CONTRACT` | Snapshot contract version. |
-| `SNAPSHOT_NATIVE_FORMAT_VERSION` | Native format version for snapshots. |
-| `hashSnapshotBytes` | SHA-256 helper for snapshot integrity. |
-| `validateSnapshotShape` | Offline snapshot shape and integrity check. |
-| `JsonSchema` | Provider-independent tool input schema. |
 | `Model` | Host-supplied normalized model stream. |
 | `ModelCallOptions` | Schway-owned model-call settings. |
 | `ModelRequest` | Native prompt/context/conversation/tool request. |
@@ -223,6 +277,8 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `ModelUsage` | Reported counters with honest unknown dimensions. |
 | `ProviderMetadata` | Opaque adapter-owned replay data. |
 | `RELEASE_CONTRACT` | Composed release contract version for downstream pinning. |
+| `SNAPSHOT_CONTRACT` | Snapshot contract version. |
+| `SNAPSHOT_NATIVE_FORMAT_VERSION` | Native format version for snapshots. |
 | `TextContent` | Native plain-text block. |
 | `ThinkingContent` | Native reasoning block and replay metadata. |
 | `ThinkingLevel` | Provider-independent requested reasoning level. |
@@ -237,11 +293,14 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `ToolTelemetry` | Harness tool timing metadata. |
 | `UserContent` | Native user plain-text content. |
 | `UserMessage` | Identified persisted user input. |
+| `validateSnapshotShape` | Offline snapshot shape and integrity check. |
 | `Workspace` | Canonical root/launch/attached-root identity. |
 
 ## Validation
 
-`bun test tests/host-release.test.ts` packs the current checkout with `bun pm pack`, installs the tarball into an isolated temporary consumer without private source access or path aliases, and proves the composed release contract through public `schway/host` imports only: static `schway.host.release/v1` capability discovery without provider/TUI loading, strict review with adversarial workspace/home content and a narrow read-only tool, independent sessions with normalized usage and transient progress, tool execution, fresh-handle reopen, cooperative cancellation, quiesced two-session snapshot with hash-verified restore into a fresh store, retire/delete lifecycle with idempotent delete, Grok/Codex route success plus 401/429 isolation with API-key bait and per-route adapter guards, and concurrent expired-token renewal sharing one refresh without cross-route reads. The installed tarball must contain `examples/host/review.ts` and `docs/host.md`, the example bundles against the public entry, and the fixture source itself is checked to import only `schway/host` with no `node:` or `bun:` specifier.
+`bun test tests/host-release.test.ts` packs the current checkout with `bun pm pack`, installs the tarball into an isolated temporary consumer without private source access or path aliases, and proves the composed release contract through public `schway/host` imports only: static `schway.host.release/v2` capability discovery without provider/TUI loading, core tools built over a fake backend completing a scripted `bash` plus `write` run through the exact policy, strict review with adversarial workspace/home content and a narrow read-only tool, independent sessions with normalized usage and transient progress, tool execution, fresh-handle reopen, cooperative cancellation, quiesced two-session snapshot with hash-verified restore into a fresh store, retire/delete lifecycle with idempotent delete, Grok/Codex route success plus 401/429 isolation with API-key bait and per-route adapter guards, and concurrent expired-token renewal sharing one refresh without cross-route reads. The installed tarball must contain `examples/host/review.ts` and `docs/host.md`, the example bundles against the public entry, and the fixture source itself is checked to import only `schway/host` with no `node:` or `bun:` specifier.
+
+`bun test tests/host-core-tools.test.ts` proves the core-tools contract: definitions deep-equal to the CLI tools, a golden recorded from the pre-backend CLI tools that both the CLI and `coreToolDefinitions(localExecutionBackend(root))` reproduce byte for byte (including truncation notices and spill files), an in-memory backend that receives every call while a preload makes `node:fs`, `node:child_process`, `node:os` and Bun process/file APIs throw, 50,000-byte code-point-safe cuts for Thai and emoji, a stale `edit` conflict with no write, `..` and symlink escapes refused before backend access, cancellation reaching `spawn` without publishing a late result, empty and explicit admission, and capability discovery that loads no tool, provider or TUI module. The packed release consumer also builds the tools over a fake backend from `schway/host` alone and completes a scripted `bash` plus `write` run.
 
 `bun test tests/host-session-snapshot.test.ts` proves quiesced two-session snapshot, fresh-store restore and ancestry resume without tool replay, busy/conflict fencing for open writers and replaced aliases, retired ledger filtering on export and restore, quarantine for missing/corrupt/incompatible/incomplete sets, forward-only migration with lazy durable bytes, idempotent resume for identical targets and delete-first conflict for mismatched targets, workspace mismatch, and sanitized manifests.
 

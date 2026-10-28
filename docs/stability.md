@@ -77,8 +77,15 @@ contract versions plus SHA-256 inventory without credentials or unowned files,
 and restore revalidates, quarantines incomplete or incompatible sets, and
 resumes ancestry through Schway-owned forward-only migration without running
 models or tools. Jit coordinates its own app store and deletion ledger; no
-distributed atomicity is promised. The release contract composes all eight
-sliced contracts as `schway.host.release/v1` for versioned downstream pinning:
+distributed atomicity is promised. The core-tools contract exports `read`,
+`write`, `edit`, `bash`, `grep`, `find` and `ls` over a host-supplied
+`ExecutionBackend` with the CLI's schemas, descriptions, effects and output
+bounds. Schway keeps path confinement to the backend root and the output
+bounds; nothing is admitted implicitly, and the backend is trusted host code,
+not a sandbox. `localExecutionBackend` reproduces the CLI's behavior, and the
+CLI and TUI registries are unchanged. The release contract composes all nine
+sliced contracts as `schway.host.release/v2` (`release/v1` plus core-tools)
+for versioned downstream pinning:
 `hostCapabilities().releaseContract` and the `RELEASE_CONTRACT` export name the
 supported behavior set, the packed artifact ships `schway/host` with reachable
 `dist/types` declarations and the `examples/host` embedded consumer, and an
@@ -96,7 +103,9 @@ or renaming a member, or making a field required, is a major change.
 ## Core tool semantics
 
 The core tools are `read`, `write`, `edit`, `bash`, `web_fetch`, `grep`, `find`
-and `ls`. Any change to their meaning needs a major version. Semantic changes include:
+and `ls`. Any change to their meaning needs a major version, whether they run in
+the CLI or through `coreToolDefinitions` over a host execution backend. Semantic
+changes include:
 
 - Renaming or removing a tool or parameter.
 - Changing a parameter’s meaning.

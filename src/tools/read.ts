@@ -1,13 +1,12 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
+import type { CoreToolAccess, ExecutionBackend } from "./backend.ts";
 import {
   abortError,
   filesystemError,
   isAbortError,
 } from "./fs.ts";
+import { localToolAccess } from "./local-backend.ts";
 import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
-import { resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
   ToolDefinition,
@@ -59,16 +58,21 @@ export interface ReadDetails {
   nextOffset?: number;
 }
 
-/** File-reading definition declaring its input schema and parallel scheduling eligibility. */
-export const readTool: ToolDefinition<ReadInput> = {
-  name: "read",
-  description:
-    "Read a file from the workspace with optional offset and limit. Relative paths resolve from the workspace root. Output is line-numbered and bounded.",
-  inputSchema: readInputSchema,
-  effect: "read-only",
-  execution: "parallel",
-  execute: executeRead,
-};
+/** Build the file-reading definition over a backend; it is eligible for parallel scheduling. */
+export function createReadTool(access: CoreToolAccess): ToolDefinition<ReadInput> {
+  return {
+    name: "read",
+    description:
+      "Read a file from the workspace with optional offset and limit. Relative paths resolve from the workspace root. Output is line-numbered and bounded.",
+    inputSchema: readInputSchema,
+    effect: "read-only",
+    execution: "parallel",
+    execute: (input, ctx) => runRead(access, input, ctx),
+  };
+}
+
+/** File-reading definition for the CLI, reading in this process from the workspace root. */
+export const readTool: ToolDefinition<ReadInput> = createReadTool(localToolAccess);
 
 /**
  * Read a file as line-numbered, bounded text.
@@ -76,14 +80,25 @@ export const readTool: ToolDefinition<ReadInput> = {
  * {@link MAX_READ_BYTES} budget before a truncation notice is appended.
  * File, binary-content, and offset failures return error results; stream cancellation rejects.
  */
-export async function executeRead(
+export function executeRead(
   input: ReadInput,
   ctx: ToolContext,
 ): Promise<ToolExecutionResult> {
-  const resolvedPath = resolveToolPath(ctx.workspace.root, input.path);
+  return readTool.execute(input, ctx);
+}
+
+async function runRead(
+  access: CoreToolAccess,
+  input: ReadInput,
+  ctx: ToolContext,
+): Promise<ToolExecutionResult> {
+  const backend = access.backend(ctx);
+  const resolved = await access.resolve(backend, input.path, { spillFile: true });
+  if (!resolved.ok) return resolved.result;
+  const resolvedPath = resolved.resolvedPath;
   let info;
   try {
-    info = await stat(resolvedPath);
+    info = await backend.stat(resolvedPath);
   } catch (error) {
     return {
       content: filesystemError(input.path, error),
@@ -92,7 +107,7 @@ export async function executeRead(
     };
   }
 
-  if (info.isDirectory()) {
+  if (info.type === "directory") {
     return {
       content: `Path is a directory: ${input.path}`,
       isError: true,
@@ -104,7 +119,7 @@ export async function executeRead(
   const limit = input.limit ?? DEFAULT_READ_LINE_LIMIT;
   let scanned;
   try {
-    scanned = await scanFileWindow(resolvedPath, startLine, limit, ctx.signal);
+    scanned = await scanFileWindow(backend, resolvedPath, startLine, limit, ctx.signal);
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : new Error("The operation was aborted");
@@ -210,6 +225,7 @@ export async function executeRead(
  * count remaining lines without storing them.
  */
 async function scanFileWindow(
+  backend: ExecutionBackend,
   path: string,
   startLine: number,
   limit: number,
@@ -218,7 +234,7 @@ async function scanFileWindow(
   const window: string[] = [];
   let lineCount = 0;
   let slicedLine = false;
-  for await (const item of iterateFileLines(path, signal)) {
+  for await (const item of iterateFileLines(backend, path, signal)) {
     if ("binary" in item) {
       return { lineCount: 0, window: [], slicedLine: false, binary: true };
     }
@@ -236,74 +252,71 @@ async function scanFileWindow(
 
 /** Yield newline-split lines, capping any single line at {@link MAX_READ_BYTES} UTF-8 bytes on a code-point boundary. */
 async function* iterateFileLines(
+  backend: ExecutionBackend,
   path: string,
   signal?: AbortSignal,
 ): AsyncGenerator<{ text: string; truncated: boolean } | { binary: true }> {
-  const stream = createReadStream(path, { signal });
+  const stream = backend.readFile(path, signal ? { signal } : undefined);
   const decoder = new TextDecoder("utf8");
   let carry = "";
   let skipRestOfLine = false;
 
-  try {
-    for await (const chunk of stream) {
-      if (signal?.aborted) {
-        throw abortError();
-      }
-      const buffer = chunk as Buffer;
-      if (buffer.includes(0)) {
-        yield { binary: true };
-        return;
-      }
-      let text = carry + decoder.decode(buffer, { stream: true });
-      carry = "";
-
-      if (skipRestOfLine) {
-        const newline = text.indexOf("\n");
-        if (newline === -1) {
-          continue;
-        }
-        text = text.slice(newline + 1);
-        skipRestOfLine = false;
-      }
-
-      while (text.length > 0) {
-        const newline = text.indexOf("\n");
-        if (newline === -1) {
-          // Carried text stays under the budget in UTF-16 units, which bounds memory; the byte cut happens when the line ends.
-          if (text.length > MAX_READ_BYTES) {
-            yield { text: utf8Prefix(text, MAX_READ_BYTES), truncated: true };
-            skipRestOfLine = true;
-            text = "";
-          } else {
-            carry = text;
-            text = "";
-          }
-          break;
-        }
-
-        const raw = text.slice(0, newline);
-        text = text.slice(newline + 1);
-        if (utf8ByteLength(raw) > MAX_READ_BYTES) {
-          yield { text: utf8Prefix(raw, MAX_READ_BYTES), truncated: true };
-        } else {
-          yield { text: raw, truncated: false };
-        }
-      }
+  // Leaving the loop early closes the backend iterator, which releases the file.
+  for await (const chunk of stream) {
+    if (signal?.aborted) {
+      throw abortError();
     }
-
-    if (skipRestOfLine) {
+    if (chunk.includes(0)) {
+      yield { binary: true };
       return;
     }
-    const tail = carry + decoder.decode();
-    if (tail.length > 0) {
-      const truncated = utf8ByteLength(tail) > MAX_READ_BYTES;
-      yield {
-        text: truncated ? utf8Prefix(tail, MAX_READ_BYTES) : tail,
-        truncated,
-      };
+    let text = carry + decoder.decode(chunk, { stream: true });
+    carry = "";
+
+    if (skipRestOfLine) {
+      const newline = text.indexOf("\n");
+      if (newline === -1) {
+        continue;
+      }
+      text = text.slice(newline + 1);
+      skipRestOfLine = false;
     }
-  } finally {
-    stream.destroy();
+
+    while (text.length > 0) {
+      const newline = text.indexOf("\n");
+      if (newline === -1) {
+        // Carried text stays under the budget in UTF-16 units, which bounds memory; the byte cut happens when the line ends.
+        if (text.length > MAX_READ_BYTES) {
+          yield { text: utf8Prefix(text, MAX_READ_BYTES), truncated: true };
+          skipRestOfLine = true;
+          text = "";
+        } else {
+          carry = text;
+          text = "";
+        }
+        break;
+      }
+
+      const raw = text.slice(0, newline);
+      text = text.slice(newline + 1);
+      if (utf8ByteLength(raw) > MAX_READ_BYTES) {
+        yield { text: utf8Prefix(raw, MAX_READ_BYTES), truncated: true };
+      } else {
+        yield { text: raw, truncated: false };
+      }
+    }
+  }
+
+  if (skipRestOfLine) {
+    return;
+  }
+  const tail = carry + decoder.decode();
+  if (tail.length > 0) {
+    const truncated = utf8ByteLength(tail) > MAX_READ_BYTES;
+    yield {
+      text: truncated ? utf8Prefix(tail, MAX_READ_BYTES) : tail,
+      truncated,
+    };
   }
 }
 

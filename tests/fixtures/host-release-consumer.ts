@@ -1,10 +1,13 @@
 import {
+  CORE_TOOLS_CONTRACT,
+  coreToolDefinitions,
   createHost,
   hostCapabilities,
   validateSnapshotShape,
   hashSnapshotBytes,
   RELEASE_CONTRACT,
   SNAPSHOT_CONTRACT,
+  type ExecutionBackend,
   type HostOptions,
   type Model,
 } from "schway/host";
@@ -17,7 +20,8 @@ type Input =
   | { action: "capabilities" }
   | { action: "release"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string; restoreDirectory: string }
   | { action: "codex-route" | "grok-route"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
-  | { action: "renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
+  | { action: "renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
+  | { action: "core-tools"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
 
 function fakeStore() {
   const values = new Map<string, string>();
@@ -138,8 +142,8 @@ if (input.action === "capabilities") {
 } else if (input.action === "release") {
   const { workspaceRoot, homeDirectory, sessionDirectory, restoreDirectory } = input;
   const caps = hostCapabilities();
-  if (caps.releaseContract !== "schway.host.release/v1") throw new Error("Missing release contract");
-  if (RELEASE_CONTRACT !== "schway.host.release/v1") throw new Error("Missing release constant");
+  if (caps.releaseContract !== "schway.host.release/v2") throw new Error("Missing release contract");
+  if (RELEASE_CONTRACT !== "schway.host.release/v2") throw new Error("Missing release constant");
   if (caps.snapshotContract !== SNAPSHOT_CONTRACT) throw new Error("Snapshot contract mismatch");
   if (caps.observedInference !== "not-checked") throw new Error("Static discovery claimed inference");
 
@@ -369,6 +373,72 @@ if (input.action === "capabilities") {
   await second.close();
   await host.close();
   console.log(JSON.stringify({ outcome: "completed", refreshes, inferences }));
+} else if (input.action === "core-tools") {
+  const { workspaceRoot, homeDirectory, sessionDirectory } = input;
+  if (hostCapabilities().coreToolsContract !== CORE_TOOLS_CONTRACT) throw new Error("Missing core-tools contract");
+  // A minimal in-memory backend: every filesystem and process call is recorded and served without host I/O.
+  const files = new Map<string, string>([["/box/workspace/README.md", "box readme\n"]]);
+  const calls: string[] = [];
+  const unsupported = (name: string) => async () => { calls.push(name); throw Object.assign(new Error(name), { code: "ENOTSUP" }); };
+  const backend: ExecutionBackend = {
+    workspaceRoot: "/box/workspace",
+    temporaryDirectory: "/box/tmp",
+    async realpath(path) {
+      calls.push(`realpath ${path}`);
+      if (path === "/box/workspace" || files.has(path)) return path;
+      throw Object.assign(new Error("missing"), { code: "ENOENT" });
+    },
+    async stat(path) { calls.push(`stat ${path}`); return { type: files.has(path) ? "file" : "directory" }; },
+    async *readFile(path) { calls.push(`readFile ${path}`); yield new TextEncoder().encode(files.get(path) ?? ""); },
+    async observeFile(path) { calls.push(`observeFile ${path}`); return files.has(path) ? { targetExists: true } : null; },
+    async writeFileAtomically(path, content, options) {
+      calls.push(`writeFileAtomically ${path}`);
+      if (options?.observed !== null) throw Object.assign(new Error("stale"), { code: "ECHANGED" });
+      files.set(path, content);
+    },
+    async writePrivateFile(path, content) { calls.push(`writePrivateFile ${path}`); files.set(path, content); },
+    list: unsupported("list"),
+    glob() { throw new Error("glob unused"); },
+    search: unsupported("search"),
+    async spawn(request) {
+      calls.push(`spawn ${request.command} @ ${request.cwd} env=${JSON.stringify(request.env)}`);
+      return { stdout: "built\n", stderr: "", exitCode: 1, timedOut: false };
+    },
+  };
+  const definitions = coreToolDefinitions(backend, { env: { PATH: "/usr/bin" } });
+  const host = await createHost({
+    workspaceRoot, homeDirectory, sessionDirectory,
+    context: { policy: "strict", systemPrompt: "Box operator", sections: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions },
+    limits: { maxTurns: 3, maxConcurrentTools: 2, contextWindow: 32768, maxInputChars: 4096 },
+  });
+  const session = await host.createSession();
+  const results: Array<{ id: string; content: string; isError: boolean }> = [];
+  let advertised: string[] = [];
+  const model: Model = {
+    provider: "scripted",
+    id: "core-tools",
+    async *stream(request) {
+      const toolResults = request.items.filter((item) => item.type === "tool_result");
+      if (toolResults.length === 0) {
+        advertised = (request.tools ?? []).map((tool) => tool.name);
+        yield { type: "message_complete", message: { type: "assistant", id: crypto.randomUUID(), content: [
+          { type: "tool_call", id: "bash-1", name: "bash", arguments: { command: "make" } },
+          { type: "tool_call", id: "write-1", name: "write", arguments: { path: "out/result.txt", content: "box result\n" } },
+        ] } };
+        return;
+      }
+      for (const item of toolResults) {
+        const result = item as { toolCallId: string; content: string; isError: boolean };
+        results.push({ id: result.toolCallId, content: result.content, isError: result.isError });
+      }
+      yield { type: "message_complete", message: { type: "assistant", id: crypto.randomUUID(), content: [{ type: "text", text: "box-done" }] } };
+    },
+  };
+  const run = await session.submit({ text: "Use the box" }, model);
+  await session.close();
+  await host.close();
+  console.log(JSON.stringify({ outcome: run.outcome, advertised, results, calls, written: files.get("/box/workspace/out/result.txt") ?? null }));
 } else {
   throw new Error(`Unknown action: ${(input as { action: string }).action}`);
 }

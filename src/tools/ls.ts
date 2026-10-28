@@ -1,9 +1,10 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import type { CoreToolAccess, ExecutionBackend } from "./backend.ts";
 import { abortError, filesystemError, isAbortError, isErrno } from "./fs.ts";
+import { localToolAccess } from "./local-backend.ts";
 import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength } from "./output-budget.ts";
-import { displayToolPath, resolveToolPath } from "./path.ts";
+import { displayToolPath } from "./path.ts";
 import type {
   ToolContext,
   ToolDefinition,
@@ -50,33 +51,49 @@ export interface LsDetails {
   truncated: boolean;
 }
 
-/** Bounded directory-listing definition eligible for parallel scheduling. */
-export const lsTool: ToolDefinition<LsInput> = {
-  name: "ls",
-  description:
-    "List a directory with an explicit depth instead of dumping the whole tree. Relative paths resolve from the workspace root. Depth defaults to 1.",
-  inputSchema: lsInputSchema,
-  effect: "read-only",
-  execution: "parallel",
-  execute: executeLs,
-};
+/** Build the bounded directory-listing definition over a backend; it is eligible for parallel scheduling. */
+export function createLsTool(access: CoreToolAccess): ToolDefinition<LsInput> {
+  return {
+    name: "ls",
+    description:
+      "List a directory with an explicit depth instead of dumping the whole tree. Relative paths resolve from the workspace root. Depth defaults to 1.",
+    inputSchema: lsInputSchema,
+    effect: "read-only",
+    execution: "parallel",
+    execute: (input, ctx) => runLs(access, input, ctx),
+  };
+}
+
+/** Bounded directory-listing definition for the CLI, listing in this process from the workspace root. */
+export const lsTool: ToolDefinition<LsInput> = createLsTool(localToolAccess);
 
 /**
  * List a directory up to `depth` levels.
  * Relative paths resolve from the workspace root; output observes a character budget.
  * Filesystem failures return error results, nested permission failures are skipped, and detected cancellation rejects.
  */
-export async function executeLs(
+export function executeLs(
+  input: LsInput,
+  ctx: ToolContext,
+): Promise<ToolExecutionResult> {
+  return lsTool.execute(input, ctx);
+}
+
+async function runLs(
+  access: CoreToolAccess,
   input: LsInput,
   ctx: ToolContext,
 ): Promise<ToolExecutionResult> {
   const path = input.path ?? ".";
   const depth = input.depth ?? DEFAULT_LS_DEPTH;
-  const resolvedPath = resolveToolPath(ctx.workspace.root, path);
+  const backend = access.backend(ctx);
+  const resolved = await access.resolve(backend, path);
+  if (!resolved.ok) return resolved.result;
+  const resolvedPath = resolved.resolvedPath;
 
   let info;
   try {
-    info = await stat(resolvedPath);
+    info = await backend.stat(resolvedPath);
   } catch (error) {
     return {
       content: filesystemError(path, error),
@@ -85,7 +102,7 @@ export async function executeLs(
     };
   }
 
-  if (!info.isDirectory()) {
+  if (info.type !== "directory") {
     return {
       content: `Path is a file: ${path}`,
       isError: true,
@@ -97,6 +114,7 @@ export async function executeLs(
   let truncated = false;
   try {
     truncated = await walkDirectory(
+      backend,
       resolvedPath,
       depth,
       ctx,
@@ -134,6 +152,7 @@ export async function executeLs(
 
 /** Walk `dir` up to `depth` levels, appending workspace-relative entries. */
 async function walkDirectory(
+  backend: ExecutionBackend,
   dir: string,
   depth: number,
   ctx: ToolContext,
@@ -146,7 +165,7 @@ async function walkDirectory(
   }
   let entries;
   try {
-    entries = await readdir(dir, { withFileTypes: true });
+    entries = [...await backend.list(dir, ctx.signal ? { signal: ctx.signal } : undefined)];
   } catch (error) {
     if (
       topLevel ||
@@ -163,8 +182,8 @@ async function walkDirectory(
       throw abortError();
     }
     const child = join(dir, entry.name);
-    const relative = displayToolPath(ctx.workspace.root, child);
-    const isDir = entry.isDirectory();
+    const relative = displayToolPath(backend.workspaceRoot, child);
+    const isDir = entry.type === "directory";
     const line = isDir ? `${relative}/` : relative;
     const extra = (lines.length === 0 ? 0 : 1) + utf8ByteLength(line);
     if (lines.length > 0 && state.bytes + extra > MAX_LS_BYTES) {
@@ -173,7 +192,7 @@ async function walkDirectory(
     lines.push(line);
     state.bytes += extra;
     if (isDir && depth > 1) {
-      const truncated = await walkDirectory(child, depth - 1, ctx, lines, state);
+      const truncated = await walkDirectory(backend, child, depth - 1, ctx, lines, state);
       if (truncated) {
         return true;
       }

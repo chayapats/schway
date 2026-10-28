@@ -69,7 +69,7 @@ async function packedConsumer(consumer: string, input: Record<string, unknown>, 
   return JSON.parse(stdout);
 }
 
-test("packed release artifact installs without private source access and advertises release/v1", async () => {
+test("packed release artifact installs without private source access and advertises release/v2", async () => {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
   try {
     const { consumer } = await packAndInstall(dir);
@@ -84,7 +84,8 @@ test("packed release artifact installs without private source access and adverti
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({
       contract: "schway.host.base/v1",
-      releaseContract: "schway.host.release/v1",
+      releaseContract: "schway.host.release/v2",
+      coreToolsContract: "schway.host.core-tools/v1",
       contextContract: "schway.host.context-policy/v1",
       toolContract: "schway.host.tool-policy/v1",
       sessionContract: "schway.host.durable-sessions/v1",
@@ -115,7 +116,7 @@ test("packed release consumer composes strict review, lifecycle, cancel and snap
         builder.onLoad({filter:/(?:[/\\\\](?:providers|tui)[/\\\\]|@opentui|[/\\\\]openai[/\\\\])/},()=>{throw new Error('Forbidden provider or TUI init');});
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({
-      releaseContract: "schway.host.release/v1",
+      releaseContract: "schway.host.release/v2",
       completed: "completed",
       tooled: "completed",
       cancelled: "cancelled",
@@ -124,6 +125,43 @@ test("packed release consumer composes strict review, lifecycle, cancel and snap
       executions: 1,
     });
     expect(["restored", "partial"]).toContain(result["restored"] as string);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 120_000);
+
+test("packed release consumer runs core tools over a fake backend through the exact policy", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  try {
+    const { consumer } = await packAndInstall(dir);
+    const workspaceRoot = join(consumer, "work-core");
+    const homeDirectory = join(consumer, "home-core");
+    const sessionDirectory = join(consumer, "sessions-core");
+    await mkdir(workspaceRoot, { recursive: true });
+    await mkdir(homeDirectory, { recursive: true });
+    const result = await packedConsumer(consumer,
+      { action: "core-tools", workspaceRoot, homeDirectory, sessionDirectory },
+      `await Bun.plugin({name:'release-core-tools-guard',setup(builder){
+        builder.onLoad({filter:/(?:[/\\\\](?:providers|tui)[/\\\\]|@opentui|[/\\\\]openai[/\\\\])/},()=>{throw new Error('Forbidden provider or TUI init');});
+      }});`) as Record<string, unknown>;
+    expect(result).toEqual({
+      outcome: "completed",
+      advertised: ["read", "write", "edit", "bash", "grep", "find", "ls"],
+      results: [
+        { id: "bash-1", content: "Exit code: 1\n\nstdout:\nbuilt\n", isError: false },
+        { id: "write-1", content: "Wrote out/result.txt", isError: false },
+      ],
+      calls: [
+        'spawn make @ /box/workspace env={"PATH":"/usr/bin"}',
+        "realpath /box/workspace",
+        "realpath /box/workspace/out/result.txt",
+        "realpath /box/workspace/out",
+        "realpath /box/workspace",
+        "observeFile /box/workspace/out/result.txt",
+        "writeFileAtomically /box/workspace/out/result.txt",
+      ],
+      written: "box result\n",
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

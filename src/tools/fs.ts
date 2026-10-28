@@ -35,14 +35,17 @@ export function filesystemError(path: string, error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Wrap a filesystem failure as model-visible error text with supplied and resolved paths in details. */
+/** Wrap a filesystem failure as model-visible error text with supplied and resolved paths in details; `ECHANGED` names the changed path. */
 export function filesystemFailure(
   path: string,
   resolvedPath: string,
   error: unknown,
 ): ToolExecutionResult {
+  const changed = isErrno(error, "ECHANGED") ? (error as { path?: unknown }).path : undefined;
   return {
-    content: filesystemError(path, error),
+    content: isErrno(error, "ECHANGED")
+      ? `File changed before replacement: ${typeof changed === "string" ? changed : resolvedPath}`
+      : filesystemError(path, error),
     isError: true,
     details: { path, resolvedPath },
   };
@@ -55,7 +58,8 @@ export interface FileObservation extends FileTarget { bytes: Buffer }
 
 /** Signal an observed filesystem race without claiming an atomic compare-and-swap. */
 export class FileChangedError extends Error {
-  constructor(path: string) { super(`File changed before replacement: ${path}`); }
+  readonly code = "ECHANGED";
+  constructor(readonly path: string) { super(`File changed before replacement: ${path}`); }
 }
 
 /** Report only ordinary POSIX permissions, omitting metadata on unsupported Windows filesystems. */
