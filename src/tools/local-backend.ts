@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { chmod, mkdir, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute } from "node:path";
+import { dirname, isAbsolute, relative } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import {
   unconfinedAccess,
@@ -104,7 +104,8 @@ async function searchWithRipgrep(request: ExecutionSearchRequest): Promise<Execu
   if (request.glob !== undefined && request.glob.length > 0) {
     args.push("-g", request.glob);
   }
-  args.push("--", request.pattern, request.path);
+  // Ripgrep reports paths as it receives them, so pass the cwd-relative form the CLI always used.
+  args.push("--", request.pattern, relative(request.cwd, request.path) || ".");
 
   const proc = Bun.spawn([rg, ...args], {
     cwd: request.cwd,

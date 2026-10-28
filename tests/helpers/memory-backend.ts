@@ -68,8 +68,9 @@ export function memoryBackend(options: MemoryBackendOptions = {}) {
     return current;
   };
   const lookup = (path: string) => entries.get(real(path))!;
-  /** Resolve links through the deepest existing ancestor so writes land where a real filesystem would put them. */
-  const target = (path: string): string => {
+  /** Resolve links through the parent's deepest existing ancestor; the final entry itself is replaced, never followed. */
+  const target = (path: string): string => join(ancestor(parent(path)), path.slice(path.lastIndexOf("/") + 1));
+  const ancestor = (path: string): string => {
     const tail: string[] = [];
     for (let current = path; ; current = parent(current)) {
       try { return join(real(current), ...tail.reverse()); }

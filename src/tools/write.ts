@@ -1,6 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { countLines } from "../text/diff.ts";
-import type { CoreToolAccess, ExecutionFileObservation } from "./backend.ts";
+import { unlessCancelled, type CoreToolAccess, type ExecutionFileObservation } from "./backend.ts";
 import {
   abortError,
   filesystemFailure,
@@ -50,7 +50,7 @@ export function createWriteTool(access: CoreToolAccess): ToolDefinition<WriteInp
     inputSchema: writeInputSchema,
     effect: "mutating",
     execution: "exclusive",
-    execute: (input, ctx) => runWrite(access, input, ctx),
+    execute: (input, ctx) => unlessCancelled(runWrite(access, input, ctx), ctx.signal),
   };
 }
 

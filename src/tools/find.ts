@@ -1,6 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { resolve } from "node:path";
-import type { CoreToolAccess, ExecutionBackend } from "./backend.ts";
+import { unlessCancelled, type CoreToolAccess, type ExecutionBackend } from "./backend.ts";
 import {
   abortError,
   filesystemError,
@@ -62,7 +62,7 @@ export function createFindTool(access: CoreToolAccess): ToolDefinition<FindInput
     inputSchema: findInputSchema,
     effect: "read-only",
     execution: "parallel",
-    execute: (input, ctx) => runFind(access, input, ctx),
+    execute: (input, ctx) => unlessCancelled(runFind(access, input, ctx), ctx.signal),
   };
 }
 

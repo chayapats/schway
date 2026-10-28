@@ -1,6 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
 import { join } from "node:path";
-import type { CoreToolAccess, ExecutionBackend } from "./backend.ts";
+import { unlessCancelled, type CoreToolAccess, type ExecutionBackend } from "./backend.ts";
 import { abortError, filesystemError, isAbortError, isErrno } from "./fs.ts";
 import { localToolAccess } from "./local-backend.ts";
 import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength } from "./output-budget.ts";
@@ -60,7 +60,7 @@ export function createLsTool(access: CoreToolAccess): ToolDefinition<LsInput> {
     inputSchema: lsInputSchema,
     effect: "read-only",
     execution: "parallel",
-    execute: (input, ctx) => runLs(access, input, ctx),
+    execute: (input, ctx) => unlessCancelled(runLs(access, input, ctx), ctx.signal),
   };
 }
 

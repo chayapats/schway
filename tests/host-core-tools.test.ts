@@ -152,6 +152,12 @@ test("traversal is refused before any backend call and symlink escapes before an
   expect(memory.text("/etc/passwd")).toBe("root:x:0:0\n");
   expect(memory.text("/etc/new.txt")).toBeUndefined();
 
+  // A final symlink inside the root is replaced by the write, never followed.
+  const aliased = memoryBackend({ files: { "target.txt": "original\n" }, links: { "/workspace/alias.txt": "/workspace/target.txt" } });
+  expect(await byName(coreToolDefinitions(aliased.backend)).write!.execute({ path: "alias.txt", content: "replaced" }, ctx())).toMatchObject({ content: "Wrote alias.txt" });
+  expect(aliased.text("/workspace/target.txt")).toBe("original\n");
+  expect(aliased.text("/workspace/alias.txt")).toBe("replaced");
+
   memory.calls.length = 0;
   expect(await tools.read!.execute({ path: "inner/file.txt" }, ctx())).toMatchObject({ content: "     1|inner" });
   expect((await tools.write!.execute({ path: "inner/deep/new.txt", content: "ok" }, ctx())).isError).toBeUndefined();
@@ -215,6 +221,47 @@ test("an aborted signal reaches spawn, the call settles cancelled and a late res
   await Bun.sleep(1);
   second.abort();
   expect((await call).status).toBe("cancelled");
+});
+
+test("a backend write or spill that settles after cancellation is not published", async () => {
+  const memory = memoryBackend({
+    files: { "notes.txt": "alpha\n" },
+    spawn: async () => ({ stdout: "x".repeat(MAX_BASH_BYTES + 1), stderr: "", exitCode: 0, timedOut: false }),
+  });
+  let controller = new AbortController();
+  const delayed = {
+    ...memory.backend,
+    async writeFileAtomically(...args: Parameters<typeof memory.backend.writeFileAtomically>) {
+      await memory.backend.writeFileAtomically(...args);
+      controller.abort();
+    },
+    async writePrivateFile(...args: Parameters<typeof memory.backend.writePrivateFile>) {
+      await memory.backend.writePrivateFile(...args);
+      controller.abort();
+    },
+  };
+  const tools = byName(coreToolDefinitions(delayed));
+  for (const [name, input] of [
+    ["write", { path: "late.txt", content: "late" }],
+    ["edit", { path: "notes.txt", edits: [{ oldText: "alpha", newText: "beta" }] }],
+    ["bash", { command: "big" }],
+  ] as Array<[string, unknown]>) {
+    controller = new AbortController();
+    await expect(tools[name]!.execute(input, { ...ctx(), signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+  }
+  const call = (id: string, name: string, args: Record<string, unknown>) => {
+    controller = new AbortController();
+    return executeToolCall({ registry: createToolRegistry(coreToolDefinitions(delayed)), call: { type: "tool_call", id, name, arguments: args },
+      workspace: ctx().workspace, signal: controller.signal });
+  };
+  expect((await call("w", "write", { path: "late2.txt", content: "late" })).status).toBe("cancelled");
+});
+
+test("search receives the checked absolute path", async () => {
+  const memory = memoryBackend({ files: { "src/a.ts": "needle\n" } });
+  const result = await byName(coreToolDefinitions(memory.backend)).grep!.execute({ pattern: "needle", path: "src" }, ctx());
+  expect(result.content).toBe("src/a.ts:1:needle");
+  expect(memory.calls.filter(call => call.op === "search")).toEqual([{ op: "search", target: "/workspace/src" }]);
 });
 
 test("host env option replaces the per-call environment and invalid backends fail with invalid-options", async () => {

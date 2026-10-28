@@ -1,5 +1,5 @@
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { filesystemError, isErrno } from "./fs.ts";
+import { abortError, filesystemError, isErrno } from "./fs.ts";
 import { resolveToolPath } from "./path.ts";
 import type { ToolContext, ToolExecutionResult, ToolOutputChunk } from "./types.ts";
 
@@ -145,6 +145,16 @@ export interface CoreToolAccess {
   resolve(backend: ExecutionBackend, path: string, options?: { readonly spillFile?: boolean }): Promise<CorePathResolution>;
   /** Subprocess environment for one invocation. */
   env(ctx: ToolContext): Readonly<Record<string, string | undefined>> | undefined;
+}
+
+/** Await a core tool's result and refuse to publish it when cancellation arrived before it settled. */
+export async function unlessCancelled(
+  result: Promise<ToolExecutionResult>,
+  signal: AbortSignal | undefined,
+): Promise<ToolExecutionResult> {
+  const settled = await result;
+  if (signal?.aborted) throw abortError();
+  return settled;
 }
 
 /** Spill-file names that `read` may open in the backend's temporary directory under confinement. */

@@ -1,5 +1,5 @@
 import { Type, type Static } from "@sinclair/typebox";
-import type { CoreToolAccess, ExecutionFileObservation } from "./backend.ts";
+import { unlessCancelled, type CoreToolAccess, type ExecutionFileObservation } from "./backend.ts";
 import {
   abortError,
   filesystemFailure,
@@ -72,7 +72,7 @@ export function createEditTool(access: CoreToolAccess): ToolDefinition<EditInput
     inputSchema: editInputSchema,
     effect: "mutating",
     execution: "exclusive",
-    execute: (input, ctx) => runEdit(access, input, ctx),
+    execute: (input, ctx) => unlessCancelled(runEdit(access, input, ctx), ctx.signal),
   };
 }
 

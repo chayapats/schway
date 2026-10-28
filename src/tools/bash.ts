@@ -1,5 +1,5 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { spillFilePath, type CoreToolAccess } from "./backend.ts";
+import { spillFilePath, unlessCancelled, type CoreToolAccess } from "./backend.ts";
 import { abortError } from "./fs.ts";
 import { localToolAccess } from "./local-backend.ts";
 import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
@@ -66,7 +66,7 @@ export function createBashTool(access: CoreToolAccess): ToolDefinition<BashInput
     inputSchema: bashInputSchema,
     effect: "mutating",
     execution: "exclusive",
-    execute: (input, ctx) => runBash(access, input, ctx),
+    execute: (input, ctx) => unlessCancelled(runBash(access, input, ctx), ctx.signal),
   };
 }
 

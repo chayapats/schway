@@ -1,5 +1,5 @@
 import { Type, type Static } from "@sinclair/typebox";
-import type { CoreToolAccess } from "./backend.ts";
+import { unlessCancelled, type CoreToolAccess } from "./backend.ts";
 import { abortError, filesystemError, isAbortError, isErrno } from "./fs.ts";
 import { localToolAccess } from "./local-backend.ts";
 import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
@@ -83,7 +83,7 @@ export function createGrepTool(access: CoreToolAccess): ToolDefinition<GrepInput
     inputSchema: grepInputSchema,
     effect: "read-only",
     execution: "parallel",
-    execute: (input, ctx) => runGrep(access, input, ctx),
+    execute: (input, ctx) => unlessCancelled(runGrep(access, input, ctx), ctx.signal),
   };
 }
 
@@ -129,10 +129,9 @@ async function runGrep(
   let truncated: boolean;
   let failure: string | undefined;
   try {
-    // Ripgrep receives the model path relative to the workspace root, as it always has.
     const ran = await backend.search({
       pattern: input.pattern,
-      path,
+      path: resolvedPath,
       cwd: root,
       ...(input.glob !== undefined ? { glob: input.glob } : {}),
       ...(input.ignoreCase !== undefined ? { ignoreCase: input.ignoreCase } : {}),
