@@ -1,6 +1,6 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { stat } from "node:fs/promises";
 import { resolve } from "node:path";
+import { unlessCancelled, type CoreToolAccess, type ExecutionBackend } from "./backend.ts";
 import {
   abortError,
   filesystemError,
@@ -8,8 +8,9 @@ import {
   isAbortError,
   isErrno,
 } from "./fs.ts";
+import { localToolAccess } from "./local-backend.ts";
 import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength } from "./output-budget.ts";
-import { displayToolPath, resolveToolPath } from "./path.ts";
+import { displayToolPath } from "./path.ts";
 import type {
   ToolContext,
   ToolDefinition,
@@ -52,32 +53,48 @@ export interface FindDetails {
   truncated: boolean;
 }
 
-/** Glob-based file-discovery definition eligible for parallel scheduling. */
-export const findTool: ToolDefinition<FindInput> = {
-  name: "find",
-  description:
-    'Discover files with a simple glob pattern such as "**/*.ts". Relative paths resolve from the workspace root. Use bash for advanced Unix find syntax.',
-  inputSchema: findInputSchema,
-  effect: "read-only",
-  execution: "parallel",
-  execute: executeFind,
-};
+/** Build the glob-based file-discovery definition over a backend; it is eligible for parallel scheduling. */
+export function createFindTool(access: CoreToolAccess): ToolDefinition<FindInput> {
+  return {
+    name: "find",
+    description:
+      'Discover files with a simple glob pattern such as "**/*.ts". Relative paths resolve from the workspace root. Use bash for advanced Unix find syntax.',
+    inputSchema: findInputSchema,
+    effect: "read-only",
+    execution: "parallel",
+    execute: (input, ctx) => unlessCancelled(runFind(access, input, ctx), ctx.signal),
+  };
+}
+
+/** Glob-based file-discovery definition for the CLI, scanning in this process from the workspace root. */
+export const findTool: ToolDefinition<FindInput> = createFindTool(localToolAccess);
 
 /**
  * Discover files matching a glob under an optional search path.
  * Relative paths resolve from the workspace root; results are sorted display paths with a character budget.
  * Invalid paths and glob failures return error results, while detected cancellation rejects.
  */
-export async function executeFind(
+export function executeFind(
+  input: FindInput,
+  ctx: ToolContext,
+): Promise<ToolExecutionResult> {
+  return findTool.execute(input, ctx);
+}
+
+async function runFind(
+  access: CoreToolAccess,
   input: FindInput,
   ctx: ToolContext,
 ): Promise<ToolExecutionResult> {
   const path = input.path ?? ".";
-  const resolvedPath = resolveToolPath(ctx.workspace.root, path);
+  const backend = access.backend(ctx);
+  const resolved = await access.resolve(backend, path);
+  if (!resolved.ok) return resolved.result;
+  const resolvedPath = resolved.resolvedPath;
 
   let info;
   try {
-    info = await stat(resolvedPath);
+    info = await backend.stat(resolvedPath);
   } catch (error) {
     return {
       content: filesystemError(path, error),
@@ -86,7 +103,7 @@ export async function executeFind(
     };
   }
 
-  if (!info.isDirectory()) {
+  if (info.type !== "directory") {
     return {
       content: `Path is a file: ${path}`,
       isError: true,
@@ -100,7 +117,7 @@ export async function executeFind(
 
   let collected: { matches: string[]; truncated: boolean };
   try {
-    collected = await collectMatches(input.pattern, resolvedPath, ctx);
+    collected = await collectMatches(backend, input.pattern, resolvedPath, ctx);
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();
@@ -137,23 +154,19 @@ export async function executeFind(
 
 /** Scan `pattern` under `cwd` and return workspace-relative display paths. */
 async function collectMatches(
+  backend: ExecutionBackend,
   pattern: string,
   cwd: string,
   ctx: ToolContext,
 ): Promise<{ matches: string[]; truncated: boolean }> {
-  const glob = new Bun.Glob(pattern);
   const matches: string[] = [];
   let bytes = 0;
   let truncated = false;
-  for await (const file of glob.scan({
-    cwd,
-    onlyFiles: true,
-    followSymlinks: false,
-  })) {
+  for await (const file of backend.glob(pattern, { cwd, ...(ctx.signal ? { signal: ctx.signal } : {}) })) {
     if (ctx.signal?.aborted) {
       throw abortError();
     }
-    const display = displayToolPath(ctx.workspace.root, resolve(cwd, file));
+    const display = displayToolPath(backend.workspaceRoot, resolve(cwd, file));
     const extra = (matches.length === 0 ? 0 : 1) + utf8ByteLength(display);
     if (matches.length > 0 && bytes + extra > MAX_FIND_BYTES) {
       truncated = true;

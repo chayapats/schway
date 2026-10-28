@@ -1,13 +1,11 @@
 import { Type, type Static } from "@sinclair/typebox";
+import { unlessCancelled, type CoreToolAccess, type ExecutionFileObservation } from "./backend.ts";
 import {
   abortError,
   filesystemFailure,
   isAbortError,
-  observeFile,
-  type FileObservation,
-  writeFileAtomically,
 } from "./fs.ts";
-import { resolveToolPath } from "./path.ts";
+import { localToolAccess } from "./local-backend.ts";
 import type {
   ToolContext,
   ToolDefinition,
@@ -65,16 +63,21 @@ export interface EditDetails {
   hunks?: EditHunk[];
 }
 
-/** Exact-replacement definition that runs behind an exclusive scheduling barrier. */
-export const editTool: ToolDefinition<EditInput> = {
-  name: "edit",
-  description:
-    "Apply exact text replacements to an existing file. Each oldText must match exactly once in the original file. Multiple edits are matched against the original content, not sequentially. Overlapping edits are rejected and no partial changes are written. Prefer this over write for targeted changes.",
-  inputSchema: editInputSchema,
-  effect: "mutating",
-  execution: "exclusive",
-  execute: executeEdit,
-};
+/** Build the exact-replacement definition over a backend; it runs behind an exclusive scheduling barrier. */
+export function createEditTool(access: CoreToolAccess): ToolDefinition<EditInput> {
+  return {
+    name: "edit",
+    description:
+      "Apply exact text replacements to an existing file. Each oldText must match exactly once in the original file. Multiple edits are matched against the original content, not sequentially. Overlapping edits are rejected and no partial changes are written. Prefer this over write for targeted changes.",
+    inputSchema: editInputSchema,
+    effect: "mutating",
+    execution: "exclusive",
+    execute: (input, ctx) => unlessCancelled(runEdit(access, input, ctx), ctx.signal),
+  };
+}
+
+/** Exact-replacement definition for the CLI, editing in this process from the workspace root. */
+export const editTool: ToolDefinition<EditInput> = createEditTool(localToolAccess);
 
 /**
  * Apply exact replacements atomically.
@@ -82,22 +85,33 @@ export const editTool: ToolDefinition<EditInput> = {
  * Relative paths resolve from the workspace root; missing, duplicate, or overlapping
  * matches and filesystem failures return error results, while detected cancellation rejects.
  */
-export async function executeEdit(
+export function executeEdit(
   input: EditInput,
   ctx: ToolContext,
 ): Promise<ToolExecutionResult> {
-  const resolvedPath = resolveToolPath(ctx.workspace.root, input.path);
+  return editTool.execute(input, ctx);
+}
+
+async function runEdit(
+  access: CoreToolAccess,
+  input: EditInput,
+  ctx: ToolContext,
+): Promise<ToolExecutionResult> {
+  const backend = access.backend(ctx);
+  const resolved = await access.resolve(backend, input.path);
+  if (!resolved.ok) return resolved.result;
+  const resolvedPath = resolved.resolvedPath;
   if (ctx.signal?.aborted) {
     throw abortError();
   }
 
   let original: string;
-  let observed: FileObservation;
+  let observed: ExecutionFileObservation;
   try {
-    const current = await observeFile(resolvedPath, ctx.signal);
-    if (!current) throw Object.assign(new Error("File not found"), { code: "ENOENT" });
+    const current = await backend.observeFile(resolvedPath, { content: true, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+    if (!current?.bytes) throw Object.assign(new Error("File not found"), { code: "ENOENT" });
     observed = current;
-    original = current.bytes.toString("utf8");
+    original = Buffer.from(current.bytes.buffer, current.bytes.byteOffset, current.bytes.byteLength).toString("utf8");
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();
@@ -115,7 +129,7 @@ export async function executeEdit(
   }
 
   try {
-    await writeFileAtomically(resolvedPath, applied.content, ctx.signal, undefined, { observed });
+    await backend.writeFileAtomically(resolvedPath, applied.content, { observed, ...(ctx.signal ? { signal: ctx.signal } : {}) });
   } catch (error) {
     if (ctx.signal?.aborted || isAbortError(error)) {
       throw error instanceof Error ? error : abortError();

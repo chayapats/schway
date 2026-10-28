@@ -4,6 +4,19 @@
 
 ### Added
 
+- Add `schway.host.core-tools/v1`: `coreToolDefinitions(backend, options?)`
+  exports `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls` from
+  `schway/host` over a host-supplied `ExecutionBackend`, with the CLI's
+  schemas, descriptions, scheduling, effects and output bounds.
+  `localExecutionBackend(workspaceRoot)` reproduces the CLI's behavior byte
+  for byte. Schway keeps the 50,000-byte code-point-safe caps, truncation
+  notices and spill files, refuses `..` and symlink escapes from the backend
+  root before any read, write or spawn, and never publishes a backend result
+  after cancellation. Core tools are admitted only when passed in
+  `tools.definitions`; the backend is trusted host code, not a sandbox. The
+  CLI and TUI keep their existing registry and behavior. `hostCapabilities()`
+  adds `coreToolsContract` and the composed release contract becomes
+  `schway.host.release/v2` (`release/v1` plus core-tools) (#429).
 - Add a versioned packed host artifact with a composed `schway.host.release/v1`
   contract for downstream pinning. `hostCapabilities()` advertises
   `releaseContract` alongside the eight sliced contracts and `RELEASE_CONTRACT`

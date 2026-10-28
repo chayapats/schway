@@ -2,6 +2,7 @@ import type { Model, ModelUsage } from "../model/model.ts";
 import type { ContextSection } from "../context/manager.ts";
 import type { AssistantMessage } from "../conversation/types.ts";
 import type { ToolDefinition } from "../tools/types.ts";
+import type { CoreToolOptions, ExecutionBackend } from "../tools/backend.ts";
 
 /** Native conversation blocks and results shared by host-supplied models and tools. */
 export type {
@@ -33,14 +34,22 @@ export type {
 } from "../tools/types.ts";
 /** Canonical primary workspace identity supplied to each selected tool invocation. */
 export type { Workspace } from "../workspace/workspace.ts";
+/** Host-pluggable execution backend behind the core tools; the backend is trusted host code, not a sandbox. */
+export type {
+  CoreToolOptions, ExecutionBackend, ExecutionDirectoryEntry, ExecutionEntryType, ExecutionFileObservation, ExecutionSearchMatch,
+  ExecutionSearchRequest, ExecutionSearchResult, ExecutionSpawnRequest, ExecutionSpawnResult, ExecutionStat,
+} from "../tools/backend.ts";
 
 /** Supported composed host-release contract for versioned downstream pinning. */
-export const RELEASE_CONTRACT = "schway.host.release/v1" as const;
+export const RELEASE_CONTRACT = "schway.host.release/v2" as const;
+
+/** Supported core-tools contract: Schway's core tools over a host-supplied execution backend. */
+export const CORE_TOOLS_CONTRACT = "schway.host.core-tools/v1" as const;
 
 /** Static API support only; capability discovery never probes accounts or inference. */
 export interface HostCapabilities {
   readonly contract: "schway.host.base/v1";
-  readonly releaseContract: "schway.host.release/v1";
+  readonly releaseContract: "schway.host.release/v2";
   readonly features: readonly ["host-supplied-model", "native-result-reference", "explicit-compaction"];
   readonly contextPolicies: readonly ["workspace-discovery", "strict", "controlled"];
   readonly sessionContract: "schway.host.durable-sessions/v1";
@@ -56,6 +65,7 @@ export interface HostCapabilities {
   readonly runContract: "schway.host.run-control/v1";
   readonly dataContract: "schway.host.managed-session-data/v1";
   readonly snapshotContract: "schway.host.session-snapshot/v1";
+  readonly coreToolsContract: "schway.host.core-tools/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -231,7 +241,7 @@ export class HostError extends Error {
 
 const capabilities: HostCapabilities = Object.freeze({
   contract: "schway.host.base/v1",
-  releaseContract: "schway.host.release/v1",
+  releaseContract: "schway.host.release/v2",
   features: Object.freeze(["host-supplied-model", "native-result-reference", "explicit-compaction"] as const),
   contextPolicies: Object.freeze(["workspace-discovery", "strict", "controlled"] as const),
   sessionContract: "schway.host.durable-sessions/v1",
@@ -247,6 +257,7 @@ const capabilities: HostCapabilities = Object.freeze({
   runContract: "schway.host.run-control/v1",
   dataContract: "schway.host.managed-session-data/v1",
   snapshotContract: "schway.host.session-snapshot/v1",
+  coreToolsContract: "schway.host.core-tools/v1",
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */
@@ -256,4 +267,33 @@ export function hostCapabilities(): HostCapabilities { return capabilities; }
 export async function createHost(options: HostOptions): Promise<HostRuntime> {
   const { createHostRuntime } = await import("./runtime.ts");
   return createHostRuntime(options);
+}
+
+/**
+ * Build `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls` over `backend`, with the CLI's schemas,
+ * descriptions, scheduling, effects and output bounds. Paths are confined to `backend.workspaceRoot`.
+ * Nothing is admitted until the host passes the definitions in `tools.definitions`.
+ */
+export function coreToolDefinitions(backend: ExecutionBackend, options: CoreToolOptions = {}): readonly ToolDefinition[] {
+  const functions = ["realpath", "stat", "readFile", "observeFile", "writeFileAtomically", "writePrivateFile", "list", "glob", "search", "spawn"] as const;
+  if (typeof backend !== "object" || backend === null || !absolutePath(backend.workspaceRoot) || !absolutePath(backend.temporaryDirectory) ||
+      functions.some(name => typeof backend[name] !== "function")) throw new HostError("invalid-options");
+  if (typeof options !== "object" || options === null || Object.keys(options).some(key => key !== "env") ||
+      (options.env !== undefined && (typeof options.env !== "object" || options.env === null ||
+        Object.values(options.env).some(value => typeof value !== "string")))) throw new HostError("invalid-options");
+  // Loaded on demand so capability discovery never loads tool code.
+  const { createCoreToolDefinitions } = require("../tools/core.ts") as typeof import("../tools/core.ts");
+  return createCoreToolDefinitions(backend, options.env === undefined ? {} : { env: { ...options.env } });
+}
+
+/** Run the core tools in this process from an absolute workspace root, with the CLI's exact local behavior. */
+export function localExecutionBackend(workspaceRoot: string): ExecutionBackend {
+  if (!absolutePath(workspaceRoot)) throw new HostError("invalid-options");
+  const local = require("../tools/local-backend.ts") as typeof import("../tools/local-backend.ts");
+  return local.localExecutionBackend(workspaceRoot);
+}
+
+/** True for a string absolute POSIX or Windows path, without loading path modules during discovery. */
+function absolutePath(value: unknown): value is string {
+  return typeof value === "string" && (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\"));
 }

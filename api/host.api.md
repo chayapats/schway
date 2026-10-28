@@ -78,6 +78,17 @@ export interface ContextSourcePolicy {
 export type ConversationItem = UserMessage | AssistantMessage | ToolResult;
 
 // @public
+export const CORE_TOOLS_CONTRACT: "schway.host.core-tools/v1";
+
+// @public
+export function coreToolDefinitions(backend: ExecutionBackend, options?: CoreToolOptions): readonly ToolDefinition[];
+
+// @public
+export interface CoreToolOptions {
+    readonly env?: Readonly<Record<string, string>>;
+}
+
+// @public
 export function createAuthRouteModel(selection: HostAuthSelection): Promise<Model>;
 
 // @public
@@ -88,6 +99,115 @@ export function credentialReferenceForRoute(route: HostAuthRoute): HostCredentia
 
 // @public
 export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescription;
+
+// @public
+export interface ExecutionBackend {
+    glob(pattern: string, options: {
+        readonly cwd: string;
+        readonly signal?: AbortSignal;
+    }): AsyncIterable<string>;
+    list(path: string, options?: {
+        readonly signal?: AbortSignal;
+    }): Promise<readonly ExecutionDirectoryEntry[]>;
+    observeFile(path: string, options?: {
+        readonly content?: boolean;
+        readonly signal?: AbortSignal;
+    }): Promise<ExecutionFileObservation | null>;
+    readFile(path: string, options?: {
+        readonly signal?: AbortSignal;
+    }): AsyncIterable<Uint8Array>;
+    realpath(path: string): Promise<string>;
+    search(request: ExecutionSearchRequest): Promise<ExecutionSearchResult>;
+    spawn(request: ExecutionSpawnRequest): Promise<ExecutionSpawnResult>;
+    stat(path: string): Promise<ExecutionStat>;
+    readonly temporaryDirectory: string;
+    readonly workspaceRoot: string;
+    writeFileAtomically(path: string, content: string, options?: {
+        readonly observed?: ExecutionFileObservation | null;
+        readonly createParents?: boolean;
+        readonly signal?: AbortSignal;
+    }): Promise<void>;
+    writePrivateFile(path: string, content: string): Promise<void>;
+}
+
+// @public
+export interface ExecutionDirectoryEntry {
+    // (undocumented)
+    readonly name: string;
+    // (undocumented)
+    readonly type: ExecutionEntryType | "symlink";
+}
+
+// @public
+export type ExecutionEntryType = "file" | "directory" | "other";
+
+// @public
+export interface ExecutionFileObservation {
+    readonly bytes?: Uint8Array;
+    readonly targetExists: boolean;
+}
+
+// @public
+export interface ExecutionSearchMatch {
+    // (undocumented)
+    readonly line: number;
+    // (undocumented)
+    readonly path: string;
+    // (undocumented)
+    readonly text: string;
+}
+
+// @public
+export interface ExecutionSearchRequest {
+    readonly cwd: string;
+    // (undocumented)
+    readonly glob?: string;
+    // (undocumented)
+    readonly ignoreCase?: boolean;
+    readonly limit: number;
+    readonly path: string;
+    // (undocumented)
+    readonly pattern: string;
+    // (undocumented)
+    readonly signal?: AbortSignal;
+}
+
+// @public
+export interface ExecutionSearchResult {
+    // (undocumented)
+    readonly failure?: string;
+    // (undocumented)
+    readonly matches: readonly ExecutionSearchMatch[];
+    // (undocumented)
+    readonly truncated: boolean;
+}
+
+// @public
+export interface ExecutionSpawnRequest {
+    readonly command: string;
+    readonly cwd: string;
+    readonly env?: Readonly<Record<string, string | undefined>>;
+    readonly onOutput?: (chunk: ToolOutputChunk) => void;
+    readonly signal?: AbortSignal;
+    readonly timeoutMs?: number;
+}
+
+// @public
+export interface ExecutionSpawnResult {
+    readonly exitCode: number | null;
+    // (undocumented)
+    readonly stderr: string;
+    // (undocumented)
+    readonly stdout: string;
+    // (undocumented)
+    readonly timedOut: boolean;
+}
+
+// @public
+export interface ExecutionStat {
+    // (undocumented)
+    readonly type: ExecutionEntryType;
+}
 
 // @public
 export function hashSnapshotBytes(bytes: Uint8Array): string;
@@ -184,6 +304,8 @@ export interface HostCapabilities {
     // (undocumented)
     readonly contract: "schway.host.base/v1";
     // (undocumented)
+    readonly coreToolsContract: "schway.host.core-tools/v1";
+    // (undocumented)
     readonly dataContract: "schway.host.managed-session-data/v1";
     // (undocumented)
     readonly extensionDiscovery: "disabled-only";
@@ -194,7 +316,7 @@ export interface HostCapabilities {
     // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
-    readonly releaseContract: "schway.host.release/v1";
+    readonly releaseContract: "schway.host.release/v2";
     // (undocumented)
     readonly runContract: "schway.host.run-control/v1";
     // (undocumented)
@@ -557,6 +679,9 @@ export function isCredentialWriteRefused(error: unknown): error is Error;
 export type JsonSchema = Record<string, unknown>;
 
 // @public
+export function localExecutionBackend(workspaceRoot: string): ExecutionBackend;
+
+// @public
 export const MAX_SNAPSHOT_ARTIFACT_BYTES: number;
 
 // @public
@@ -636,7 +761,7 @@ export interface ModelUsage {
 export type ProviderMetadata = Record<string, unknown>;
 
 // @public
-export const RELEASE_CONTRACT: "schway.host.release/v1";
+export const RELEASE_CONTRACT: "schway.host.release/v2";
 
 // @public
 export const SNAPSHOT_CONTRACT: "schway.host.session-snapshot/v1";

@@ -1,12 +1,8 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { spawn, type ChildProcess } from "node:child_process";
-import { chmod, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { StringDecoder } from "node:string_decoder";
+import { spillFilePath, unlessCancelled, type CoreToolAccess } from "./backend.ts";
 import { abortError } from "./fs.ts";
+import { localToolAccess } from "./local-backend.ts";
 import { TOOL_OUTPUT_BUDGET_BYTES, utf8ByteLength, utf8Prefix } from "./output-budget.ts";
-import { resolveToolPath } from "./path.ts";
 import type {
   ToolContext,
   ToolDefinition,
@@ -61,16 +57,21 @@ export interface BashDetails {
   totalBytes?: number;
 }
 
-/** Shell-execution definition that runs behind an exclusive scheduling barrier. */
-export const bashTool: ToolDefinition<BashInput> = {
-  name: "bash",
-  description:
-    "Run a shell command in a fresh bash process. Defaults to the workspace root. A non-zero exit code is ordinary result data, not a tool failure. Output is bounded; oversized output is spilled to a temporary file.",
-  inputSchema: bashInputSchema,
-  effect: "mutating",
-  execution: "exclusive",
-  execute: executeBash,
-};
+/** Build the shell-execution definition over a backend; it runs behind an exclusive scheduling barrier. */
+export function createBashTool(access: CoreToolAccess): ToolDefinition<BashInput> {
+  return {
+    name: "bash",
+    description:
+      "Run a shell command in a fresh bash process. Defaults to the workspace root. A non-zero exit code is ordinary result data, not a tool failure. Output is bounded; oversized output is spilled to a temporary file.",
+    inputSchema: bashInputSchema,
+    effect: "mutating",
+    execution: "exclusive",
+    execute: (input, ctx) => unlessCancelled(runBash(access, input, ctx), ctx.signal),
+  };
+}
+
+/** Shell-execution definition for the CLI, running in this process from the workspace root. */
+export const bashTool: ToolDefinition<BashInput> = createBashTool(localToolAccess);
 
 /**
  * Run `command` in a fresh bash shell.
@@ -78,7 +79,15 @@ export const bashTool: ToolDefinition<BashInput> = {
  * Oversized output spills to a temporary file; nonzero exits are result data and timeouts are tool errors.
  * Cancellation terminates the process group and rejects; process or spill-file failures also reject.
  */
-export async function executeBash(
+export function executeBash(
+  input: BashInput,
+  ctx: ToolContext,
+): Promise<ToolExecutionResult> {
+  return bashTool.execute(input, ctx);
+}
+
+async function runBash(
+  access: CoreToolAccess,
   input: BashInput,
   ctx: ToolContext,
 ): Promise<ToolExecutionResult> {
@@ -86,23 +95,37 @@ export async function executeBash(
     throw abortError();
   }
 
-  const cwd = input.cwd
-    ? resolveToolPath(ctx.workspace.root, input.cwd)
-    : ctx.workspace.root;
+  const backend = access.backend(ctx);
+  let cwd = backend.workspaceRoot;
+  if (input.cwd) {
+    const resolved = await access.resolve(backend, input.cwd);
+    if (!resolved.ok) return resolved.result;
+    cwd = resolved.resolvedPath;
+  }
 
-  const collected = await runShell(input.command, cwd, input.timeout, ctx);
+  const env = access.env(ctx);
+  const collected = await backend.spawn({
+    command: input.command,
+    cwd,
+    ...(env ? { env } : {}),
+    ...(input.timeout !== undefined ? { timeoutMs: input.timeout } : {}),
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    ...(ctx.onOutput ? { onOutput: ctx.onOutput } : {}),
+  });
+  // A backend that settles after cancellation must not publish its late result.
+  if (ctx.signal?.aborted) {
+    throw abortError();
+  }
   const totalBytes =
     utf8ByteLength(collected.stdout) + utf8ByteLength(collected.stderr);
   const truncated = totalBytes > MAX_BASH_BYTES;
   let outputPath: string | undefined;
   if (truncated) {
-    outputPath = join(tmpdir(), `schway-bash-${crypto.randomUUID()}.log`);
-    await writeFile(
+    outputPath = spillFilePath(backend);
+    await backend.writePrivateFile(
       outputPath,
       `stdout:\n${collected.stdout}\nstderr:\n${collected.stderr}\n`,
-      { mode: 0o600 },
     );
-    await chmod(outputPath, 0o600);
   }
   const bounded = boundStreams(
     collected.stdout,
@@ -135,199 +158,6 @@ export async function executeBash(
     details,
     ...(collected.timedOut ? { isError: true } : {}),
   };
-}
-
-interface ShellOutput {
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-  timedOut: boolean;
-}
-
-/** Spawn a fresh bash process, stream chunks, and wait for exit. */
-async function runShell(
-  command: string,
-  cwd: string,
-  timeout: number | undefined,
-  ctx: ToolContext,
-): Promise<ShellOutput> {
-  let child: ChildProcess | undefined;
-  let pgid: number | undefined;
-  let timedOut = false;
-  let killTimer: ReturnType<typeof setTimeout> | undefined;
-  let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
-
-  const killTree = (signal: NodeJS.Signals) => {
-    if (pgid === undefined) {
-      return;
-    }
-    try {
-      process.kill(-pgid, signal);
-    } catch {
-      try {
-        child?.kill(signal);
-      } catch {
-        // already exited
-      }
-    }
-  };
-
-  const forceTerminate = () => {
-    killTree("SIGKILL");
-    // An inherited descriptor can outlive the group; close our handles so collectors settle too.
-    child?.stdout?.destroy();
-    child?.stderr?.destroy();
-  };
-
-  const terminate = () => {
-    if (killTimer !== undefined) return;
-    killTree("SIGTERM");
-    killTimer = setTimeout(forceTerminate, 200);
-  };
-
-  const onAbort = () => {
-    terminate();
-  };
-  ctx.signal?.addEventListener("abort", onAbort);
-
-  try {
-    if (ctx.signal?.aborted) {
-      throw abortError();
-    }
-
-    child = spawn("bash", ["-c", command], {
-      cwd,
-      env: ctx.env ?? process.env,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    pgid = child.pid;
-
-    if (timeout !== undefined) {
-      timeoutTimer = setTimeout(() => {
-        timedOut = true;
-        terminate();
-      }, timeout);
-    }
-
-    if (ctx.signal?.aborted) {
-      terminate();
-    }
-
-    const stdout = collectStream(child.stdout, "stdout", ctx);
-    const stderr = collectStream(child.stderr, "stderr", ctx);
-    const streams = Promise.all([stdout, stderr]);
-    // A pipe may fail before process exit; handle it immediately while retaining the original rejection.
-    void streams.catch(terminate);
-    const drainStreams = async () => {
-      // Stop inherited writers without discarding buffered normal output; failures escalate via terminate.
-      const drainTimer = setTimeout(() => killTree("SIGKILL"), 200);
-      try {
-        // A fail-fast rejection must not cancel escalation while the other pipe is still open.
-        await Promise.allSettled([stdout, stderr]);
-      } finally {
-        clearTimeout(drainTimer);
-      }
-    };
-
-    let exitCode: number | null;
-    try {
-      exitCode = await new Promise<number | null>((resolve, reject) => {
-        const cleanup = () => {
-          child!.removeListener("error", onError);
-          child!.removeListener("exit", onExit);
-        };
-        const onError = (error: Error) => {
-          cleanup();
-          reject(error);
-        };
-        const onExit = (code: number | null) => {
-          cleanup();
-          resolve(code);
-        };
-        child!.once("error", onError);
-        child!.once("exit", onExit);
-      });
-    } catch (error) {
-      terminate();
-      await drainStreams();
-      throw error;
-    }
-
-    await drainStreams();
-    const [stdoutText, stderrText] = await streams;
-    if (ctx.signal?.aborted) {
-      throw abortError();
-    }
-
-    return {
-      stdout: stdoutText,
-      stderr: stderrText,
-      exitCode,
-      timedOut,
-    };
-  } finally {
-    ctx.signal?.removeEventListener("abort", onAbort);
-    if (timeoutTimer !== undefined) {
-      clearTimeout(timeoutTimer);
-    }
-    if (killTimer !== undefined) {
-      clearTimeout(killTimer);
-    }
-  }
-}
-
-/** Decode a pipe as UTF-8, forwarding chunks to `onOutput`. */
-function collectStream(
-  stream: NodeJS.ReadableStream | null | undefined,
-  name: "stdout" | "stderr",
-  ctx: ToolContext,
-): Promise<string> {
-  if (!stream) {
-    return Promise.resolve("");
-  }
-  const decoder = new StringDecoder("utf8");
-  let text = "";
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const cleanup = () => {
-      stream.removeListener("data", onData);
-      stream.removeListener("error", onError);
-      stream.removeListener("end", onFinish);
-      stream.removeListener("close", onFinish);
-    };
-    const onData = (chunk: Buffer | string) => {
-      const piece =
-        typeof chunk === "string" ? chunk : decoder.write(chunk);
-      if (piece.length === 0) {
-        return;
-      }
-      text += piece;
-      ctx.onOutput?.({ stream: name, text: piece });
-    };
-    const onError = (error: Error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(error);
-    };
-    const onFinish = () => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      const tail = decoder.end();
-      if (tail.length > 0) {
-        text += tail;
-        ctx.onOutput?.({ stream: name, text: tail });
-      }
-      resolve(text);
-    };
-    stream.on("data", onData);
-    stream.once("error", onError);
-    stream.once("end", onFinish);
-    // An unsuccessful spawn can close a pipe without ever emitting end or error.
-    stream.once("close", onFinish);
-  });
 }
 
 /** Model-facing summary: exit code plus stdout/stderr. */
