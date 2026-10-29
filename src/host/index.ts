@@ -18,6 +18,9 @@ export type {
   HostAuthDescription, HostAuthFetch, HostAuthReadiness, HostAuthRoute, HostAuthRunResult, HostAuthSelection, HostAuthStatusCode, HostCredentialReference, HostCredentialStore, HostCredentialWriteGuard,
 } from "./auth-routes.ts";
 export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute, isCleanupUncertain, isCredentialWriteRefused } from "./auth-routes.ts";
+/** Bounded device approval with opaque credential writes and secret-free terminal outcomes. */
+export type { HostDeviceSignInOptions, HostDeviceSignIn, HostDeviceSignInFailure, HostDeviceSignInOutcome, HostDeviceSignInStart } from "./device-sign-in.ts";
+export { beginDeviceSignIn } from "./device-sign-in.ts";
 /** Quiesced native-state snapshot and validated restore for owned managed sessions. */
 export type {
   HostSessionSnapshot, HostSnapshotArtifact, HostSnapshotArtifactKind, HostSnapshotOptions, HostSnapshotQuarantineReason,
@@ -76,6 +79,7 @@ export interface HostCapabilities {
   readonly snapshotContract: "schway.host.session-snapshot/v1";
   /** Bounded vendor-neutral search and pinned fetch tools with untrusted evidence. */
   readonly webToolsContract: "schway.host.web-tools/v1";
+  readonly deviceSignInContract: "schway.host.device-sign-in/v1";
   readonly coreToolsContract: "schway.host.core-tools/v1";
 }
 
@@ -269,6 +273,7 @@ const capabilities: HostCapabilities = Object.freeze({
   dataContract: "schway.host.managed-session-data/v1",
   snapshotContract: "schway.host.session-snapshot/v1",
   webToolsContract: "schway.host.web-tools/v1",
+  deviceSignInContract: "schway.host.device-sign-in/v1",
   coreToolsContract: "schway.host.core-tools/v1",
 } as HostCapabilities);
 

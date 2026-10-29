@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chmod, lstat, mkdir, open, readFile, readdir, rename, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, readFile, readdir, rename, rmdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { FileChangedError, observeFile, observeFileTarget, writeFileAtomically } from "../src/tools/fs.ts";
 import { withTempDir } from "./helpers.ts";
@@ -321,11 +321,16 @@ test.skipIf(process.platform === "win32")("restrictive umask preserves existing 
 test.skipIf(process.platform === "win32")("private staging retains inherited directory setgid without publishing privileged file bits", async () => {
   await withTempDir(async root => {
     await chmod(root, 0o2700);
+    // Linux inherits directory setgid; other filesystems may inherit only the group.
+    const probe = join(root, "inheritance-probe");
+    await mkdir(probe, { mode: 0o700 });
+    const inheritedMode = (await stat(probe)).mode & 0o2777;
+    await rmdir(probe);
     const path = join(root, "fresh");
     await writeFileAtomically(path, "fresh", undefined, async () => {
       const entries = await readdir(root); expect(entries).toHaveLength(1);
       const staging = join(root, entries[0]!);
-      expect((await stat(staging)).mode & 0o2777).toBe(0o2700);
+      expect((await stat(staging)).mode & 0o2777).toBe(inheritedMode);
       const files = await readdir(staging); expect(files).toHaveLength(1);
       expect((await stat(join(staging, files[0]!))).gid).toBe((await stat(root)).gid);
     }, { mode: 0o640 });

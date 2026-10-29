@@ -52,6 +52,7 @@ import {
   type CodexFetchLike,
 } from "../src/model/providers/codex-subscription.ts";
 import { createCodexLoginRunner, loadInteractiveModel, subscriptionAuthorizeLauncher } from "../src/tui/app.ts";
+import { SIGN_IN_TIMED_OUT, signInTimeout } from "../src/tui/sign-in-wait.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { createConversationView } from "../src/tui/view.ts";
 import { parseLoginTarget } from "../src/tui/commands.ts";
@@ -514,7 +515,7 @@ test("device authorization request failures stay actionable without leaking tran
         throw new Error("socket-sentinel");
       }) satisfies CodexFetchLike,
     }),
-  ).rejects.toThrow(/device sign-in failed/);
+  ).rejects.toThrow(/device sign-in failed/i);
 });
 
 test("device exchange expiry remaps to restart with --device and stays actionable", async () => {
@@ -563,6 +564,18 @@ test("device exchange expiry remaps to restart with --device and stays actionabl
     expect(result.message).toMatch(/Restart \/login chatgpt --device/);
     expect(result.message).not.toMatch(/could not complete/);
   }
+});
+
+test("device deadline remains actionable through the login runner and TUI timeout mapping", async () => {
+  const store = fakeCredentialStore();
+  const runner = createCodexLoginRunner({ store, secrets: [], fetch: async () => Response.json({
+    device_auth_id: "fixture", user_code: "ABCD", expires_in: 0,
+  }) });
+  const result = await runner({ device: true, signal: new AbortController().signal, onProgress: () => {} });
+  expect(result).toEqual({ ok: false, message: "Device sign-in timed out · /login chatgpt --device retry" });
+  if (result.ok) throw new Error("Expected device timeout");
+  expect(signInTimeout(result.message)).toEqual({ text: SIGN_IN_TIMED_OUT, details: result.message });
+  expect(await loadSubscriptionTokens(store)).toBeNull();
 });
 
 test("browser code exchange keeps the localhost redirect while device exchange uses deviceauth callback", async () => {
