@@ -1,7 +1,7 @@
 schway-screen 1
 screen web-fetch-rows
 title Web fetch results
-description Fetched pages show status, size and time; an HTTP error stays visible and URL tokens stay masked in targets and result text.
+description Fetched pages show status, size and time; HTTP and address-policy errors stay visible while URL tokens stay masked.
 variant nocolor-dark-80
 size 80x30
 cursor 7 27 visible
@@ -20,13 +20,13 @@ cursor 7 27 visible
      city=Bangkok&access_token=***"}
      Tool failed. Inspect this result before continuing.
 
+   !  WEB_FETCH  http://private.example.test/                      error ▾
+     Request blocked
+
+     This destination is blocked. Use a public web address.
+     Tool failed. Inspect this result before continuing.
+
    ⠋  WEB_FETCH  https://maps.example.test/route?from=…&to=…&a… running… ▸
-
-
-
-
-
-
 
 
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model   Provider default          ctx ~246
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default          ctx ~277
   Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #161b24 -
@@ -115,16 +115,40 @@ cursor 7 27 visible
 14 3-4 #e6eaf0 #1e2430 b
 14 4-5 #e6eaf0 #1e2430 -
 14 5-16 #e6eaf0 #4a505a b
-14 16-63 #e6eaf0 #1e2430 -
-14 63-75 #8b95a7 #1e2430 -
+14 16-45 #e6eaf0 #1e2430 -
+14 45-67 #8b95a7 #1e2430 -
+14 67-72 #e6eaf0 #1e2430 -
+14 72-75 #8b95a7 #1e2430 -
 14 75-77 #ffffff #1e2430 -
 14 77-80 #ffffff #0e1117 -
-15 0-80 #ffffff #0e1117 -
-16 0-80 #ffffff #0e1117 -
-17 0-80 #ffffff #0e1117 -
-18 0-80 #ffffff #0e1117 -
+15 0-2 #ffffff #0e1117 -
+15 2-5 #ffffff #1e2430 -
+15 5-20 #8b95a7 #1e2430 -
+15 20-77 #ffffff #1e2430 -
+15 77-80 #ffffff #0e1117 -
+16 0-2 #ffffff #0e1117 -
+16 2-77 #ffffff #1e2430 -
+16 77-80 #ffffff #0e1117 -
+17 0-2 #ffffff #0e1117 -
+17 2-5 #ffffff #1e2430 -
+17 5-59 #8b95a7 #1e2430 -
+17 59-77 #ffffff #1e2430 -
+17 77-80 #ffffff #0e1117 -
+18 0-2 #ffffff #0e1117 -
+18 2-5 #ffffff #1e2430 -
+18 5-56 #8b95a7 #1e2430 -
+18 56-77 #ffffff #1e2430 -
+18 77-80 #ffffff #0e1117 -
 19 0-80 #ffffff #0e1117 -
-20 0-80 #ffffff #0e1117 -
+20 0-2 #ffffff #0e1117 -
+20 2-3 #e6eaf0 #1e2430 -
+20 3-4 #e6eaf0 #1e2430 b
+20 4-5 #e6eaf0 #1e2430 -
+20 5-16 #e6eaf0 #4a505a b
+20 16-63 #e6eaf0 #1e2430 -
+20 63-75 #8b95a7 #1e2430 -
+20 75-77 #ffffff #1e2430 -
+20 77-80 #ffffff #0e1117 -
 21 0-80 #ffffff #0e1117 -
 22 0-80 #ffffff #0e1117 -
 23 0-80 #ffffff #0e1117 -

@@ -4,6 +4,8 @@ import { STATUS_CODES } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { version } from "../../package.json";
+import { BlockedWebAddress, checkedWebAddress, resolveWebAddresses, type WebFetchAddressPolicy, type WebFetchResolver } from "./web-address.ts";
+import { connectWebAddress, UnsupportedWebContentEncoding, type WebFetchConnect } from "./web-transport.ts";
 import { abortError } from "./fs.ts";
 import { htmlToText } from "./html-text.ts";
 import { utf8ByteLength as utf8Length, utf8Prefix } from "./output-budget.ts";
@@ -52,6 +54,7 @@ export type WebFetchErrorKind =
   | "invalid-url"
   | "unsupported-scheme"
   | "userinfo"
+  | "blocked-address"
   | "dns"
   | "connection-refused"
   | "connection-reset"
@@ -62,6 +65,7 @@ export type WebFetchErrorKind =
   | "redirect-limit"
   | "http-status"
   | "unsupported-content-type"
+  | "unsupported-content-encoding"
   | "body-cap";
 
 /** Structured outcome of one web_fetch call: URLs, HTTP status, byte counts, truncation, spill path, timing and failure class. */
@@ -90,13 +94,23 @@ export interface WebFetchDetails {
   errorKind?: WebFetchErrorKind;
 }
 
-/** Injection points for deterministic tests; production uses the exported defaults. */
-export interface WebFetchOptions {
-  fetch?: (input: string, init: RequestInit) => Promise<Response>;
+/** Additional destination policy, finite fetch budgets and trusted fixture seams. */
+export interface WebFetchOptions extends WebFetchAddressPolicy {
+  /** Trusted DNS seam; every returned address is checked before connection. */
+  resolve?: WebFetchResolver;
+  /** Additional URL restriction after the address baseline; false or rejection refuses the hop. */
+  urlGuard?: (url: URL) => boolean | Promise<boolean>;
+  /** Trusted transport seam; implementations must connect only to the supplied numeric address. */
+  connect?: WebFetchConnect;
+  /** Per-hop DNS, policy, connect, TLS and response deadline, from 1 to 5000 milliseconds. */
   responseDeadlineMs?: number;
+  /** Whole-call deadline from 1 to 15000 milliseconds. */
   totalDeadlineMs?: number;
+  /** Decompressed body cap from 1 to 2097152 bytes. */
   maxRawBytes?: number;
+  /** Whole-result cap from 1024 to 32768 UTF-8 bytes, framing included for host tools. */
   maxOutputBytes?: number;
+  /** Monotonic milliseconds used only for reported duration. */
   now?: () => number;
 }
 
@@ -107,14 +121,23 @@ const DESCRIPTION =
   "read-only and run in parallel, so make several in one turn when you need several pages.";
 
 /** Build the read-only, parallel web_fetch definition with optional test injections. */
-export function createWebFetchTool(options: WebFetchOptions = {}): ToolDefinition<WebFetchInput> {
+export function createWebFetchTool(options: WebFetchOptions = {}, spillToFile = true): ToolDefinition<WebFetchInput> {
+  if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => !["resolve", "connect", "urlGuard", "allowHosts", "dangerouslyAllowPrivateAddressesForDevelopment", "responseDeadlineMs", "totalDeadlineMs", "maxRawBytes", "maxOutputBytes", "now"].includes(key)) ||
+      ["resolve", "connect", "urlGuard", "now"].some(key => options[key as keyof WebFetchOptions] !== undefined && typeof options[key as keyof WebFetchOptions] !== "function") ||
+      (options.allowHosts !== undefined && (!Array.isArray(options.allowHosts) || options.allowHosts.some(host => typeof host !== "string"))) ||
+      (options.dangerouslyAllowPrivateAddressesForDevelopment !== undefined && typeof options.dangerouslyAllowPrivateAddressesForDevelopment !== "boolean")) throw new Error("Invalid web fetch options.");
+  for (const [value, minimum, maximum] of [[options.responseDeadlineMs, 1, WEB_FETCH_RESPONSE_DEADLINE_MS], [options.totalDeadlineMs, 1, WEB_FETCH_TOTAL_DEADLINE_MS],
+    [options.maxRawBytes, 1, WEB_FETCH_MAX_RAW_BYTES], [options.maxOutputBytes, 1024, WEB_FETCH_MAX_OUTPUT_BYTES]] as const) {
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < minimum || value > maximum)) throw new Error("Invalid web fetch options.");
+  }
+  options = { ...options, ...(options.allowHosts ? { allowHosts: [...options.allowHosts] } : {}) };
   return {
     name: "web_fetch",
-    description: DESCRIPTION,
+    description: spillToFile ? DESCRIPTION : DESCRIPTION.replace("Output is bounded; oversized text is saved to a temporary file you can read.", "Output is bounded untrusted data; oversized text is truncated."),
     inputSchema: webFetchInputSchema,
     effect: "read-only",
     execution: "parallel",
-    execute: (input, ctx) => executeWebFetch(input, ctx, options),
+    execute: (input, ctx) => executeWebFetch(input, ctx, options, spillToFile),
   };
 }
 
@@ -130,9 +153,9 @@ type Status = { text: string; display: string };
  * Rejects other schemes and userinfo before any request; follows at most five redirects; every failure is a tool error.
  * Cancellation aborts the request, releases the connection and rejects with an AbortError.
  */
-async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: WebFetchOptions): Promise<ToolExecutionResult> {
+async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: WebFetchOptions, spillToFile: boolean): Promise<ToolExecutionResult> {
   const now = options.now ?? (() => performance.now());
-  const fetchImpl = options.fetch ?? ((url: string, init: RequestInit) => fetch(url, init));
+  const fetchImpl = options.connect ?? connectWebAddress;
   const responseDeadlineMs = options.responseDeadlineMs ?? WEB_FETCH_RESPONSE_DEADLINE_MS;
   const totalDeadlineMs = options.totalDeadlineMs ?? WEB_FETCH_TOTAL_DEADLINE_MS;
   const maxRawBytes = options.maxRawBytes ?? WEB_FETCH_MAX_RAW_BYTES;
@@ -184,15 +207,20 @@ async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: 
     for (;;) {
       const responseTimer = setTimeout(() => abortWith("response-deadline"), responseDeadlineMs);
       try {
+        const address = await raceAbort(checkedWebAddress(current, options, options.resolve ?? resolveWebAddresses, controller.signal), controller.signal);
+        if (options.urlGuard && await raceAbort(Promise.resolve().then(() => options.urlGuard!(new URL(current.href))).catch(() => false), controller.signal) !== true) throw new BlockedWebAddress();
+        if (controller.signal.aborted) throw abortError();
         response = await raceAbort(fetchImpl(current.href, {
           method: "GET",
           headers: { "User-Agent": WEB_FETCH_USER_AGENT, Accept: ACCEPT },
           redirect: "manual",
           credentials: "omit",
           signal: controller.signal,
-        }), controller.signal);
+        }, address), controller.signal);
       } catch (error) {
         if (cause === "cancelled") throw abortError();
+        if (error instanceof BlockedWebAddress) return { content: `Request blocked\n\n${error.message}`, isError: true,
+          details: { url: "[blocked]", finalUrl: "[blocked]", statusLine: "Request blocked", rawBytes: 0, textBytes: 0, truncated: false, durationMs: elapsed(), errorKind: "blocked-address" } satisfies WebFetchDetails };
         const outcome = deadlineOutcome() ?? networkOutcome(error, current);
         return fail(outcome, status("No response", current.href), { finalUrl: display(current.href) });
       } finally {
@@ -268,7 +296,7 @@ async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: 
     }
 
     if (rawBytes === 0 && kind !== "unsupported") {
-      return { content: `${statusLine.text}\n\nThe response body is empty.`, details: { ...base, textBytes: 0, truncated: false, durationMs: elapsed() } };
+      return { content: boundOutput(`${statusLine.text}\n\nThe response body is empty.`, maxOutputBytes), details: { ...base, textBytes: 0, truncated: false, durationMs: elapsed() } };
     }
     if (effectiveKind === "unsupported") {
       return fail({ kind: "unsupported-content-type", message: `Unsupported content type ${typeLabel(contentType)} (${sizeLabel}). web_fetch returns text only.` },
@@ -282,7 +310,7 @@ async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: 
           statusLine, { ...base, truncated: true });
       }
       const message = effectiveKind === "html" ? "The page has no readable text. It may need JavaScript." : "The response has no readable text.";
-      return { content: `${statusLine.text}\n\n${message}`, details: { ...base, textBytes: 0, truncated: false, durationMs: elapsed() } };
+      return { content: boundOutput(`${statusLine.text}\n\n${message}`, maxOutputBytes), details: { ...base, textBytes: 0, truncated: false, durationMs: elapsed() } };
     }
 
     const textBytes = utf8Length(text);
@@ -292,6 +320,10 @@ async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: 
       return { content: `${head}${text}${capNote}`, details: { ...base, textBytes, truncated: body.capped, durationMs: elapsed() } };
     }
 
+    if (!spillToFile) return {
+      content: boundOutput(`${head}${text}${capNote}`, maxOutputBytes),
+      details: { ...base, textBytes, truncated: true, durationMs: elapsed() },
+    };
     const outputPath = join(tmpdir(), `schway-web-fetch-${crypto.randomUUID()}.txt`);
     await writeFile(outputPath, text, { mode: 0o600 });
     await chmod(outputPath, 0o600);
@@ -302,7 +334,7 @@ async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: 
     const shownBytes = utf8Length(shown);
     const nextLine = shown.split("\n").length;
     return {
-      content: `${head}${shown}${notice(shownBytes, nextLine)}${capNote}`,
+      content: boundOutput(`${head}${shown}${notice(shownBytes, nextLine)}${capNote}`, maxOutputBytes),
       details: { ...base, textBytes, truncated: true, outputPath, durationMs: elapsed() },
     };
   } finally {
@@ -351,6 +383,7 @@ function maskedUrl(value: string): string {
 
 /** Map a fetch rejection to a plain failure class and message. */
 function networkOutcome(error: unknown, url: URL): Outcome {
+  if (error instanceof UnsupportedWebContentEncoding) return { kind: "unsupported-content-encoding", message: error.message };
   const record = typeof error === "object" && error !== null ? error as { code?: unknown; message?: unknown; cause?: unknown } : {};
   const nested = typeof record.cause === "object" && record.cause !== null ? record.cause as { code?: unknown; message?: unknown } : {};
   const code = `${String(record.code ?? "")} ${String(nested.code ?? "")}`;
@@ -368,8 +401,7 @@ function networkOutcome(error: unknown, url: URL): Outcome {
   if (/\b(ECONNRESET|ConnectionClosed|ConnectionReset|EPIPE|ECONNABORTED)\b/.test(code) || /connection (was )?(reset|closed)|socket (hang up|closed)/i.test(message)) {
     return { kind: "connection-reset", message: `The connection to ${host} closed before the response finished.` };
   }
-  const detail = String(record.message ?? "").trim();
-  return { kind: "network", message: `The request to ${host} failed${detail ? `: ${detail}` : "."}` };
+  return { kind: "network", message: `The request to ${host} failed.` };
 }
 
 /** Settle with the promise or reject when the signal aborts first. */

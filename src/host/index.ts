@@ -40,6 +40,15 @@ export type {
   ExecutionSearchRequest, ExecutionSearchResult, ExecutionSpawnRequest, ExecutionSpawnResult, ExecutionStat,
 } from "../tools/backend.ts";
 
+/** Vendor-neutral search backend and finite budgets for explicit host web tools. */
+export type { SearchProvider, SearchResult, WebSearchOptions } from "../tools/web-search.ts";
+/** Checked destination and trusted DNS/connect seams for host-supplied fetch policy. */
+export type { WebFetchAddress, WebFetchAddressPolicy, WebFetchResolver } from "../tools/web-address.ts";
+/** Trusted transport connects only to the supplied checked numeric address. */
+export type { WebFetchConnect } from "../tools/web-transport.ts";
+/** Explicit fetch policy, output budgets and sanitized outcome metadata. */
+export type { WebFetchOptions, WebFetchDetails, WebFetchErrorKind } from "../tools/web-fetch.ts";
+
 /** Supported composed host-release contract for versioned downstream pinning. */
 export const RELEASE_CONTRACT = "schway.host.release/v2" as const;
 
@@ -65,6 +74,8 @@ export interface HostCapabilities {
   readonly runContract: "schway.host.run-control/v1";
   readonly dataContract: "schway.host.managed-session-data/v1";
   readonly snapshotContract: "schway.host.session-snapshot/v1";
+  /** Bounded vendor-neutral search and pinned fetch tools with untrusted evidence. */
+  readonly webToolsContract: "schway.host.web-tools/v1";
   readonly coreToolsContract: "schway.host.core-tools/v1";
 }
 
@@ -257,6 +268,7 @@ const capabilities: HostCapabilities = Object.freeze({
   runContract: "schway.host.run-control/v1",
   dataContract: "schway.host.managed-session-data/v1",
   snapshotContract: "schway.host.session-snapshot/v1",
+  webToolsContract: "schway.host.web-tools/v1",
   coreToolsContract: "schway.host.core-tools/v1",
 } as HostCapabilities);
 
@@ -296,4 +308,24 @@ export function localExecutionBackend(workspaceRoot: string): ExecutionBackend {
 /** True for a string absolute POSIX or Windows path, without loading path modules during discovery. */
 function absolutePath(value: unknown): value is string {
   return typeof value === "string" && (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value) || value.startsWith("\\\\"));
+}
+
+/** Build a bounded read-only search tool over an embedder-owned backend, with untrusted results. */
+export function createWebSearchTool(provider: import("../tools/web-search.ts").SearchProvider, options?: import("../tools/web-search.ts").WebSearchOptions): ToolDefinition {
+  const search = require("../tools/web-search.ts") as typeof import("../tools/web-search.ts");
+  return search.createWebSearchTool(provider, options);
+}
+
+/** Build a bounded read-only fetch tool with pinned SSRF checks before application policy and untrusted results. */
+export function createWebFetchTool(options: import("../tools/web-fetch.ts").WebFetchOptions = {}): ToolDefinition {
+  const fetch = require("../tools/web-fetch.ts") as typeof import("../tools/web-fetch.ts");
+  const { untrustedWebText } = require("../tools/web-untrusted.ts") as typeof import("../tools/web-untrusted.ts");
+  const definition = fetch.createWebFetchTool(options, false);
+  const maxBytes = options.maxOutputBytes ?? fetch.WEB_FETCH_MAX_OUTPUT_BYTES;
+  return { ...definition, async execute(input, ctx) {
+    const result = await definition.execute(input as import("../tools/web-fetch.ts").WebFetchInput, ctx);
+    const framed = untrustedWebText(result.content, maxBytes);
+    return { ...result, content: framed.content, details: { ...(result.details as import("../tools/web-fetch.ts").WebFetchDetails),
+      truncated: (result.details as import("../tools/web-fetch.ts").WebFetchDetails).truncated || framed.truncated } };
+  } };
 }

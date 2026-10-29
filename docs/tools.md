@@ -44,8 +44,8 @@ remote host and any proxy on the way. Approval modes do not change that: because
 the tool reads only, it runs without a prompt in `auto`, `ask` and `read-only`, so
 the model can put workspace content into a URL without asking. Extension
 `beforeTool` and `afterTool` hooks apply to it like any other tool, so a hook can
-deny or rewrite a fetch. Loopback and private addresses stay reachable, which
-lets the model read local development servers.
+deny or rewrite a fetch. Loopback and private destinations are blocked by the
+default address guard, including when a hook rewrites the URL.
 
 ### Requests
 
@@ -56,6 +56,23 @@ lets the model read local development servers.
 - At most 5 redirects are followed. Each hop must again be `http` or `https`
   without credentials. The status line reports the final URL.
 - JavaScript does not run, and pages are not cached.
+
+### Destination guard
+
+The CLI and TUI refuse nonpublic destinations by default. Before each connection,
+including redirects, Schway checks every resolved address and pins that connection
+to a checked numeric IP. It retains the original HTTP Host and TLS certificate
+identity and never performs a second hostname lookup or uses an environment proxy.
+Loopback, private, CGNAT, link-local, unspecified, broadcast, multicast, reserved,
+IPv4-mapped/translated IPv6 and tunnel destinations are blocked, as are known
+metadata hostnames. Mixed public/private DNS answers fail closed. Refusals return
+`details.errorKind: "blocked-address"` without disclosing any resolved address.
+
+An embedder may restrict exact normalized hostnames with `allowHosts` (an empty
+list denies all). The allowlist never overrides the baseline. Deliberate local
+development requires `dangerouslyAllowPrivateAddressesForDevelopment: true`;
+the CLI never sets it. Custom DNS and connect seams are trusted host code; a
+custom transport must connect only to the supplied numeric address.
 
 ### Deadlines and caps
 

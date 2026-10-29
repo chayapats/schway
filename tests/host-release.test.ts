@@ -86,6 +86,7 @@ test("packed release artifact installs without private source access and adverti
       contract: "schway.host.base/v1",
       releaseContract: "schway.host.release/v2",
       coreToolsContract: "schway.host.core-tools/v1",
+      webToolsContract: "schway.host.web-tools/v1",
       contextContract: "schway.host.context-policy/v1",
       toolContract: "schway.host.tool-policy/v1",
       sessionContract: "schway.host.durable-sessions/v1",
@@ -283,3 +284,20 @@ test("packed release example builds against the public host entry", async () => 
     expect(await Bun.file(outfile).exists()).toBe(true);
   });
 });
+
+
+test("packed consumer admits vendor-neutral web tools with guarded untrusted results and hosted lookup off", async () => {
+  await withTempDir(async dir => {
+    const { consumer } = await packAndInstall(dir);
+    const workspaceRoot = join(consumer, "web-work"), homeDirectory = join(consumer, "web-home"), sessionDirectory = join(consumer, "web-sessions");
+    await mkdir(workspaceRoot); await mkdir(homeDirectory);
+    const result = await packedConsumer(consumer, { action: "web-tools", workspaceRoot, homeDirectory, sessionDirectory },
+      `await Bun.plugin({name:'web-tools-guard',setup(builder){
+        builder.onLoad({filter:/(?:[/\\\\](?:providers|tui)[/\\\\]|@opentui|[/\\\\]openai[/\\\\])/},()=>{throw new Error('Web tools loaded provider or TUI');});
+      }});`) as { outcome: string; contract: string; calls: string[]; results: Array<{ content: string; isError: boolean }> };
+    expect(result.outcome).toBe("completed"); expect(result.contract).toBe("schway.host.web-tools/v1");
+    expect(result.calls).toEqual(["search weather 2", "guard example.com", "fetch https://example.com/page 93.184.216.34"]);
+    expect(result.results.map(item => item.isError)).toEqual([false, false, true]);
+    for (const item of result.results.slice(0, 2)) expect(item.content).toContain("&lt;/untrusted_data&gt;");
+  });
+}, 120_000);

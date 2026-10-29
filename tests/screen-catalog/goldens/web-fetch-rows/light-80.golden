@@ -1,7 +1,7 @@
 schway-screen 1
 screen web-fetch-rows
 title Web fetch results
-description Fetched pages show status, size and time; an HTTP error stays visible and URL tokens stay masked in targets and result text.
+description Fetched pages show status, size and time; HTTP and address-policy errors stay visible while URL tokens stay masked.
 variant light-80
 size 80x30
 cursor 7 27 visible
@@ -20,13 +20,13 @@ cursor 7 27 visible
      city=Bangkok&access_token=***"}
      Tool failed. Inspect this result before continuing.
 
+   !  WEB_FETCH  http://private.example.test/                      error ▾
+     Request blocked
+
+     This destination is blocked. Use a public web address.
+     Tool failed. Inspect this result before continuing.
+
    ⠋  WEB_FETCH  https://maps.example.test/route?from=…&to=…&a… running… ▸
-
-
-
-
-
-
 
 
 
@@ -34,7 +34,7 @@ cursor 7 27 visible
   ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
   ▌ › Ask Schway…
   ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripted/scripted-model   Provider default          ctx ~246
+ ◆ Auto  ● Ready   scripted/scripted-model   Provider default          ctx ~277
   Shift+Tab change mode · Enter send · Ctrl+F find · Alt+I inspect
 == styles
 00 0-1 #ffffff #ecedea -
@@ -112,19 +112,43 @@ cursor 7 27 visible
 13 0-80 #ffffff #f7f7f4 -
 14 0-2 #ffffff #f7f7f4 -
 14 2-3 #0a5894 #e1e3df -
-14 3-4 #0a5894 #e1e3df b
+14 3-4 #a61f16 #e1e3df b
 14 4-5 #1d232c #e1e3df -
 14 5-16 #065e74 #c7d3d2 b
-14 16-63 #1d232c #e1e3df -
-14 63-75 #545e6c #e1e3df -
+14 16-45 #1d232c #e1e3df -
+14 45-67 #545e6c #e1e3df -
+14 67-72 #a61f16 #e1e3df -
+14 72-75 #545e6c #e1e3df -
 14 75-77 #ffffff #e1e3df -
 14 77-80 #ffffff #f7f7f4 -
-15 0-80 #ffffff #f7f7f4 -
-16 0-80 #ffffff #f7f7f4 -
-17 0-80 #ffffff #f7f7f4 -
-18 0-80 #ffffff #f7f7f4 -
+15 0-2 #ffffff #f7f7f4 -
+15 2-5 #ffffff #e1e3df -
+15 5-20 #545e6c #e1e3df -
+15 20-77 #ffffff #e1e3df -
+15 77-80 #ffffff #f7f7f4 -
+16 0-2 #ffffff #f7f7f4 -
+16 2-77 #ffffff #e1e3df -
+16 77-80 #ffffff #f7f7f4 -
+17 0-2 #ffffff #f7f7f4 -
+17 2-5 #ffffff #e1e3df -
+17 5-59 #545e6c #e1e3df -
+17 59-77 #ffffff #e1e3df -
+17 77-80 #ffffff #f7f7f4 -
+18 0-2 #ffffff #f7f7f4 -
+18 2-5 #ffffff #e1e3df -
+18 5-56 #545e6c #e1e3df -
+18 56-77 #ffffff #e1e3df -
+18 77-80 #ffffff #f7f7f4 -
 19 0-80 #ffffff #f7f7f4 -
-20 0-80 #ffffff #f7f7f4 -
+20 0-2 #ffffff #f7f7f4 -
+20 2-3 #0a5894 #e1e3df -
+20 3-4 #0a5894 #e1e3df b
+20 4-5 #1d232c #e1e3df -
+20 5-16 #065e74 #c7d3d2 b
+20 16-63 #1d232c #e1e3df -
+20 63-75 #545e6c #e1e3df -
+20 75-77 #ffffff #e1e3df -
+20 77-80 #ffffff #f7f7f4 -
 21 0-80 #ffffff #f7f7f4 -
 22 0-80 #ffffff #f7f7f4 -
 23 0-80 #ffffff #f7f7f4 -

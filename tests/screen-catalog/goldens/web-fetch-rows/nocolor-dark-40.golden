@@ -1,19 +1,13 @@
 schway-screen 1
 screen web-fetch-rows
 title Web fetch results
-description Fetched pages show status, size and time; an HTTP error stays visible and URL tokens stay masked in targets and result text.
+description Fetched pages show status, size and time; HTTP and address-policy errors stay visible while URL tokens stay masked.
 variant nocolor-dark-40
 size 40x30
 cursor 6 27 visible
 == text
  ⚡ schway  /project
 
-  ✓  WEB_FETCH  https://weather.… ▸
-  ✓  WEB_FETCH  https://reader.e… ▸
-  !  WEB_FETCH  https://ap… error ▾
-    HTTP 401 Unauthorized
-    application/json · 58 bytes
-    https://api.example.test/
     forecast?city=…&access_token=…
 
     The server returned HTTP 401
@@ -26,15 +20,21 @@ cursor 6 27 visible
     Tool failed. Inspect this result
     before continuing.
 
+  !  WEB_FETCH  http://pri… error ▾
+    Request blocked
+
+    This destination is blocked. Use
+    a public web address.
+    Tool failed. Inspect this result
+    before continuing.
+
   ⠋  WEB_FETCH  https:/… running… ▸
-
-
 
 
  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
  ▌ › Ask Schway…
  ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
- ◆ Auto  ● Ready   scripte…    ctx ~246
+ ◆ Auto  ● Ready   scripte…    ctx ~277
  Shift+Tab change mode · Enter send
 == styles
 00 0-1 #ffffff #161b24 -
@@ -45,89 +45,75 @@ cursor 6 27 visible
 00 20-40 #ffffff #161b24 -
 01 0-40 #ffffff #0e1117 -
 02 0-1 #ffffff #0e1117 -
-02 1-2 #e6eaf0 #1e2430 -
-02 2-3 #e6eaf0 #1e2430 b
-02 3-4 #e6eaf0 #1e2430 -
-02 4-15 #e6eaf0 #4a505a b
-02 15-33 #e6eaf0 #1e2430 -
-02 33-36 #8b95a7 #1e2430 -
-02 36-38 #ffffff #1e2430 -
+02 1-4 #ffffff #1e2430 -
+02 4-34 #8b95a7 #1e2430 -
+02 34-38 #ffffff #1e2430 -
 02 38-40 #ffffff #0e1117 -
 03 0-1 #ffffff #0e1117 -
-03 1-2 #e6eaf0 #1e2430 -
-03 2-3 #e6eaf0 #1e2430 b
-03 3-4 #e6eaf0 #1e2430 -
-03 4-15 #e6eaf0 #4a505a b
-03 15-33 #e6eaf0 #1e2430 -
-03 33-36 #8b95a7 #1e2430 -
-03 36-38 #ffffff #1e2430 -
+03 1-38 #ffffff #1e2430 -
 03 38-40 #ffffff #0e1117 -
 04 0-1 #ffffff #0e1117 -
-04 1-2 #e6eaf0 #1e2430 -
-04 2-3 #e6eaf0 #1e2430 b
-04 3-4 #e6eaf0 #1e2430 -
-04 4-15 #e6eaf0 #4a505a b
-04 15-27 #e6eaf0 #1e2430 -
-04 27-28 #8b95a7 #1e2430 -
-04 28-33 #e6eaf0 #1e2430 -
-04 33-36 #8b95a7 #1e2430 -
-04 36-38 #ffffff #1e2430 -
+04 1-4 #ffffff #1e2430 -
+04 4-33 #8b95a7 #1e2430 -
+04 33-38 #ffffff #1e2430 -
 04 38-40 #ffffff #0e1117 -
 05 0-1 #ffffff #0e1117 -
 05 1-4 #ffffff #1e2430 -
-05 4-25 #8b95a7 #1e2430 -
-05 25-38 #ffffff #1e2430 -
+05 4-17 #8b95a7 #1e2430 -
+05 17-38 #ffffff #1e2430 -
 05 38-40 #ffffff #0e1117 -
 06 0-1 #ffffff #0e1117 -
-06 1-4 #ffffff #1e2430 -
-06 4-31 #8b95a7 #1e2430 -
-06 31-38 #ffffff #1e2430 -
+06 1-38 #ffffff #1e2430 -
 06 38-40 #ffffff #0e1117 -
 07 0-1 #ffffff #0e1117 -
 07 1-4 #ffffff #1e2430 -
-07 4-29 #8b95a7 #1e2430 -
-07 29-38 #ffffff #1e2430 -
+07 4-36 #8b95a7 #1e2430 -
+07 36-38 #ffffff #1e2430 -
 07 38-40 #ffffff #0e1117 -
 08 0-1 #ffffff #0e1117 -
 08 1-4 #ffffff #1e2430 -
-08 4-34 #8b95a7 #1e2430 -
-08 34-38 #ffffff #1e2430 -
+08 4-30 #8b95a7 #1e2430 -
+08 30-38 #ffffff #1e2430 -
 08 38-40 #ffffff #0e1117 -
 09 0-1 #ffffff #0e1117 -
-09 1-38 #ffffff #1e2430 -
+09 1-4 #ffffff #1e2430 -
+09 4-13 #8b95a7 #1e2430 -
+09 13-38 #ffffff #1e2430 -
 09 38-40 #ffffff #0e1117 -
 10 0-1 #ffffff #0e1117 -
 10 1-4 #ffffff #1e2430 -
-10 4-33 #8b95a7 #1e2430 -
-10 33-38 #ffffff #1e2430 -
+10 4-35 #8b95a7 #1e2430 -
+10 35-38 #ffffff #1e2430 -
 10 38-40 #ffffff #0e1117 -
 11 0-1 #ffffff #0e1117 -
 11 1-4 #ffffff #1e2430 -
-11 4-17 #8b95a7 #1e2430 -
-11 17-38 #ffffff #1e2430 -
+11 4-37 #8b95a7 #1e2430 -
+11 37-38 #ffffff #1e2430 -
 11 38-40 #ffffff #0e1117 -
 12 0-1 #ffffff #0e1117 -
-12 1-38 #ffffff #1e2430 -
+12 1-4 #ffffff #1e2430 -
+12 4-22 #8b95a7 #1e2430 -
+12 22-38 #ffffff #1e2430 -
 12 38-40 #ffffff #0e1117 -
-13 0-1 #ffffff #0e1117 -
-13 1-4 #ffffff #1e2430 -
-13 4-36 #8b95a7 #1e2430 -
-13 36-38 #ffffff #1e2430 -
-13 38-40 #ffffff #0e1117 -
+13 0-40 #ffffff #0e1117 -
 14 0-1 #ffffff #0e1117 -
-14 1-4 #ffffff #1e2430 -
-14 4-30 #8b95a7 #1e2430 -
-14 30-38 #ffffff #1e2430 -
+14 1-2 #e6eaf0 #1e2430 -
+14 2-3 #e6eaf0 #1e2430 b
+14 3-4 #e6eaf0 #1e2430 -
+14 4-15 #e6eaf0 #4a505a b
+14 15-27 #e6eaf0 #1e2430 -
+14 27-28 #8b95a7 #1e2430 -
+14 28-33 #e6eaf0 #1e2430 -
+14 33-36 #8b95a7 #1e2430 -
+14 36-38 #ffffff #1e2430 -
 14 38-40 #ffffff #0e1117 -
 15 0-1 #ffffff #0e1117 -
 15 1-4 #ffffff #1e2430 -
-15 4-13 #8b95a7 #1e2430 -
-15 13-38 #ffffff #1e2430 -
+15 4-19 #8b95a7 #1e2430 -
+15 19-38 #ffffff #1e2430 -
 15 38-40 #ffffff #0e1117 -
 16 0-1 #ffffff #0e1117 -
-16 1-4 #ffffff #1e2430 -
-16 4-35 #8b95a7 #1e2430 -
-16 35-38 #ffffff #1e2430 -
+16 1-38 #ffffff #1e2430 -
 16 38-40 #ffffff #0e1117 -
 17 0-1 #ffffff #0e1117 -
 17 1-4 #ffffff #1e2430 -
@@ -136,21 +122,29 @@ cursor 6 27 visible
 17 38-40 #ffffff #0e1117 -
 18 0-1 #ffffff #0e1117 -
 18 1-4 #ffffff #1e2430 -
-18 4-22 #8b95a7 #1e2430 -
-18 22-38 #ffffff #1e2430 -
+18 4-25 #8b95a7 #1e2430 -
+18 25-38 #ffffff #1e2430 -
 18 38-40 #ffffff #0e1117 -
-19 0-40 #ffffff #0e1117 -
+19 0-1 #ffffff #0e1117 -
+19 1-4 #ffffff #1e2430 -
+19 4-37 #8b95a7 #1e2430 -
+19 37-38 #ffffff #1e2430 -
+19 38-40 #ffffff #0e1117 -
 20 0-1 #ffffff #0e1117 -
-20 1-2 #e6eaf0 #1e2430 -
-20 2-3 #e6eaf0 #1e2430 b
-20 3-4 #e6eaf0 #1e2430 -
-20 4-15 #e6eaf0 #4a505a b
-20 15-24 #e6eaf0 #1e2430 -
-20 24-36 #8b95a7 #1e2430 -
-20 36-38 #ffffff #1e2430 -
+20 1-4 #ffffff #1e2430 -
+20 4-22 #8b95a7 #1e2430 -
+20 22-38 #ffffff #1e2430 -
 20 38-40 #ffffff #0e1117 -
 21 0-40 #ffffff #0e1117 -
-22 0-40 #ffffff #0e1117 -
+22 0-1 #ffffff #0e1117 -
+22 1-2 #e6eaf0 #1e2430 -
+22 2-3 #e6eaf0 #1e2430 b
+22 3-4 #e6eaf0 #1e2430 -
+22 4-15 #e6eaf0 #4a505a b
+22 15-24 #e6eaf0 #1e2430 -
+22 24-36 #8b95a7 #1e2430 -
+22 36-38 #ffffff #1e2430 -
+22 38-40 #ffffff #0e1117 -
 23 0-40 #ffffff #0e1117 -
 24 0-40 #ffffff #0e1117 -
 25 0-1 #ffffff #0e1117 -

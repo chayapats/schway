@@ -95,6 +95,12 @@ export function createAuthRouteModel(selection: HostAuthSelection): Promise<Mode
 export function createHost(options: HostOptions): Promise<HostRuntime>;
 
 // @public
+export function createWebFetchTool(options?: WebFetchOptions): ToolDefinition;
+
+// @public
+export function createWebSearchTool(provider: SearchProvider, options?: WebSearchOptions): ToolDefinition;
+
+// @public
 export function credentialReferenceForRoute(route: HostAuthRoute): HostCredentialReference;
 
 // @public
@@ -329,6 +335,7 @@ export interface HostCapabilities {
     readonly toolContract: "schway.host.tool-policy/v1";
     // (undocumented)
     readonly toolPolicies: readonly ["exact"];
+    readonly webToolsContract: "schway.host.web-tools/v1";
 }
 
 // @public
@@ -764,6 +771,22 @@ export type ProviderMetadata = Record<string, unknown>;
 export const RELEASE_CONTRACT: "schway.host.release/v2";
 
 // @public
+export interface SearchProvider {
+    readonly id: string;
+    search(query: string, options: {
+        limit: number;
+        signal: AbortSignal;
+    }): Promise<readonly SearchResult[]>;
+}
+
+// @public
+export interface SearchResult {
+    readonly snippet: string;
+    readonly title: string;
+    readonly url: string;
+}
+
+// @public
 export const SNAPSHOT_CONTRACT: "schway.host.session-snapshot/v1";
 
 // @public
@@ -886,6 +909,63 @@ export interface UserMessage {
 
 // @public
 export function validateSnapshotShape(snapshot: unknown): HostSnapshotValidation;
+
+// @public
+export interface WebFetchAddress {
+    // (undocumented)
+    readonly address: string;
+    // (undocumented)
+    readonly family: 4 | 6;
+}
+
+// @public
+export interface WebFetchAddressPolicy {
+    allowHosts?: readonly string[];
+    dangerouslyAllowPrivateAddressesForDevelopment?: boolean;
+}
+
+// @public
+export type WebFetchConnect = (url: string, init: RequestInit, address: WebFetchAddress) => Promise<Response>;
+
+// @public
+export interface WebFetchDetails {
+    contentType?: string;
+    durationMs: number;
+    errorKind?: WebFetchErrorKind;
+    finalUrl: string;
+    outputPath?: string;
+    rawBytes: number;
+    status?: number;
+    statusLine: string;
+    textBytes: number;
+    truncated: boolean;
+    url: string;
+}
+
+// @public
+export type WebFetchErrorKind = "invalid-url" | "unsupported-scheme" | "userinfo" | "blocked-address" | "dns" | "connection-refused" | "connection-reset" | "tls" | "network" | "response-deadline" | "total-deadline" | "redirect-limit" | "http-status" | "unsupported-content-type" | "unsupported-content-encoding" | "body-cap";
+
+// @public
+export interface WebFetchOptions extends WebFetchAddressPolicy {
+    connect?: WebFetchConnect;
+    maxOutputBytes?: number;
+    maxRawBytes?: number;
+    now?: () => number;
+    resolve?: WebFetchResolver;
+    responseDeadlineMs?: number;
+    totalDeadlineMs?: number;
+    urlGuard?: (url: URL) => boolean | Promise<boolean>;
+}
+
+// @public
+export type WebFetchResolver = (hostname: string, signal: AbortSignal) => Promise<readonly WebFetchAddress[]>;
+
+// @public
+export interface WebSearchOptions {
+    deadlineMs?: number;
+    maxOutputBytes?: number;
+    maxResults?: number;
+}
 
 // @public
 export interface Workspace {
