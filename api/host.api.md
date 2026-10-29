@@ -328,10 +328,11 @@ export interface HostCapabilities {
     // (undocumented)
     readonly hostedLookup: "disabled-only";
     // (undocumented)
-    readonly modelCatalog: "schway.host.model-catalog/v1";
     readonly imageInputContract: "schway.host.image-input/v1";
     // (undocumented)
     readonly imageInputRoutes: readonly HostImageRouteCapability[];
+    // (undocumented)
+    readonly modelCatalog: "schway.host.model-catalog/v1";
     // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
