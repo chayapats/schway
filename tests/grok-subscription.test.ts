@@ -1,5 +1,6 @@
 import { beforeAll, afterAll, expect, test } from "bun:test";
 import { GROK_CLIENT_ID, GROK_SCOPE, GROK_REFERRER, GROK_TOKEN_URL, GROK_DEVICE_AUTHORIZATION_URL, createBrowserAttempt, createAuthorizeUrl, exchangeCodeForTokens, refreshSubscriptionTokens, parseSubscriptionTokens, subscriptionAccessExpired, requestDeviceAuthorization, pollDeviceAuthorization, loginWithDeviceFlow, type GrokFetch } from "../src/model/providers/grok-subscription.ts";
+import { manualClock } from "./helpers/manual-clock.ts";
 
 const json = (value: unknown, status = 200) => Response.json(value, { status });
 const grant = { deviceCode: "private-device", userCode: "ABCD-EFGH", verificationUri: "https://x.ai/device", expiresIn: 900, interval: 5 };
@@ -48,22 +49,30 @@ test("device authorization posts restricted scopes and rejects insecure verifica
   await expect(requestDeviceAuthorization({ fetch: async () => json({ device_code: "d", user_code: "u", verification_uri: "http://x.ai/device" }) })).rejects.toThrow("HTTPS");
 });
 test("device polling waits intervals, adds slow-down, and uses the standard form grant", async () => {
-  let now = 0, calls = 0; const waits: number[] = [];
-  const tokens = await pollDeviceAuthorization({ ...grant, now: () => now, sleep: async ms => { waits.push(ms); now += ms; }, fetch: async (url, init) => {
+  const clock = manualClock(), started = clock.now(), polls: number[] = [];
+  const work = pollDeviceAuthorization({ ...grant, now: clock.now, sleep: clock.sleep, fetch: async (url, init) => {
     expect(String(url)).toBe(GROK_TOKEN_URL);
     expect(Object.fromEntries(new URLSearchParams(String(init!.body)))).toEqual({ client_id: GROK_CLIENT_ID, grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: grant.deviceCode, referrer: "schway" });
-    calls++; return calls === 1 ? json({ error: "authorization_pending" }, 400) : calls === 2 ? json({ error: "slow_down" }, 400) : json({ access_token: "approved" });
+    polls.push(clock.now() - started);
+    return polls.length === 1 ? json({ error: "authorization_pending" }, 400) : polls.length === 2 ? json({ error: "slow_down" }, 400) : json({ access_token: "approved" });
   } });
-  expect(waits).toEqual([5000, 5000, 10_000]); expect(tokens.accessToken).toBe("approved");
+  await clock.advance(20_000);
+  expect(polls).toEqual([5000, 10_000, 20_000]); expect((await work).accessToken).toBe("approved");
+  expect(clock.pending()).toBe(0);
 });
 test("device denial, expiry, deadline and Esc have distinct outcomes without saving", async () => {
   for (const reason of ["access_denied", "expired_token", "deadline", "abort"]) {
-    let now = 0; const abort = new AbortController();
-    const task = pollDeviceAuthorization({ ...grant, expiresIn: 8, signal: abort.signal, now: () => now, sleep: async ms => { now += ms; if (reason === "abort") abort.abort(); }, fetch: async () => json({ error: reason === "deadline" ? "authorization_pending" : reason }, 400) });
-    await expect(task).rejects.toThrow(reason === "access_denied" ? "denied" : reason === "expired_token" ? "code expired" : reason === "deadline" ? "timed out" : "Aborted");
+    const clock = manualClock(), abort = new AbortController();
+    const task = pollDeviceAuthorization({ ...grant, expiresIn: 8, signal: abort.signal, now: clock.now, sleep: clock.sleep, fetch: async () => json({ error: reason === "deadline" ? "authorization_pending" : reason }, 400) }).catch(error => error);
+    if (reason === "abort") abort.abort();
+    await clock.advance(8000);
+    expect(await task).toMatchObject({ message: expect.stringContaining(reason === "access_denied" ? "denied" : reason === "expired_token" ? "code expired" : reason === "deadline" ? "timed out" : "Aborted") });
+    expect(clock.pending()).toBe(0);
   }
-  let saved = 0, now = 0; const abort = new AbortController(), notices: string[] = [], panels: unknown[] = [];
-  await expect(loginWithDeviceFlow({ signal: abort.signal, deps: { now: () => now, sleep: async ms => { now += ms; abort.abort(); }, fetch: async () => json({ device_code: grant.deviceCode, user_code: grant.userCode, verification_uri: grant.verificationUri }), saveTokens: async () => { saved++; }, onProgress: message => notices.push(message), onApproval: approval => panels.push(approval) } })).rejects.toThrow("Aborted");
+  let saved = 0; const clock = manualClock(), abort = new AbortController(), notices: string[] = [], panels: unknown[] = [];
+  const work = loginWithDeviceFlow({ signal: abort.signal, deps: { now: clock.now, sleep: clock.sleep, fetch: async () => json({ device_code: grant.deviceCode, user_code: grant.userCode, verification_uri: grant.verificationUri }), saveTokens: async () => { saved++; }, onProgress: message => notices.push(message), onApproval: approval => { panels.push(approval); abort.abort(); } } });
+  await expect(work).rejects.toThrow("Aborted");
+  expect(clock.pending()).toBe(0);
   expect(saved).toBe(0); expect(notices).toEqual([]); expect(panels).toEqual([{ kind: "device", verificationUri: grant.verificationUri, userCode: grant.userCode }]);
 });
 
@@ -150,8 +159,9 @@ test("browser, device, headless, doctor and smoke never consume or alter another
     const transport: GrokFetch = async (url, init) => { requests.push(String(url) + " " + String(init?.body)); return String(url) === GROK_DEVICE_AUTHORIZATION_URL ? json({ device_code: "fixture-device", user_code: "ABCD-EFGH", verification_uri: "https://x.ai/device" }) : json({ access_token: "fixture-access", refresh_token: "fixture-refresh" }); };
     try {
       await loginWithBrowserFlow({ signal: new AbortController().signal, deps: { fetch: transport, saveTokens: async () => {}, openBrowser: async value => { const url = new URL(value); await (await fetch(`${url.searchParams.get("redirect_uri")}?state=${url.searchParams.get("state")}&code=fixture-code`)).text(); } } });
-      let now = 0;
-      await loginWithDeviceFlow({ signal: new AbortController().signal, deps: { fetch: transport, saveTokens: async () => {}, now: () => now, sleep: async ms => { now += ms; } } });
+      const clock = manualClock();
+      const work = loginWithDeviceFlow({ signal: new AbortController().signal, deps: { fetch: transport, saveTokens: async () => {}, now: clock.now, sleep: clock.sleep } });
+      await clock.advance(5000); await work;
       let stderr = "";
       expect(await runCli(["--provider", "xai", "--xai-auth", "grok", "--model", "grok-4.7", "-p", "Hello"], { cwd: home, env: { HOME: home }, credentialStore: fakeCredentialStore(), fetch: transport, stdout: { write() {} }, stderr: { write(value) { stderr += value; } } })).toBe(1);
       expect(stderr).toContain("No Grok subscription login found.");

@@ -2,37 +2,12 @@ import { expect, test } from "bun:test";
 import { beginDeviceSignIn, checkAuthReadiness, containsNoSecrets, credentialReferenceForRoute, hostCapabilities,
   type HostAuthFetch, type HostAuthRoute, type HostClock, type HostCredentialStore, type HostDeviceSignIn, type HostDeviceSignInOptions } from "schway/host";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { manualClock } from "./helpers/manual-clock.ts";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 import { join, resolve } from "node:path";
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; }
-function manualClock() {
-  let time = 1_800_000_000_000;
-  const timers = new Set<{ at: number; finish(): void }>();
-  const clock: HostClock & { advance(ms: number): Promise<void>; pending(): number } = {
-    now: () => time,
-    sleep: (ms, signal) => new Promise<void>((resolve, reject) => {
-      const cleanup = () => { timers.delete(entry); signal?.removeEventListener("abort", stop); };
-      const stop = () => { cleanup(); reject(new DOMException("Aborted", "AbortError")); };
-      const entry = { at: time + ms, finish() { cleanup(); resolve(); } };
-      timers.add(entry); signal?.addEventListener("abort", stop, { once: true });
-      if (signal?.aborted) stop();
-    }),
-    advance: async ms => {
-      await flush();
-      const target = time + ms;
-      for (;;) {
-        const next = [...timers].sort((a, b) => a.at - b.at)[0];
-        if (!next || next.at > target) break;
-        time = next.at; next.finish(); await flush();
-      }
-      time = target; await flush();
-    },
-    pending: () => timers.size,
-  };
-  return clock;
-}
 
 function protocol(route: HostAuthRoute, clock: HostClock, input: {
   replies?: Array<{ error?: string; status?: number }>;
@@ -245,6 +220,34 @@ test("host device sign-in loads only the selected provider and no TUI or CLI", a
 });
 
 for (const route of ["codex", "grok"] as const) {
+  for (const phase of ["fetch", "body"] as const) {
+    test(`${route} shared provider expires a hung ${phase} on its injected clock`, async () => {
+      const clock = manualClock(), cancel = new AbortController(), response = deferred<Response>();
+      let requestSignal: AbortSignal | undefined, failure: unknown;
+      const fixture = protocol(route, clock, { lifetime: 5, onPoll: async init => {
+        requestSignal = init?.signal ?? undefined;
+        return phase === "fetch" ? response.promise : new Response(new ReadableStream());
+      } });
+      const provider = route === "codex" ? await import("../src/model/providers/codex-subscription.ts")
+        : await import("../src/model/providers/grok-subscription.ts");
+      const authorization = await provider.beginDeviceAuthorization({ fetch: fixture.fetch, now: clock.now, sleep: clock.sleep });
+      const work = authorization.poll(cancel.signal).catch(error => { failure = error; });
+      try {
+        await clock.advance(4999);
+        expect(requestSignal).toBeDefined(); expect(requestSignal?.aborted).toBe(false);
+        expect(failure).toBeUndefined();
+        await clock.advance(1);
+        expect(failure).toMatchObject({ kind: "expired", message: route === "codex"
+          ? "Device sign-in timed out · /login chatgpt --device retry"
+          : "Grok device sign-in timed out waiting for approval. Restart /login grok --device." });
+        expect(requestSignal?.aborted).toBe(true);
+        expect(clock.pending()).toBe(0);
+      } finally {
+        cancel.abort(); response.resolve(Response.json({})); await work;
+      }
+    });
+  }
+
   test(`${route} CLI consumes the same issuance deadline before polling or saving`, async () => {
     let time = 1_800_000_000_000, saves = 0, polls = 0;
     const fetch: HostAuthFetch = async url => {
@@ -268,6 +271,25 @@ for (const route of ["codex", "grok"] as const) {
     const clock = manualClock(), store = fakeCredentialStore();
     expect(await beginDeviceSignIn({ route, clock, store, fetch: protocol(route, clock, { lifetime: 0 }).fetch }))
       .toEqual({ kind: "expired", route, containsNoSecrets: true });
+  });
+}
+
+for (const expiry of ["ISO date", "Unix seconds", "Unix milliseconds", "relative seconds"] as const) {
+  test(`Codex keeps ${expiry} expiry after a slow authorization request`, async () => {
+    const clock = manualClock(), issuedAt = clock.now(), expiresAt = issuedAt + 30_000;
+    const fixture = protocol("codex", clock);
+    const fetch: HostAuthFetch = async (url, init) => {
+      if (!String(url).endsWith("usercode")) return fixture.fetch(url, init);
+      await clock.advance(20_000);
+      return Response.json({ device_auth_id: "fixture", user_code: "ABCD", ...(expiry === "relative seconds"
+        ? { expires_in: 30 } : { expires_at: expiry === "ISO date" ? new Date(expiresAt).toISOString()
+          : expiry === "Unix seconds" ? expiresAt / 1000 : expiresAt }) });
+    };
+    const flow = await start({ route: "codex", clock, store: fakeCredentialStore(), fetch });
+    expect(flow.expiresAt).toBe(expiresAt);
+    expect(flow.expiresAt - clock.now()).toBe(10_000);
+    expect(await flow.poll(new AbortController().signal)).toEqual({ kind: "ready", route: "codex", containsNoSecrets: true });
+    expect(clock.pending()).toBe(0);
   });
 }
 

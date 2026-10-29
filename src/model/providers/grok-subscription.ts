@@ -151,7 +151,7 @@ export async function requestDeviceAuthorization(input: { fetch?: GrokFetch; sig
 export async function pollDeviceAuthorization(input: GrokDeviceAuthorization & { expiresAt?: number; fetch?: GrokFetch; signal?: AbortSignal; now?: () => number; sleep?: (ms: number, signal?: AbortSignal) => Promise<void> }): Promise<GrokTokens> {
   const now = input.now ?? Date.now, wait = input.sleep ?? sleepDeviceFlow;
   const deadline = input.expiresAt ?? deviceFlowExpiresAt(input.expiresIn, now());
-  return withinDeviceFlow({ expiresAt: deadline, signal: input.signal, now,
+  return withinDeviceFlow({ expiresAt: deadline, signal: input.signal, now, sleep: input.sleep,
     expiredMessage: "Grok device sign-in timed out waiting for approval. Restart /login grok --device." }, async signal => {
     let interval = input.interval * 1000;
     const expired = () => new DeviceFlowError("expired", "Grok device sign-in timed out waiting for approval. Restart /login grok --device.");

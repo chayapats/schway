@@ -894,7 +894,8 @@ export async function pollDeviceAuthorization(input: {
 }): Promise<CodexTokens> {
   const now = input.now ?? Date.now;
   const expiresAt = input.expiresAt ?? now() + Math.min(input.timeoutMs ?? CODEX_DEVICE_TIMEOUT_MS, CODEX_DEVICE_TIMEOUT_MS);
-  return withinDeviceFlow({ expiresAt, signal: input.signal, now }, async signal => {
+  return withinDeviceFlow({ expiresAt, signal: input.signal, now, sleep: input.sleep,
+    expiredMessage: "Device sign-in timed out · /login chatgpt --device retry" }, async signal => {
     let intervalMs = input.pollIntervalMs ?? 5_000;
     const wait = input.sleep ?? sleepDeviceFlow;
     const runFetch = input.fetch ?? fetch;
@@ -986,7 +987,8 @@ export async function beginDeviceAuthorization(input: {
   timeoutMs?: number; pollIntervalMs?: number;
 }): Promise<DeviceFlowAuthorization<CodexTokens>> {
   const now = input.now ?? Date.now, issuedAt = now();
-  const grant = await requestDeviceAuthorization({ fetch: input.fetch, signal: input.signal, now });
+  // Derive absolute-expiry lifetimes from the same timestamp used to rebuild the deadline.
+  const grant = await requestDeviceAuthorization({ fetch: input.fetch, signal: input.signal, now: () => issuedAt });
   const expiresAt = Math.min(deviceFlowExpiresAt(grant.expiresIn, issuedAt), issuedAt + (input.timeoutMs ?? CODEX_DEVICE_TIMEOUT_MS));
   return { userCode: grant.userCode, verificationUri: grant.verificationUri, expiresAt,
     poll: signal => pollDeviceAuthorization({ ...grant, expiresAt, signal, fetch: input.fetch, now, sleep: input.sleep,
