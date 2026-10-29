@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import type { ConversationItem, UserMessage } from "../src/conversation/types.ts";
+import { ExtensionHooks } from "../src/extensions/hooks.ts";
+import type { ExtensionModelRequest } from "../src/extensions/index.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
 import type { ModelRequest } from "../src/model/model.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
@@ -32,6 +34,32 @@ async function fixture(dir: string, bodies: string[], secrets: string[] = []) {
   const modules = await Promise.all(paths.map(path => import(pathToFileURL(path).href)));
   return { ...loaded, modules, paths, workspace, home };
 }
+
+test("model hooks exclude transient image bytes from typed inputs and accepted returns", async () => {
+  const signal = new AbortController().signal;
+  const hooks = new ExtensionHooks(signal);
+  const imageData = new Map([["fixture-image", new Uint8Array([1, 2, 3])]]);
+  const request: ModelRequest = { systemPrompt: "original", context: [], items: [], imageData };
+  hooks.beforeModel("byte-free", input => {
+    // @ts-expect-error Transient image bytes are absent from the hook-facing type.
+    expect(input.imageData).toBeUndefined();
+    return { ...input, systemPrompt: "prepared" };
+  });
+  const prepared = await hooks.prepare(request, [], signal);
+  expect(prepared.systemPrompt).toBe("prepared");
+  expect(prepared).not.toHaveProperty("imageData");
+  expect(request.imageData).toBe(imageData);
+
+  hooks.beforeModel("inject-bytes", input => {
+    const replacement: ExtensionModelRequest = {
+      ...input,
+      // @ts-expect-error Hooks cannot return transient image bytes either.
+      imageData,
+    };
+    return replacement;
+  });
+  await expect(hooks.prepare(request, [], signal)).rejects.toThrow("unsupported field");
+});
 
 test("two enabled extensions waterfall into actual requests without mutating durable or retained data", async () => {
   await withTempDir(async dir => {

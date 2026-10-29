@@ -170,7 +170,7 @@ export type ExtensionEventListener = (event: ExtensionEvent, context: {
 }) => void | Promise<void>;
 
 // @public
-export interface ExtensionModelRequest extends Omit<ModelRequest, "hostedTools"> {
+export interface ExtensionModelRequest extends Omit<ModelRequest, "hostedTools" | "imageData"> {
     // (undocumented)
     readonly signal: AbortSignal;
 }

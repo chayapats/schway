@@ -307,8 +307,9 @@ medium in both rounds, plus unsupported-choice refusal, without paid remote call
 requests. Add `--enable-live` only when deliberately authorizing two subscription
 calls; optional `--timeout-ms` is 1000–300000, default 120000 for the whole probe.
 The probe uses the selected route's OS secure-store login, never environment API
-keys or another route. It uses bounded transport, 1024 output tokens, no SDK retry,
-no tools and `store: false`.
+keys or another route. Both routes use a timeout and cumulative response-byte limit,
+no SDK retry, no tools and `store: false`. Grok also receives a 1024-token output cap.
+Codex rejects output-token caps, so it relies on the time and byte limits.
 
 The first call transcribes a bundled synthetic PNG; the second transcribes a JPEG
 while replaying the first image and response. A completed stream and exact six-digit

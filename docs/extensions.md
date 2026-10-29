@@ -328,8 +328,10 @@ same way: Schway sets the optional `ModelRequest.hostedTools` (such as
 input never has the field, so a hook cannot add, remove or change it, and a
 result that sets `hostedTools` is rejected as an unsupported field with the
 usual extension error. It is attached even when no `beforeModel` hook is
-registered. `ExtensionModelRequest` therefore omits `hostedTools`. An extension
-tool named `web_search` keeps its name; Schway then sends no hosted search for
+registered. Transient `ModelRequest.imageData` is also excluded from hook inputs
+and accepted returns; hooks see image references in conversation items, never
+image bytes. `ExtensionModelRequest` therefore omits `hostedTools` and `imageData`.
+An extension tool named `web_search` keeps its name; Schway then sends no hosted search for
 that session. Public types include `BeforeAgentInput`, `BeforeAgentHook`,
 `ContextHook`, `BeforeModelHook`, `ExtensionModelRequest`, `ExtensionDenial`,
 `ContextSection`, `ConversationItem`, `UserMessage`, `ModelTool`, and
