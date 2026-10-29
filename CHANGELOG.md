@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Security
+
+- Block nonpublic and metadata destinations in `web_fetch` by default, including
+  every redirect's resolved DNS answers. Pin connections to checked addresses to
+  prevent DNS rebinding; refused calls return `blocked-address` without resolved
+  IPs. Exact host allowlists only tighten access; local development needs the
+  named `dangerouslyAllowPrivateAddressesForDevelopment` opt-in (#433).
+
 ### Added
 
 - Add `schway.host.core-tools/v1`: `coreToolDefinitions(backend, options?)`

@@ -5,7 +5,7 @@ import { version } from "../package.json";
 import { executeToolCall } from "../src/tools/executor.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import {
-  createWebFetchTool,
+  createWebFetchTool as createGuardedWebFetchTool,
   WEB_FETCH_ERROR_EXCERPT_BYTES,
   WEB_FETCH_MAX_OUTPUT_BYTES,
   WEB_FETCH_MAX_RAW_BYTES,
@@ -13,13 +13,19 @@ import {
   WEB_FETCH_RESPONSE_DEADLINE_MS,
   WEB_FETCH_TOTAL_DEADLINE_MS,
   WEB_FETCH_USER_AGENT,
-  webFetchTool,
+  webFetchTool as defaultWebFetchTool,
   type WebFetchDetails,
   type WebFetchOptions,
 } from "../src/tools/web-fetch.ts";
 import type { ToolExecutionResult } from "../src/tools/types.ts";
 import { decodeHtmlEntities, htmlToText } from "../src/tools/html-text.ts";
 
+// Body/format fixtures explicitly opt into their loopback HTTP servers; security tests use defaults.
+const createWebFetchTool = (options: WebFetchOptions = {}) => createGuardedWebFetchTool({
+  dangerouslyAllowPrivateAddressesForDevelopment: true,
+  ...(options.connect ? { resolve: async () => [{ address: "93.184.216.34", family: 4 as const }] } : {}), ...options,
+});
+const webFetchTool = createWebFetchTool();
 const workspace = { root: "/tmp/project", launchCwd: "/tmp/project", extraRoots: [] };
 const fixtures = join(import.meta.dir, "fixtures/web-fetch");
 const encoder = new TextEncoder();
@@ -55,7 +61,7 @@ test("exported limits match the documented contract", () => {
   expect(WEB_FETCH_MAX_OUTPUT_BYTES).toBe(32 * 1024);
   expect(WEB_FETCH_MAX_REDIRECTS).toBe(5);
   expect(WEB_FETCH_ERROR_EXCERPT_BYTES).toBe(2 * 1024);
-  expect(webFetchTool).toMatchObject({ name: "web_fetch", effect: "read-only", execution: "parallel" });
+  expect(defaultWebFetchTool).toMatchObject({ name: "web_fetch", effect: "read-only", execution: "parallel" });
 });
 
 test("the schema requires one url and rejects unknown keys", () => {
@@ -233,7 +239,7 @@ test("a closed port fails as connection refused", async () => {
 });
 
 test("DNS, TLS and reset failures from injected fetch errors each have their own message", async () => {
-  const failing = (error: Error) => ({ fetch: async () => { throw error; } });
+  const failing = (error: Error) => ({ connect: async () => { throw error; } });
   const coded = (message: string, code: string) => Object.assign(new TypeError(message), { code });
   const dns = await fetchUrl("https://unknown.example.test/", failing(coded("getaddrinfo ENOTFOUND unknown.example.test", "ENOTFOUND")));
   expect(dns).toMatchObject({ isError: true, details: { errorKind: "dns" } });
@@ -248,7 +254,7 @@ test("DNS, TLS and reset failures from injected fetch errors each have their own
   expect(reset.content).toEndWith("The connection to flaky.example.test closed before the response finished.");
   const other = await fetchUrl("https://odd.example.test/", failing(new Error("Something else")));
   expect(other).toMatchObject({ isError: true, details: { errorKind: "network" } });
-  expect(other.content).toEndWith("The request to odd.example.test failed: Something else");
+  expect(other.content).toEndWith("The request to odd.example.test failed.");
   expect(new Set([dns.content, tls.content, reset.content, other.content].map(content => content.split("\n\n")[1])).size).toBe(4);
 });
 
@@ -261,7 +267,7 @@ test("a TLS handshake against a plain HTTP loopback server fails as TLS", async 
 
 test("file:, ftp:, relative and userinfo URLs are rejected before any request", async () => {
   const requests: string[] = [];
-  const options: WebFetchOptions = { fetch: async input => { requests.push(input); return new Response("unexpected"); } };
+  const options: WebFetchOptions = { connect: async input => { requests.push(input); return new Response("unexpected"); } };
   const file = await fetchUrl("file:///etc/hosts", options);
   expect(file.content).toBe("No request sent · file:///etc/hosts\n\nOnly http and https URLs are supported, not file:");
   expect(file.details.errorKind).toBe("unsupported-scheme");

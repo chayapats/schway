@@ -4,6 +4,8 @@ import { STATUS_CODES } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { version } from "../../package.json";
+import { BlockedWebAddress, checkedWebAddress, resolveWebAddresses, type WebFetchAddressPolicy, type WebFetchResolver } from "./web-address.ts";
+import { connectWebAddress, type WebFetchConnect } from "./web-transport.ts";
 import { abortError } from "./fs.ts";
 import { htmlToText } from "./html-text.ts";
 import { utf8ByteLength as utf8Length, utf8Prefix } from "./output-budget.ts";
@@ -52,6 +54,7 @@ export type WebFetchErrorKind =
   | "invalid-url"
   | "unsupported-scheme"
   | "userinfo"
+  | "blocked-address"
   | "dns"
   | "connection-refused"
   | "connection-reset"
@@ -91,8 +94,11 @@ export interface WebFetchDetails {
 }
 
 /** Injection points for deterministic tests; production uses the exported defaults. */
-export interface WebFetchOptions {
-  fetch?: (input: string, init: RequestInit) => Promise<Response>;
+export interface WebFetchOptions extends WebFetchAddressPolicy {
+  /** Trusted DNS seam; every returned address is checked before connection. */
+  resolve?: WebFetchResolver;
+  /** Trusted transport seam; implementations must connect only to the supplied numeric address. */
+  connect?: WebFetchConnect;
   responseDeadlineMs?: number;
   totalDeadlineMs?: number;
   maxRawBytes?: number;
@@ -132,7 +138,7 @@ type Status = { text: string; display: string };
  */
 async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: WebFetchOptions): Promise<ToolExecutionResult> {
   const now = options.now ?? (() => performance.now());
-  const fetchImpl = options.fetch ?? ((url: string, init: RequestInit) => fetch(url, init));
+  const fetchImpl = options.connect ?? connectWebAddress;
   const responseDeadlineMs = options.responseDeadlineMs ?? WEB_FETCH_RESPONSE_DEADLINE_MS;
   const totalDeadlineMs = options.totalDeadlineMs ?? WEB_FETCH_TOTAL_DEADLINE_MS;
   const maxRawBytes = options.maxRawBytes ?? WEB_FETCH_MAX_RAW_BYTES;
@@ -184,15 +190,18 @@ async function executeWebFetch(input: WebFetchInput, ctx: ToolContext, options: 
     for (;;) {
       const responseTimer = setTimeout(() => abortWith("response-deadline"), responseDeadlineMs);
       try {
+        const address = await raceAbort(checkedWebAddress(current, options, options.resolve ?? resolveWebAddresses, controller.signal), controller.signal);
         response = await raceAbort(fetchImpl(current.href, {
           method: "GET",
           headers: { "User-Agent": WEB_FETCH_USER_AGENT, Accept: ACCEPT },
           redirect: "manual",
           credentials: "omit",
           signal: controller.signal,
-        }), controller.signal);
+        }, address), controller.signal);
       } catch (error) {
         if (cause === "cancelled") throw abortError();
+        if (error instanceof BlockedWebAddress) return { content: `Request blocked\n\n${error.message}`, isError: true,
+          details: { url: "[blocked]", finalUrl: "[blocked]", statusLine: "Request blocked", rawBytes: 0, textBytes: 0, truncated: false, durationMs: elapsed(), errorKind: "blocked-address" } satisfies WebFetchDetails };
         const outcome = deadlineOutcome() ?? networkOutcome(error, current);
         return fail(outcome, status("No response", current.href), { finalUrl: display(current.href) });
       } finally {
@@ -368,8 +377,7 @@ function networkOutcome(error: unknown, url: URL): Outcome {
   if (/\b(ECONNRESET|ConnectionClosed|ConnectionReset|EPIPE|ECONNABORTED)\b/.test(code) || /connection (was )?(reset|closed)|socket (hang up|closed)/i.test(message)) {
     return { kind: "connection-reset", message: `The connection to ${host} closed before the response finished.` };
   }
-  const detail = String(record.message ?? "").trim();
-  return { kind: "network", message: `The request to ${host} failed${detail ? `: ${detail}` : "."}` };
+  return { kind: "network", message: `The request to ${host} failed.` };
 }
 
 /** Settle with the promise or reject when the signal aborts first. */

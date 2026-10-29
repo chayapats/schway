@@ -16,7 +16,8 @@ import type {
 } from "../src/tools/types.ts";
 import { writeTool } from "../src/tools/write.ts";
 import { bashTool } from "../src/tools/bash.ts";
-import { webFetchTool } from "../src/tools/web-fetch.ts";
+import { createWebFetchTool } from "../src/tools/web-fetch.ts";
+const webFetchTool = createWebFetchTool({ dangerouslyAllowPrivateAddressesForDevelopment: true });
 import { withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 

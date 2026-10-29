@@ -14,11 +14,11 @@ import type { ModelRequest } from "../src/model/model.ts";
 import { createSession } from "../src/session/session.ts";
 import { bashTool } from "../src/tools/bash.ts";
 import { createToolRegistry, type ToolRegistry } from "../src/tools/registry.ts";
-import { webFetchTool } from "../src/tools/web-fetch.ts";
+
 import { TuiController } from "../src/tui/controller.ts";
 import { toolPresentation, toolTarget } from "../src/tui/presentation.ts";
 import { credentialValues, displayUrl, maskCredentialsInText } from "../src/tools/web-fetch-display.ts";
-import { createWebFetchTool, type WebFetchDetails } from "../src/tools/web-fetch.ts";
+import { createWebFetchTool as createGuardedWebFetchTool, type WebFetchDetails, type WebFetchOptions } from "../src/tools/web-fetch.ts";
 import { buildTranscriptFromSession, formatToolFinishedText, summarizeToolResult, webFetchDisplayText } from "../src/tui/transcript-format.ts";
 import { branchTreePreviewForRecord, buildBranchTreeSnapshot } from "../src/tui/branch-tree.ts";
 import { resolveWorkspace } from "../src/workspace/workspace.ts";
@@ -26,6 +26,11 @@ import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
+const createWebFetchTool = (options: WebFetchOptions = {}) => createGuardedWebFetchTool({
+  dangerouslyAllowPrivateAddressesForDevelopment: true,
+  ...(options.connect ? { resolve: async () => [{ address: "93.184.216.34", family: 4 as const }] } : {}), ...options,
+});
+const webFetchTool = createWebFetchTool();
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
@@ -144,7 +149,7 @@ test("an extension tool named web_fetch fails to load with the collision error",
   });
 });
 
-test("headless runs offer web_fetch, run it in ask and read-only, deny bash, and redact JSON details", async () => {
+test("headless runs offer guarded web_fetch in every approval mode, deny bash, and redact JSON details", async () => {
   await withTempDir(async dir => {
     const fixture = pageServer();
     const secret = "sk-headless-secret-1234";
@@ -170,13 +175,13 @@ test("headless runs offer web_fetch, run it in ask and read-only, deny bash, and
       expect(stdout.text).not.toContain(secret);
       const events = stdout.text.trim().split("\n").map(line => JSON.parse(line));
       const fetched = events.find(event => event.type === "tool.finished" && event.toolCallId === "fetch");
-      expect(fetched).toMatchObject({ status: "success", details: { url: `${fixture.base}/forecast?key=…`, status: 200, contentType: "text/html", truncated: false } });
+      expect(fetched).toMatchObject({ status: "error", details: { errorKind: "blocked-address", truncated: false } });
       expect(events.some(event => event.type === "tool.denied" && event.name === "web_fetch")).toBe(false);
       const shell = events.find(event => event.type === "tool.finished" && event.toolCallId === "shell");
       if (mode === "auto") expect(shell).toMatchObject({ status: "success" });
       else expect(shell).toMatchObject({ status: "error", content: mode === "ask" ? ASK_HEADLESS_DENIAL : READ_ONLY_HEADLESS_DENIAL });
     }
-    expect(fixture.hits).toHaveLength(3);
+    expect(fixture.hits).toHaveLength(0);
   });
 });
 
@@ -380,7 +385,7 @@ const LEAKS: Array<[url: string, secrets: string[]]> = [
 
 /** Run web_fetch on one URL against a server that echoes the requested URL in a 404 body. */
 async function leakRun(url: string) {
-  const tool = createWebFetchTool({ fetch: async input => new Response(`Not found: ${input}\nTry ${input} again.`, { status: 404, headers: { "Content-Type": "text/plain" } }) });
+  const tool = createWebFetchTool({ connect: async input => new Response(`Not found: ${input}\nTry ${input} again.`, { status: 404, headers: { "Content-Type": "text/plain" } }) });
   const result = await tool.execute({ url }, { workspace: { root: "/tmp/project", launchCwd: "/tmp/project", extraRoots: [] } });
   return { result, details: result.details as WebFetchDetails };
 }
@@ -426,7 +431,7 @@ test("resumed rows with an unrecognized reason phrase and 404 bodies with a back
     ["จบแล้ว", "https://h.test/x?token=abc`LEAKR5W", "LEAKR5W"],
   ]) {
     for (const status of [200, 404]) {
-      const tool = createWebFetchTool({ fetch: async input => new Response(`Cannot GET ${new URL(input).pathname}${new URL(input).search}${new URL(input).hash}`, { status, statusText: reason, headers: { "Content-Type": "text/plain" } }) });
+      const tool = createWebFetchTool({ connect: async input => new Response(`Cannot GET ${new URL(input).pathname}${new URL(input).search}${new URL(input).hash}`, { status, statusText: reason, headers: { "Content-Type": "text/plain" } }) });
       const result = await tool.execute({ url }, { workspace: { root: "/tmp/project", launchCwd: "/tmp/project", extraRoots: [] } });
       const session = createSession();
       session.append({ type: "assistant", id: "a", content: [{ type: "tool_call", id: "c", name: "web_fetch", arguments: { url } }] });
@@ -529,7 +534,7 @@ test("value-only echoes of the requested credentials are masked in live, control
     [`https://h.test/x?token=${"A".repeat(11_000)}%25252541&x%25252526pwd%2525253DREALSECRET`, "bad password REALSECRET", "REALSECRET", 401],
     [`https://h.test/x?auth=admin:s3cr3t&${Array.from({ length: 12 }, (_, index) => `sig${index}=v${index}%2Fx%2By`).join("&")}`, "bad password s3cr3t", "s3cr3t", 401],
   ] as const) {
-    const tool = createWebFetchTool({ fetch: async () => new Response(body, { status, headers: { "Content-Type": "application/json" } }) });
+    const tool = createWebFetchTool({ connect: async () => new Response(body, { status, headers: { "Content-Type": "application/json" } }) });
     const result = await tool.execute({ url }, { workspace: { root: "/tmp/project", launchCwd: "/tmp/project", extraRoots: [] } });
     const session = createSession();
     session.append({ type: "assistant", id: "a", content: [{ type: "tool_call", id: "c", name: "web_fetch", arguments: { url } }] });
@@ -561,7 +566,7 @@ test("a long presigned final URL after a redirect still masks a signature the 40
   const finalUrl = `https://bucket.s3.test/releases/app.tar.gz?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIAEXAMPLE%2F20261006%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20261006T000000Z&X-Amz-Expires=300&X-Amz-Security-Token=${"T".repeat(800)}&X-Amz-SignedHeaders=host&X-Amz-Signature=${signature}`;
   expect(finalUrl.length).toBeGreaterThan(1_000);
   const url = "https://downloads.example.test/releases/latest/app.tar.gz";
-  const tool = createWebFetchTool({ fetch: async input => input === url
+  const tool = createWebFetchTool({ connect: async input => input === url
     ? new Response(null, { status: 302, headers: { Location: finalUrl } })
     : new Response(`<Error><Code>SignatureDoesNotMatch</Code><SignatureProvided>${signature}</SignatureProvided></Error>`, { status: 403, headers: { "Content-Type": "application/xml" } }) });
   const result = await tool.execute({ url }, { workspace: { root: "/tmp/project", launchCwd: "/tmp/project", extraRoots: [] } });
@@ -584,7 +589,7 @@ test("a long first line is read whole, server text in the status line is bounded
   expect(webFetchDisplayText(content, undefined, undefined)).not.toContain(secret);
   // The tool bounds a long server reason phrase in its own status line.
   const url = "https://h.test/x?token=SECRETLONG2";
-  const tool = createWebFetchTool({ fetch: async () => new Response("rejected SECRETLONG2", { status: 401, statusText: "Nope ".repeat(5_000), headers: { "Content-Type": "text/plain" } }) });
+  const tool = createWebFetchTool({ connect: async () => new Response("rejected SECRETLONG2", { status: 401, statusText: "Nope ".repeat(5_000), headers: { "Content-Type": "text/plain" } }) });
   const result = await tool.execute({ url }, { workspace: { root: "/tmp/project", launchCwd: "/tmp/project", extraRoots: [] } });
   const first = result.content.split("\n")[0]!;
   expect(first.length).toBeLessThan(400);
@@ -836,7 +841,7 @@ test("the interactive app registers web_fetch and runs it in ask mode without a 
       const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       expect({ exit, stderr }).toEqual({ exit: 0, stderr: "" });
       expect(stdout).toContain("TUI_WEB_FETCH_OK");
-      expect(fixture.hits).toEqual(["/forecast?access_token=abc123"]);
+      expect(fixture.hits).toEqual([]);
     } finally { clearTimeout(timeout); }
   });
 }, 15_000);

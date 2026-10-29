@@ -78,7 +78,7 @@ const fetchRow = (ui: ScreenHarness, id: string, url: string, finish?: { status:
   ui.advance();
   // Like the tool, details carry the display-safe first line that the TUI shows instead of the raw echo.
   const statusLine = finish.content.split("\n")[0]!.replace(url, displayUrl(url));
-  ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name: "web_fetch", ...finish, details: { ...(finish.details as object), statusLine } });
+  ui.controller.applyEvent({ type: "tool.finished", toolCallId: id, name: "web_fetch", ...finish, details: { statusLine, ...(finish.details as object) } });
   ui.session.append({ type: "tool_result", id: `result-${id}`, toolCallId: id, content: finish.content, isError: finish.status !== "success" });
 };
 /** Commit one answer through the live controller path; `searches` adds that many kept hosted web search items. */
@@ -309,7 +309,7 @@ export const SCREENS: readonly Screen[] = [
     shellRow(ui, "malformed", "inspect invalid exit details", "success", "Exit code: 0", { exitCode: "0" });
     shellRow(ui, "error", "run unavailable command", "error", "Command could not start.");
   }, ready: s => s.transcript.filter(entry => entry.kind === "tool").length === 8 },
-  { id: "web-fetch-rows", title: "Web fetch results", description: "Fetched pages show status, size and time; an HTTP error stays visible and URL tokens stay masked in targets and result text.", noColorWidths: true, elapsed: 1200, drive: async ui => {
+  { id: "web-fetch-rows", title: "Web fetch results", description: "Fetched pages show status, size and time; HTTP and address-policy errors stay visible while URL tokens stay masked.", noColorWidths: true, elapsed: 1200, drive: async ui => {
     const weather = "https://weather.example.test/th/bangkok/today";
     fetchRow(ui, "fetch-ok", weather, { status: "success", content: `HTTP 200 OK · text/html · 48,213 bytes · ${weather}\n\n# Today in Bangkok\n\nRain is likely after 3 pm.`, details: fetchDetails(weather, 200, 48_213, 420) });
     const article = "https://reader.example.test/article/42";
@@ -317,8 +317,10 @@ export const SCREENS: readonly Screen[] = [
       details: fetchDetails(article, 200, 87_940, 1_350, { truncated: true, outputPath: "/tmp/schway-web-fetch-1.txt" }) });
     const denied = "https://api.example.test/forecast?city=Bangkok&access_token=sk-live-4f9a2b7c1d";
     fetchRow(ui, "fetch-401", denied, { status: "error", content: `HTTP 401 Unauthorized · application/json · 58 bytes · ${denied}\n\nThe server returned HTTP 401 Unauthorized.\n\n{"error":"invalid token","docs":"${denied}"}`, details: { ...fetchDetails(denied, 401, 58, 180, { errorKind: "http-status" }), contentType: "application/json" } });
+    fetchRow(ui, "fetch-blocked", "http://private.example.test/", { status: "error", content: "Request blocked\n\nThis destination is blocked. Use a public web address.",
+      details: { url: "[blocked]", finalUrl: "[blocked]", statusLine: "Request blocked", rawBytes: 0, textBytes: 0, truncated: false, durationMs: 5, errorKind: "blocked-address" } });
     fetchRow(ui, "fetch-running", "https://maps.example.test/route?from=Siam&to=Asok&api_key=AIzaSyFixture123");
-  }, ready: (s, ui) => s.transcript.filter(entry => entry.kind === "tool").length === 4 && !/sk-live|AIzaSy/.test(ui.captureCharFrame()) },
+  }, ready: (s, ui) => s.transcript.filter(entry => entry.kind === "tool").length === 5 && !/sk-live|AIzaSy/.test(ui.captureCharFrame()) },
   { id: "web-search-line", title: "Hosted web search", description: "An answer that used hosted web search shows one compact line with its search count; an answer without search shows none.", noColorWidths: true, drive: async ui => {
     searchAnswer(ui, "search-two", "Rain is likely in Bangkok after 3 pm, so leave before 2:30 pm. ฝนตกช่วงบ่าย 🌧️", 2);
     searchAnswer(ui, "search-none", "The route from Siam to Asok takes about 12 minutes by BTS.", 0);
