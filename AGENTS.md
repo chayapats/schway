@@ -30,7 +30,8 @@ For implementation PRs, complete this loop before merging. In managed-worker mod
 1. Review the final diff against its issue before merging. Use independent spec-compliance and correctness reviews, and check each finding against the code before acting on it.
 2. Fix every valid finding regardless of severity. Record evidence for findings dismissed as incorrect or already addressed.
 3. Rebase onto the current target branch, regenerate affected screen-catalog goldens, and run `bun run typecheck` and the full `bun test` on the final HEAD. Review again any change made after the review.
-4. Merge once these conditions hold and existing user/repository authorization permits it. Otherwise preserve the PR and report the remaining blocker.
+4. Spend Greptile review credits only as `docs/agents/greptile.md` describes: batch issues into one PR, request one review with `@greptileai`, and skip docs-only PRs.
+5. Merge once these conditions hold and existing user/repository authorization permits it. Otherwise preserve the PR and report the remaining blocker.
 
 ### Triage labels
 
