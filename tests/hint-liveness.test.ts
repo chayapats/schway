@@ -282,7 +282,7 @@ const pagingFits = (screen: string, note: string): ChipAllowEntry => ({ screen, 
  * entry; an entry whose chip disappears or starts acting fails the test until it is deleted.
  */
 const CHIP_ALLOWLIST: readonly ChipAllowEntry[] = [
-  ...["auto-mode", "read-only-mode", "ask-mode", "grok-plan-error", "reasoning-chip-explicit", "reasoning-chip-provider-default", "reasoning-chip-advertised",
+  ...["auto-mode", "read-only-mode", "ask-mode", "grok-plan-error", "grok-quota-error", "reasoning-chip-explicit", "reasoning-chip-provider-default", "reasoning-chip-advertised",
     "reasoning-chip-unavailable", "command-palette-inserted", "thai-composer", "draft-restored", "draft-not-saved", "web-search-line", "stopped-streaming",
     "details-unavailable", "delete-session-busy", "recent-work-resume", "compaction-completed", "compaction-cancelled", "compaction-failed", "compaction-noop", "no-color", "startup-provider"].map(inspectNothing),
   { screen: "disconnected-search", chip: "↑↓ previous/next", reason: "single-item", note: "README matches once; `running-search` moves between several matches." },

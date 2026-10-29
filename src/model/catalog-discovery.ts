@@ -1,3 +1,4 @@
+import { GROK_QUOTA_ERROR } from "./grok-errors.ts";
 import { stripVTControlCharacters } from "node:util";
 import { resolveProviderCredential, selectOpenAITransport, selectXaiTransport, type OpenAIAuthPreference, type XaiAuthPreference } from "../auth/credentials.ts";
 import { createNativeCredentialStore, type CredentialStore, type CredentialTarget } from "../auth/store.ts";
@@ -224,7 +225,9 @@ export async function discoverModels(input: CatalogConnection & {
     const failure = input.signal?.aborted ? "Model discovery cancelled. Retry schway models list."
       : deadline.signal.aborted ? "Model discovery timed out after 5 seconds. Retry schway models list."
         : error instanceof Error ? error.message : "Model discovery failed. Retry schway models list.";
-    let message = input.signal?.aborted || deadline.signal.aborted ? failure : safeCatalogMessage(failure, secrets);
+    let message = input.signal?.aborted || deadline.signal.aborted ? failure
+      : catalog.route === "grok" && failure === GROK_QUOTA_ERROR ? redactSecrets(GROK_QUOTA_ERROR, secrets)
+        : safeCatalogMessage(failure, secrets);
     if (/HTTP (401|403)\b/.test(failure)) message += " Check credentials for this route; no billing fallback was used.";
     else if (/HTTP 429\b/.test(failure)) message += " Wait for the rate limit to reset, then retry schway models list.";
     else if (!/retry|sign in|pass --|set |unlock|select /i.test(message)) message += " Retry schway models list.";

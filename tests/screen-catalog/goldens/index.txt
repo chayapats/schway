@@ -28,6 +28,7 @@ grok-device-approval
 sign-in-browser-not-opened
 sign-in-timeout
 grok-plan-error
+grok-quota-error
 model-picker
 details-model
 model-picker-unconnected

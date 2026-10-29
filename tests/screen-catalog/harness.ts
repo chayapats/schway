@@ -1,3 +1,4 @@
+import { GROK_QUOTA_ERROR } from "../../src/model/grok-errors.ts";
 import { ConfigEditor } from "../../src/config/editing.ts";
 import { Database } from "bun:sqlite";
 import { openDraftStore } from "../../src/drafts/store.ts";
@@ -342,9 +343,9 @@ export async function buildScreen(screen: Screen, variant: Variant, harnessOptio
     onRuntimeEvent: event => { if (event.type === "tool.finished" && event.durationMs === undefined) activityTime += 1200; },
     agentClock: { now: () => activityTime, monotonicNow: () => activityTime, sleep: async (_ms, signal) => { if (screen.id.startsWith("retry-")) await stopped(signal); } },
     credentials: { store, grokLogin: async ({ device, signal, onApproval, onSaved }) => {
-      if (screen.id === "grok-plan-error") {
+      if (screen.id === "grok-plan-error" || screen.id === "grok-quota-error") {
         await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "fixture-access", obtainedAt: 1 })); onSaved?.();
-        return { ok: false, message: "Your Grok plan doesn't include API access. Use an xAI API key instead." };
+        return { ok: false, message: screen.id === "grok-quota-error" ? GROK_QUOTA_ERROR : "Your Grok plan doesn't include API access. Use an xAI API key instead." };
       }
       onApproval(device ? { kind: "device", verificationUri: "https://x.ai/device", userCode: "ABCD-EFGH" } : { kind: "browser" });
       await stopped(signal); return { ok: false, message: "Cancelled." };

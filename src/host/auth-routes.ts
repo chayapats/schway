@@ -315,6 +315,12 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
   if (/No ChatGPT subscription login|No Grok subscription login|expired.*no refresh token|no refresh token/i.test(text)) {
     return { ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) };
   }
+  if (valid.route === "grok" && /Grok usage limit reached/.test(text)) {
+    return { ...base, status: "quota-exceeded", nextAction: "Check https://grok.com/?_s=usage and wait before retrying this Grok subscription. API-key billing is never used as a fallback." };
+  }
+  if (valid.route === "grok" && /Grok access temporarily unavailable/.test(text)) {
+    return { ...base, status: "integration-unavailable", nextAction: "Grok access is temporarily unavailable. Retry later; API-key billing is never used as a fallback." };
+  }
   if (/Stored .* subscription login is invalid|revoked|rejected by the provider|rejected by xAI|denied|Plus\/Pro|membership|seat|entitlement|Your Grok plan doesn't include API access|HTTP 40[123]\b/i.test(text) ||
       status === 401 || status === 402 || status === 403) {
     const nextAction = valid.route === "codex"

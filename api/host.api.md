@@ -325,6 +325,8 @@ export interface HostCapabilities {
     // (undocumented)
     readonly hostedLookup: "disabled-only";
     // (undocumented)
+    readonly modelCatalog: "schway.host.model-catalog/v1";
+    // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
     readonly releaseContract: "schway.host.release/v2";
@@ -484,6 +486,16 @@ export interface HostLimits {
 }
 
 // @public
+export interface HostModelChoice {
+    // (undocumented)
+    readonly contextWindow?: number;
+    // (undocumented)
+    readonly id: string;
+    // (undocumented)
+    readonly recommended: boolean;
+}
+
+// @public
 export interface HostModelIdentity {
     // (undocumented)
     readonly id: string;
@@ -554,6 +566,19 @@ export type HostProgressEvent = {
     usage: ModelUsage;
     complete: boolean;
     transient: true;
+};
+
+// @public
+export type HostRouteModels = {
+    readonly status: "listed";
+    readonly route: HostAuthRoute;
+    readonly models: readonly HostModelChoice[];
+    readonly containsNoSecrets: true;
+} | {
+    readonly status: Exclude<HostAuthStatusCode, "configured-unverified">;
+    readonly route: HostAuthRoute;
+    readonly nextAction: string;
+    readonly containsNoSecrets: true;
 };
 
 // @public
@@ -749,6 +774,9 @@ export function isCredentialWriteRefused(error: unknown): error is Error;
 
 // @public
 export type JsonSchema = Record<string, unknown>;
+
+// @public
+export function listRouteModels(selection: Omit<HostAuthSelection, "model">): Promise<HostRouteModels>;
 
 // @public
 export function localExecutionBackend(workspaceRoot: string): ExecutionBackend;

@@ -87,6 +87,7 @@ test("packed release artifact installs without private source access and adverti
       releaseContract: "schway.host.release/v2",
       coreToolsContract: "schway.host.core-tools/v1",
       webToolsContract: "schway.host.web-tools/v1",
+      modelCatalog: "schway.host.model-catalog/v1",
       contextContract: "schway.host.context-policy/v1",
       toolContract: "schway.host.tool-policy/v1",
       sessionContract: "schway.host.durable-sessions/v1",
@@ -300,4 +301,20 @@ test("packed consumer admits vendor-neutral web tools with guarded untrusted res
     expect(result.results.map(item => item.isError)).toEqual([false, false, true]);
     for (const item of result.results.slice(0, 2)) expect(item.content).toContain("&lt;/untrusted_data&gt;");
   });
+}, 120_000);
+
+test("packed catalog consumer uses only the public API and selected subscription provider", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-catalog-")));
+  try {
+    const { consumer } = await packAndInstall(dir);
+    for (const route of ["codex", "grok"] as const) {
+      const unselected = route === "codex" ? "grok-subscription" : "codex-subscription";
+      const result = await packedConsumer(consumer, { action: "catalog", route },
+        `await Bun.plugin({name:'catalog-guard',setup(builder){
+          builder.onLoad({filter:/(?:tui|@opentui|providers[/\\\\](?:${unselected}|xai\\.ts|openai\\.ts|openai-compatible))/},()=>{throw new Error('catalog loaded unrelated runtime');});
+        }});`);
+      expect(result).toEqual({ result: { route, status: "listed", containsNoSecrets: true,
+        models: [{ id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: true, contextWindow: 64000 }] }, requests: 1, writes: 0 });
+    }
+  } finally { await rm(dir, { recursive: true, force: true }); }
 }, 120_000);

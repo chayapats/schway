@@ -1,3 +1,4 @@
+import { GROK_QUOTA_ERROR } from "../model/grok-errors.ts";
 import { APPROVAL_MODES, DEFAULT_APPROVAL_MODE, type ApprovalMode, type ApprovalRequest, type ApprovalDecision } from "../agent/approval.ts";
 import { approvalPreview, type ToolApproval } from "./tool-approval.ts";
 import { ignoredProjectApprovalNotice, projectConfigPath } from "../config/config.ts";
@@ -322,6 +323,7 @@ export abstract class ControllerCore {
   /** Append an actionable error line and mark the status as error. */
   fail(text: string, details?: string): void {
     if (details) this.retainNoticeDetails(details);
+    if (text.includes("Grok usage limit reached")) text = GROK_QUOTA_ERROR;
     if (text === "Your Grok plan doesn't include API access. Use an xAI API key instead.") text = "Your Grok plan doesn't include API access. Use an xAI API key instead · Alt+L sign in";
     this.transcript.push({
       id: this.nextId("err"),

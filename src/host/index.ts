@@ -21,6 +21,9 @@ export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRou
 /** Bounded device approval with opaque credential writes and secret-free terminal outcomes. */
 export type { HostDeviceSignInOptions, HostDeviceSignIn, HostDeviceSignInFailure, HostDeviceSignInOutcome, HostDeviceSignInStart } from "./device-sign-in.ts";
 export { beginDeviceSignIn } from "./device-sign-in.ts";
+/** Read-only account catalogs with bounded selectable models and safe route failures. */
+export type { HostModelChoice, HostRouteModels } from "./route-models.ts";
+export { listRouteModels } from "./route-models.ts";
 /** Quiesced native-state snapshot and validated restore for owned managed sessions. */
 export type {
   HostSessionSnapshot, HostSnapshotArtifact, HostSnapshotArtifactKind, HostSnapshotOptions, HostSnapshotQuarantineReason,
@@ -81,6 +84,7 @@ export interface HostCapabilities {
   readonly webToolsContract: "schway.host.web-tools/v1";
   readonly deviceSignInContract: "schway.host.device-sign-in/v1";
   readonly coreToolsContract: "schway.host.core-tools/v1";
+  readonly modelCatalog: "schway.host.model-catalog/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -275,6 +279,7 @@ const capabilities: HostCapabilities = Object.freeze({
   webToolsContract: "schway.host.web-tools/v1",
   deviceSignInContract: "schway.host.device-sign-in/v1",
   coreToolsContract: "schway.host.core-tools/v1",
+  modelCatalog: "schway.host.model-catalog/v1",
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */

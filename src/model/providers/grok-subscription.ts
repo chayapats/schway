@@ -1,7 +1,8 @@
 import { DeviceFlowError, deviceFlowExpiresAt, sleepDeviceFlow, validateDeviceVerificationUri, withinDeviceFlow, type DeviceFlowAuthorization } from "../../auth/device-flow.ts";
 import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, type CredentialStore } from "../../auth/store.ts";
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
-import { boundedCatalogFetch, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
+import { boundedCatalogFetch, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
+import { GROK_CHALLENGE_ERROR, GROK_QUOTA_ERROR } from "../grok-errors.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -36,6 +37,25 @@ export function grokRefreshFailedError(detail: string): string {
 }
 /** Plan rejection text shared with headless output; the TUI adds its own shortcut hint. */
 export const GROK_PLAN_ERROR = "Your Grok plan doesn't include API access. Use an xAI API key instead.";
+
+/** Classify API denials using only the bounded error code and challenge header, never response prose. */
+export async function subscriptionApiError(response: Response, signal?: AbortSignal): Promise<(Error & { status: number }) | undefined> {
+  if (response.headers.get("cf-mitigated") === "challenge") {
+    void response.body?.cancel().catch(() => {});
+    return Object.assign(new Error(GROK_CHALLENGE_ERROR), { status: 503 });
+  }
+  if (response.status !== 401 && response.status !== 403) return undefined;
+  let code: unknown;
+  try {
+    const bytes = await readModelCatalogBody(response, signal ?? AbortSignal.timeout(5_000), "Grok authorization");
+    const body: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (body && typeof body === "object" && !Array.isArray(body)) code = (body as Record<string, unknown>).code;
+  } catch { aborted(signal); /* Unreadable denials retain the existing status-based guidance. */ }
+  if (typeof code === "string" && code.length <= 256 && code.length > ":spending-limit".length && code.endsWith(":spending-limit")) {
+    return Object.assign(new Error(GROK_QUOTA_ERROR), { status: 429 });
+  }
+  return Object.assign(new Error(response.status === 401 ? grokRevokedSessionError() : GROK_PLAN_ERROR), { status: response.status });
+}
 function aborted(signal?: AbortSignal): void { if (signal?.aborted) throw new DOMException("Aborted", "AbortError"); }
 function positive(value: unknown, fallback: number): number { return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback; }
 function jwtExpiry(token: string): number | undefined {
@@ -359,13 +379,15 @@ export async function fetchDiscoveryCatalog(input: {
   const authorizedFetch: GrokFetch = async (url, init) => {
     const send = () => (input.fetch ?? fetch)(url, { ...init, signal: input.signal, redirect: "error", headers: { ...Object.fromEntries(new Headers(init?.headers)), Authorization: `Bearer ${accessToken}` } });
     let response = await send();
-    if (response.status === 401) {
-      void response.body?.cancel().catch(() => {});
+    let failure = await subscriptionApiError(response, input.signal ?? init?.signal ?? undefined);
+    if (failure?.status === 401) {
       try { accessToken = await getToken(accessToken); }
       catch (error) { authError = error; throw error; }
       input.signal.throwIfAborted();
       response = await send();
+      failure = await subscriptionApiError(response, input.signal ?? init?.signal ?? undefined);
     }
+    if (failure) { authError = failure; throw failure; }
     return response;
   };
   try {
@@ -383,17 +405,14 @@ export async function fetchSubscriptionModels(input: { store: CredentialStore; f
   const authorizedFetch: GrokFetch = async (url, init) => {
     const send = () => (input.fetch ?? fetch)(url, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers)), Authorization: `Bearer ${accessToken}` } });
     let response = await send();
-    if (response.status === 401) {
-      await response.body?.cancel();
+    let failure = await subscriptionApiError(response, input.signal ?? init?.signal ?? undefined);
+    if (failure?.status === 401) {
       try { accessToken = await refresher.getValidAccessToken(input.signal, accessToken); }
       catch (error) { aborted(input.signal); if (error instanceof Error) authError = error; throw error; }
       response = await send();
+      failure = await subscriptionApiError(response, input.signal ?? init?.signal ?? undefined);
     }
-    if (response.status === 401 || response.status === 403) {
-      await response.body?.cancel();
-      authError = new Error(response.status === 401 ? grokRevokedSessionError() : GROK_PLAN_ERROR);
-      throw authError;
-    }
+    if (failure) { authError = failure; throw failure; }
     return response;
   };
   try { return requireXaiModels(await fetchProviderModelList({ url: "https://api.x.ai/v1/models", signal: input.signal, label: "Grok", fetch: authorizedFetch })); }
