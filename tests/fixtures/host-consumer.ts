@@ -18,7 +18,7 @@ if (input.discovery) {
       if (request.systemPrompt !== "Trusted fixture operator") throw new Error("Lost trusted host prompt");
       if (!request.context.some(s => s.name === "host-evidence" && s.content === "fixture-source")) throw new Error("Lost supplied host context");
       if (request.hostedTools?.length) throw new Error("Unexpected hosted lookup");
-      if (!request.items.some(item => item.type === "user" && item.content[0]?.text === "โครงการแรก")) throw new Error("Lost native ancestry");
+      if (!request.items.some(item => item.type === "user" && item.content[0]?.type === "text" && item.content[0].text === "โครงการแรก")) throw new Error("Lost native ancestry");
       if (!input.reference && calls === 1) {
         yield { type: "message_complete", message: { type: "assistant", id: crypto.randomUUID(), content: [{ type: "tool_call", id: "read-fixture", name: "read_note", arguments: {} }] } };
       } else {

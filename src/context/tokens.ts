@@ -19,7 +19,7 @@ export function estimateTextTokens(text: string): number {
 export function estimateItemTokens(item: ConversationItem): number {
   if (item.type === "user") {
     return item.content.reduce(
-      (sum, block) => sum + estimateTextTokens(block.text),
+      (sum, block) => sum + (block.type === "text" ? estimateTextTokens(block.text) : 1024 + Math.ceil(block.width * block.height / 256)),
       0,
     );
   }

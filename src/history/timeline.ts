@@ -89,7 +89,7 @@ export function buildHistoryTimeline(read: HistoryRead, session: Pick<Session, "
     const attempts = starts.get(user.id) ?? [];
     const first = attempts[0];
     const excerpt = first ? { text: first.task, truncated: !!first.taskTruncated, hidden: !!first.taskHidden }
-      : historyExcerpt(user.type === "user" ? user.content.map(block => block.text).join(" ") : "", secrets);
+      : historyExcerpt(user.type === "user" ? user.content.filter(block => block.type === "text").map(block => block.text).join(" ") : "", secrets);
     const turn: HistoryTurn = { turnId: user.id, ordinal: index + 1, ...(excerpt.text ? { task: excerpt.text } : {}), taskTruncated: excerpt.truncated, taskHidden: excerpt.hidden,
       evidence: attempts.length ? "recorded" : "missing", activeMs: 0, unknownDurations: 0, incompleteAttempts: 0, attempts: [], toolResults: 0, failedTools: 0,
       commands: { total: 0, exitZero: 0, nonzero: 0, unknown: 0, truncated: false, items: [] }, files: { total: 0, truncated: false, items: [] }, oversized: 0,

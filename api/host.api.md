@@ -98,6 +98,9 @@ export function createAuthRouteModel(selection: HostAuthSelection): Promise<Mode
 export function createHost(options: HostOptions): Promise<HostRuntime>;
 
 // @public
+export function createImageContent(reference: string, mediaType: ImageContent["mediaType"], data: Uint8Array): ImageContent;
+
+// @public
 export function createWebFetchTool(options?: WebFetchOptions): ToolDefinition;
 
 // @public
@@ -268,7 +271,7 @@ export interface HostAuthReadiness {
 export type HostAuthRoute = "codex" | "grok";
 
 // @public
-export type HostAuthRunResult = {
+export type HostAuthRunResult = HostImagesRejected | {
     outcome: "completed";
     input: HostEntryReference;
     result: HostEntryReference;
@@ -326,6 +329,9 @@ export interface HostCapabilities {
     readonly hostedLookup: "disabled-only";
     // (undocumented)
     readonly modelCatalog: "schway.host.model-catalog/v1";
+    readonly imageInputContract: "schway.host.image-input/v1";
+    // (undocumented)
+    readonly imageInputRoutes: readonly HostImageRouteCapability[];
     // (undocumented)
     readonly observedInference: "not-checked";
     // (undocumented)
@@ -346,7 +352,7 @@ export interface HostCapabilities {
 }
 
 // @public
-export function hostCapabilities(): HostCapabilities;
+export function hostCapabilities(probes?: readonly HostImageProbeRecord[]): HostCapabilities;
 
 // @public
 export interface HostClock {
@@ -466,7 +472,68 @@ export class HostError extends Error {
 }
 
 // @public
+export class HostImageError extends Error {
+    constructor(code: "image-count-limit" | "image-byte-limit" | "image-pixel-limit" | "invalid-image" | "images-unavailable" | "images-unsupported");
+    // (undocumented)
+    readonly code: "image-count-limit" | "image-byte-limit" | "image-pixel-limit" | "invalid-image" | "images-unavailable" | "images-unsupported";
+}
+
+// @public
+export interface HostImageOptions {
+    // (undocumented)
+    readonly probes: readonly HostImageProbeRecord[];
+    // (undocumented)
+    readonly resolve: HostImageResolver;
+}
+
+// @public
+export interface HostImageProbeRecord {
+    // (undocumented)
+    readonly contract: "schway.host.image-input/v1";
+    // (undocumented)
+    readonly model: string;
+    // (undocumented)
+    readonly revision: string;
+    // (undocumented)
+    readonly route: HostImageRoute;
+    // (undocumented)
+    readonly testedAt: string;
+    // (undocumented)
+    readonly verdict: "pass" | "unsupported" | "inconclusive";
+}
+
+// @public
+export type HostImageResolver = (image: Readonly<ImageContent>, signal?: AbortSignal) => Promise<Uint8Array | null>;
+
+// @public
+export type HostImageRoute = "codex" | "grok";
+
+// @public
+export interface HostImageRouteCapability {
+    // (undocumented)
+    readonly passedModels: readonly string[];
+    // (undocumented)
+    readonly route: HostImageRoute;
+    // (undocumented)
+    readonly source: "embedder-probe-record";
+}
+
+// @public
+export interface HostImagesRejected {
+    // (undocumented)
+    readonly input?: HostEntryReference;
+    // (undocumented)
+    readonly model: HostModelIdentity;
+    // (undocumented)
+    readonly outcome: "images-unsupported" | "images-unavailable";
+    // (undocumented)
+    readonly usage: HostRunUsage;
+}
+
+// @public
 export interface HostInput {
+    // (undocumented)
+    images?: readonly ImageContent[];
     // (undocumented)
     text: string;
 }
@@ -517,6 +584,8 @@ export interface HostOptions {
     };
     // (undocumented)
     homeDirectory: string;
+    // (undocumented)
+    images?: HostImageOptions;
     // (undocumented)
     limits: HostLimits;
     // (undocumented)
@@ -606,12 +675,13 @@ export interface HostRunError {
 // @public
 export interface HostRunOptions {
     readonly clock?: HostClock;
+    readonly imageRoute?: HostImageRoute;
     readonly onProgress?: (event: HostProgressEvent) => void;
     readonly signal?: AbortSignal;
 }
 
 // @public
-export type HostRunResult = {
+export type HostRunResult = HostImagesRejected | {
     outcome: "completed";
     input: HostEntryReference;
     result: HostEntryReference;
@@ -767,6 +837,27 @@ export type HostSnapshotValidation = {
 };
 
 // @public
+export const IMAGE_INPUT_CONTRACT: "schway.host.image-input/v1";
+
+// @public
+export interface ImageContent {
+    // (undocumented)
+    byteLength: number;
+    // (undocumented)
+    height: number;
+    // (undocumented)
+    mediaType: "image/png" | "image/jpeg";
+    // (undocumented)
+    reference: string;
+    // (undocumented)
+    sha256: string;
+    // (undocumented)
+    type: "image";
+    // (undocumented)
+    width: number;
+}
+
+// @public
 export function isCleanupUncertain(error: unknown): boolean;
 
 // @public
@@ -780,6 +871,24 @@ export function listRouteModels(selection: Omit<HostAuthSelection, "model">): Pr
 
 // @public
 export function localExecutionBackend(workspaceRoot: string): ExecutionBackend;
+
+// @public
+export const MAX_IMAGE_BYTES: number;
+
+// @public
+export const MAX_IMAGE_DIMENSION = 2048;
+
+// @public
+export const MAX_IMAGE_PIXELS: number;
+
+// @public
+export const MAX_INPUT_IMAGES = 5;
+
+// @public
+export const MAX_REQUEST_IMAGE_BYTES: number;
+
+// @public
+export const MAX_REQUEST_IMAGES = 50;
 
 // @public
 export const MAX_SNAPSHOT_ARTIFACT_BYTES: number;
@@ -809,6 +918,7 @@ export interface ModelRequest {
     // (undocumented)
     context: readonly ContextSection[];
     hostedTools?: readonly HostedTool[];
+    imageData?: ReadonlyMap<string, Uint8Array>;
     // (undocumented)
     items: readonly ConversationItem[];
     // (undocumented)
@@ -988,7 +1098,7 @@ export interface ToolTelemetry {
 }
 
 // @public
-export type UserContent = TextContent;
+export type UserContent = TextContent | ImageContent;
 
 // @public
 export interface UserMessage {

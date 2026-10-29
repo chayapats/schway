@@ -1,3 +1,4 @@
+import { HostImageError } from "../../conversation/images.ts";
 import type {
   AssistantContent,
   AssistantMessage,
@@ -109,9 +110,10 @@ export function toWireRequest(
   const input: unknown[] = [];
   for (const item of request.items) {
     if (item.type === "user") {
+      if (item.content.some(block => block.type === "image")) throw new HostImageError("images-unsupported");
       input.push({
         role: "user",
-        content: item.content.map((block) => block.text).join(""),
+        content: item.content.filter(block => block.type === "text").map(block => block.text).join(""),
       });
     } else if (item.type === "assistant") {
       input.push({

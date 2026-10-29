@@ -1,4 +1,5 @@
 import { DeviceFlowError, deviceFlowExpiresAt, sleepDeviceFlow, validateDeviceVerificationUri, withinDeviceFlow, type DeviceFlowAuthorization } from "../../auth/device-flow.ts";
+import { imageInputPart } from "../../conversation/images.ts";
 import { abortableCatalogOperation, boundedCatalogFetch, fetchProviderModelListResult, type ModelListResult } from "../model-list.ts";
 import { assertThinking } from "../thinking.ts";
 import type {
@@ -1037,7 +1038,7 @@ export function toCodexResponsesBody(
     stream: true,
     ...(reasoning !== undefined ? { reasoning } : {}),
     instructions: toCodexInstructions(request),
-    input: toCodexInput(request.items),
+    input: toCodexInput(request.items, request.imageData),
     include: ["reasoning.encrypted_content"],
     ...(request.tools && request.tools.length > 0 ? { tools: toCodexTools(request.tools) } : {}),
   };
@@ -1212,13 +1213,13 @@ function toCodexTools(tools: readonly ModelTool[]): Array<Record<string, unknown
 }
 
 /** Convert Schway conversation items to Responses input, preserving opaque codex/openai metadata. */
-function toCodexInput(items: readonly ConversationItem[]): unknown[] {
+function toCodexInput(items: readonly ConversationItem[], imageData?: ReadonlyMap<string, Uint8Array>): unknown[] {
   const input: unknown[] = [];
   for (const item of items) {
     if (item.type === "user") {
       input.push({
         role: "user",
-        content: item.content.map((block) => ({ type: "input_text", text: block.text })),
+        content: item.content.map(block => imageInputPart(block, imageData)),
       });
       continue;
     }

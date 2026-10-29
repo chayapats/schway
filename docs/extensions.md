@@ -98,7 +98,8 @@ after an intentional public contract change.
 | `ToolOutputChunk` | A stdout or stderr chunk emitted while a tool is running. |
 | `ToolResult` | Model-facing outcome linked to a tool-call id, with errors marked explicitly. |
 | `ToolTelemetry` | Harness-measured timing of one tool call from scheduler start to settlement, in whole milliseconds; never sent to a provider. |
-| `UserContent` | Content accepted in user messages, currently limited to plain text. |
+| `ImageContent` | Sanitized PNG/JPEG reference and bounded metadata; no persisted image bytes. |
+| `UserContent` | Text or bounded image references accepted in user messages. |
 | `UserMessage` | Identified user input stored in session history and sent to the model. |
 | `Workspace` | Workspace directories whose primary root anchors relative tool paths, with launch location and optional extra roots. |
 

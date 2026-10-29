@@ -1,3 +1,4 @@
+import { validateImageContent } from "../conversation/images.ts";
 import { isDeepStrictEqual } from "node:util";
 import { LOCAL_DATE_SECTION_NAME } from "../context/date-section.ts";
 import type { ContextSection } from "../context/manager.ts";
@@ -64,6 +65,7 @@ export function validateItems(value: unknown): asserts value is ConversationItem
     metadata(item.providerMetadata);
     if (!Array.isArray(item.content)) throw new Error("message content must be native content blocks");
     for (const block of item.content) {
+      if (item.type === "user" && block?.type === "image") { validateImageContent(block); continue; }
       object(block, ["type", "text", "id", "name", "arguments", "providerMetadata"]);
       if (block.type === "text" || (item.type === "assistant" && block.type === "thinking")) {
         object(block, block.type === "text" ? ["type", "text"] : ["type", "text", "providerMetadata"]);

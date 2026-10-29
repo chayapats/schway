@@ -27,6 +27,8 @@ export interface ModelRequest {
   systemPrompt: string;
   context: readonly ContextSection[];
   items: readonly ConversationItem[];
+  /** Transient, freshly resolved image bytes keyed by SHA-256; never part of durable conversation data. */
+  imageData?: ReadonlyMap<string, Uint8Array>;
   tools?: readonly ModelTool[];
   /** Hosted tools Schway chose for this session after extension hooks ran; an adapter that cannot honor an entry ignores it. */
   hostedTools?: readonly HostedTool[];

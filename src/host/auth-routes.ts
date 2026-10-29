@@ -83,6 +83,7 @@ export interface HostAuthDescription {
 
 /** Terminal observation for a route-bound run with safe auth detail on failures. */
 export type HostAuthRunResult =
+  | import("./image-input.ts").HostImagesRejected
   | { outcome: "completed"; input: import("./index.ts").HostEntryReference; result: import("./index.ts").HostEntryReference;
       message: import("../conversation/types.ts").AssistantMessage; observedInference: "observed"; usage: import("./index.ts").HostRunUsage }
   | { outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded"; input: import("./index.ts").HostEntryReference; auth: HostAuthReadiness; usage: import("./index.ts").HostRunUsage };

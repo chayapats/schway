@@ -9,7 +9,7 @@ export type { ContextSection } from "../context/manager.ts";
 /** Native conversation and tool descriptions accepted by request hooks, without provider wire types. */
 export type {
   AssistantContent, AssistantMessage, ConversationItem, ProviderMetadata, TextContent,
-  ThinkingContent, ToolCallContent, ToolResult, UserContent, UserMessage,
+  ImageContent, ThinkingContent, ToolCallContent, ToolResult, UserContent, UserMessage,
 } from "../conversation/types.ts";
 /** Harness-measured model-call and tool-call telemetry carried by assistant messages and tool results. */
 export type { AssistantTelemetry, ToolTelemetry } from "../conversation/types.ts";

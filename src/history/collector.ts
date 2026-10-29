@@ -48,7 +48,7 @@ export function historyTurnIdentity(session: Pick<Session, "items" | "entries" |
   const entry = session.entries.find(candidate => candidate.item.id === user.id);
   if (!entry) return undefined;
   const identity: HistoryTurnIdentity = { sessionId: session.rootId, turnId: user.id, ordinal: users.length, branchId: session.activeBranchId,
-    parentId: entry.parentId, workspaceRoot, mode, task: user.content.map(block => block.text).join(" ") };
+    parentId: entry.parentId, workspaceRoot, mode, task: user.content.filter(block => block.type === "text").map(block => block.text).join(" ") };
   return isHistorySessionId(identity.sessionId) && isHistoryId(identity.turnId) && isHistoryId(identity.branchId) && isHistoryId(identity.parentId) && isHistoryRoot(workspaceRoot) ? identity : undefined;
 }
 

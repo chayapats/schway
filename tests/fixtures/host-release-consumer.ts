@@ -129,7 +129,7 @@ if (input.action === "capabilities") {
   } as unknown as HostOptions);
   const failingSession = await failing.createSession();
   const rejected = await failingSession.submitWithRoute({ text: "rejected probe" });
-  if (rejected.outcome !== "completed") {
+  if ("auth" in rejected) {
     if (rejected.auth.status !== "rejected") throw new Error(`Expected rejected, got ${rejected.auth.status}`);
     if (rejected.auth.route !== route) throw new Error("Failure switched route");
     if (JSON.stringify(rejected).includes(`${route}-release-token`)) throw new Error("Token leaked into failure");
@@ -151,7 +151,7 @@ if (input.action === "capabilities") {
   } as unknown as HostOptions);
   const quotaSession = await quotaHost.createSession();
   const quota = await quotaSession.submitWithRoute({ text: "quota probe" });
-  if (quota.outcome !== "completed") {
+  if ("auth" in quota) {
     if (quota.auth.status !== "quota-exceeded") throw new Error(`Expected quota-exceeded, got ${quota.auth.status}`);
     if (quota.auth.route !== route) throw new Error("Quota switched route");
   } else throw new Error("Expected quota failure");

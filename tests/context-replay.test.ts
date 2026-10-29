@@ -157,7 +157,7 @@ test("a large earlier-turn result is sent in full during its turn and shortened,
       let summaryInput = "";
       const summarizer = createScriptedModel({ responses: [request => {
         const first = request.items[0];
-        summaryInput = first?.type === "user" ? first.content[0]!.text : "";
+        summaryInput = first?.type === "user" && first.content[0]?.type === "text" ? first.content[0].text : "";
         return { text: "summary" };
       }] });
       const record = await contextManager.compact(session, summarizer, { reason: "manual" });

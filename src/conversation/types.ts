@@ -25,8 +25,19 @@ export interface ToolCallContent {
   providerMetadata?: ProviderMetadata;
 }
 
-/** Content accepted in user messages, currently limited to plain text. */
-export type UserContent = TextContent;
+/** Sanitized PNG/JPEG held by an embedder-owned reference; native history never contains its bytes. */
+export interface ImageContent {
+  type: "image";
+  reference: string;
+  mediaType: "image/png" | "image/jpeg";
+  byteLength: number;
+  width: number;
+  height: number;
+  sha256: string;
+}
+
+/** Text or bounded image references accepted in user messages. */
+export type UserContent = TextContent | ImageContent;
 /** Allowed assistant content block: text, reasoning, or a requested tool invocation. */
 export type AssistantContent = TextContent | ThinkingContent | ToolCallContent;
 

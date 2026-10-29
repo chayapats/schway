@@ -224,7 +224,7 @@ for (const route of ["codex", "grok"] as const) {
       const session = await host.createSession();
       const run = await session.submitWithRoute({ text: "rejected" });
       expect(run.outcome).toBe("error");
-      if (run.outcome !== "completed") {
+      if ("auth" in run) {
         expect(run.auth.status).toBe("rejected");
         expect(run.auth.route).toBe(route);
         expect(JSON.stringify(run)).not.toContain("rejected-token-sentinel");
@@ -245,7 +245,7 @@ for (const route of ["codex", "grok"] as const) {
       const session = await host.createSession();
       const run = await session.submitWithRoute({ text: "quota" });
       expect(run.outcome).toBe("error");
-      if (run.outcome !== "completed") {
+      if ("auth" in run) {
         expect(run.auth.status).toBe("quota-exceeded");
         expect(JSON.stringify(run)).not.toContain("quota-token");
       }
@@ -263,7 +263,7 @@ for (const route of ["codex", "grok"] as const) {
       const session = await host.createSession();
       const run = await session.submitWithRoute({ text: "integration" });
       expect(run.outcome).toBe("error");
-      if (run.outcome !== "completed") {
+      if ("auth" in run) {
         expect(run.auth.status).toBe("integration-unavailable");
         expect(JSON.stringify(run)).not.toContain("integration-token-sentinel");
       }
@@ -395,7 +395,7 @@ test("route isolation keeps identities separate and never falls back to API keys
     const session = await host.createSession();
     const run = await session.submitWithRoute({ text: "isolated" });
     expect(run.outcome).toBe("error");
-    if (run.outcome !== "completed") {
+    if ("auth" in run) {
       expect(run.auth.route).toBe("codex");
       expect(run.auth.model).toBe("gpt-5.4");
       expect(run.auth.status).toBe("rejected");

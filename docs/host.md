@@ -44,7 +44,7 @@ Every path is explicit and absolute. Workspace and home must already be readable
 
 Opening a managed reference validates its saved workspace and attached roots before native torn-tail repair, branch selection or interrupted-call settlement can write. A mismatched identity is rejected with the original artifact bytes preserved. A valid owner can still reopen through ordinary native recovery.
 
-`submit` accepts nonempty text up to `maxInputChars`, appends and flushes a native user entry before publishing acceptance, then calls the supplied provider-independent `Model` through the native loop. Tool definitions are cloned/validated at startup and use the existing scheduler. The registry is exact: an empty registry advertises and executes zero function tools, and a narrow registry exposes only admitted definitions. No shell/edit/write/fetch, `activate_skill` or provider adapter is added implicitly by loop startup, extensions, context preparation, retry, overflow recovery or reopened sessions. An explicitly admitted `activate_skill` is rebound per session to the current context manager so its policy still applies; unadmitted calls fail as `Unknown tool` without execution. Provider-hosted lookup is forced off (`hostedLookup: "off"`); request builders and adapters never attach search after hooks or during compaction/preflight/replay when off. Read-only approval applies after hooks to effective arguments but is not isolation; the trusted host owns resource-scoped connector implementations. Relative tool paths retain Schway canonical primary-workspace-root semantics; no independent Jit path model is introduced. Schway's own core tools are available only through the explicit core-tools contract below.
+`submit` accepts nonempty text up to `maxInputChars` and optional bounded image references, appends and flushes a native user entry before publishing acceptance, then calls the supplied provider-independent `Model` through the native loop. Tool definitions are cloned/validated at startup and use the existing scheduler. The registry is exact: an empty registry advertises and executes zero function tools, and a narrow registry exposes only admitted definitions. No shell/edit/write/fetch, `activate_skill` or provider adapter is added implicitly by loop startup, extensions, context preparation, retry, overflow recovery or reopened sessions. An explicitly admitted `activate_skill` is rebound per session to the current context manager so its policy still applies; unadmitted calls fail as `Unknown tool` without execution. Provider-hosted lookup is forced off (`hostedLookup: "off"`); request builders and adapters never attach search after hooks or during compaction/preflight/replay when off. Read-only approval applies after hooks to effective arguments but is not isolation; the trusted host owns resource-scoped connector implementations. Relative tool paths retain Schway canonical primary-workspace-root semantics; no independent Jit path model is introduced. Schway's own core tools are available only through the explicit core-tools contract below.
 
 `maxTurns` is an integer 1–100, `maxConcurrentTools` 1–32, `contextWindow` 1–2,000,000 and `maxInputChars` 1–1,000,000. `deadlineMs` is an integer 1–86,400,000 (default 300,000) and `maxAttempts` is an integer 1–10 (default 3). These are finite admission bounds; malformed, non-integer or unlimited values fail with `invalid-options` before any session or model call. Retry backoff and overflow/compaction recovery count against the run deadline. A supplied abort signal, `HostRunOptions.signal`, session `cancel()` and the deadline are cooperative; synchronous extension code stays outside hard-preemption guarantees. The base `close` methods reject `HostError` code `busy` during accepted work or session opening and never abort or settle an admitted run; call `cancel()` first, await settlement, then close. Close is idempotent; a closed handle cannot submit or read again. `cancel()` is safe to repeat and safe when idle.
 
@@ -100,6 +100,127 @@ Reopen constructs context from the current host options, including stricter opti
 ## Tool policy and hosted lookup
 
 `tools.policy` is `"exact"` with `hostedLookup: "off"`. Any other policy, a missing `hostedLookup`, or malformed/duplicate/unsupported definitions fail at `createHost` before any session or model call. Unknown tools called by a model settle as `isError` tool results (`Unknown tool: <name>`) without execution; the scheduler never runs unadmitted code. Before-model hooks may only select an unchanged subset of admitted tools (`validateTools`); attempts to add tools or set `hostedTools` fail the turn before inference. Before-tool hooks may replace arguments, but replacements are revalidated and approval (`read-only`/`ask`) applies to the effective post-hook arguments. `activate_skill` is never injected; admit it explicitly to bind per-session activation to the current context manager, where the same discovery policy still governs direct and restored activation. Requested restrictions that cannot be honored fail before inference. See ADR0012 and `tests/host-tool-policy.test.ts`.
+
+## Reference-only image input
+
+`imageInputContract: "schway.host.image-input/v1"` is additive; `RELEASE_CONTRACT`
+and `releaseContract` remain `schway.host.release/v2`. PDF input stays text-extracted
+by the embedder; native PDF, audio and video parts are unsupported.
+
+```ts
+import { createImageContent, createHost, hostCapabilities } from "schway/host";
+
+// Jit owns sanitization, authorization, deletion, storage and send auditing.
+// Read an already re-encoded PNG/JPEG derivative of at most 2048 px per side.
+const image = createImageContent("attachment:abc@r1", "image/png", sanitizedBytes);
+const images = {
+  probes: reviewedProbeRecords, // Explicit evidence for this exact route/model.
+  async resolve(reference, signal) {
+    // Recheck the live attachment, scope and authority on every call.
+    // Return null after deletion; Schway never caches this result.
+    return attachmentStore.readLiveDerivative(reference.reference, signal);
+  },
+};
+console.log(hostCapabilities(images.probes).imageInputRoutes);
+const host = await createHost({ ...hostOptions, images });
+const session = await host.createSession();
+const result = await session.submitWithRoute({ text: "Describe the image", images: [image] });
+if (result.outcome === "images-unsupported") {
+  // Jit can say: "This route can't see images yet."
+}
+```
+
+The public additions are:
+
+```ts
+interface ImageContent {
+  type: "image";
+  reference: string;
+  mediaType: "image/png" | "image/jpeg";
+  byteLength: number;
+  width: number;
+  height: number;
+  sha256: string;
+}
+interface HostInput { text: string; images?: readonly ImageContent[] }
+createImageContent(reference: string, mediaType: ImageContent["mediaType"], data: Uint8Array): ImageContent;
+type HostImageResolver = (image: Readonly<ImageContent>, signal?: AbortSignal) => Promise<Uint8Array | null>;
+interface HostImageOptions { readonly probes: readonly HostImageProbeRecord[]; readonly resolve: HostImageResolver }
+interface HostImageProbeRecord {
+  readonly contract: "schway.host.image-input/v1";
+  readonly route: "codex" | "grok";
+  readonly model: string;
+  readonly testedAt: string;
+  readonly revision: string;
+  readonly verdict: "pass" | "unsupported" | "inconclusive";
+}
+hostCapabilities(probes?: readonly HostImageProbeRecord[]): HostCapabilities;
+```
+
+Set `HostOptions.images` to that resolver and reviewed evidence. Discovery exposes
+`imageInputRoutes: readonly { route: "codex" | "grok";
+source: "embedder-probe-record"; passedModels: readonly string[] }[]`.
+The default contains both routes with empty model lists. `HostRuntime.capabilities`
+uses the host's detached evidence. Discovery reads no credentials, resolves no images
+and makes no live calls. Duplicate route/model records and malformed evidence are
+rejected as `HostError("invalid-options")`. Evidence is trusted embedder configuration,
+not a Schway attestation of an account's present support. The embedder chooses when
+to invalidate or refresh it after account, route, model or adapter changes.
+
+`submitWithRoute` checks its bound route/model before durable acceptance or credential
+access. For a trusted supplied `Model`, use `submit(input, model, { imageRoute:
+"codex" | "grok" })` to identify the actual subscription route explicitly; the model ID
+must match a passing record. No route is inferred from the xAI provider name.
+A missing/mismatched/nonpassing record returns `{ outcome: "images-unsupported",
+model, usage }` with no input reference and no resolver/provider call, including replay of
+retained images on a later text-only submission. Other model transports have no host
+image admission path. Text is never substituted for an image silently.
+
+`MAX_INPUT_IMAGES` is 5; `MAX_IMAGE_BYTES` is 10 MiB; `MAX_IMAGE_DIMENSION` is 2048;
+`MAX_IMAGE_PIXELS` is 4,194,304. `MAX_REQUEST_IMAGES` is 50 and
+`MAX_REQUEST_IMAGE_BYTES` is 50 MiB across replay, checked before resolution.
+`HostImageError.code` distinguishes `image-count-limit`, `image-byte-limit`,
+`image-pixel-limit`, `invalid-image`, `images-unavailable` and `images-unsupported`.
+Malformed references, extra fields such as `data`, unsupported MIME, invalid sizes or
+headers fail with typed errors. Input metadata errors occur before acceptance;
+request-wide bounds or oversized resolver results can throw a typed error after
+acceptance, before the affected provider request. References use 1–128 ASCII identity
+characters (letters, numbers and `._:@/-`), never a URL containing image data.
+
+The helper inspects PNG IHDR or baseline/extended/progressive JPEG SOF dimensions
+without decoding pixels; it does not sanitize or certify a file. The embedder must
+re-encode and sanitize it first. On every model attempt and tool round, Schway asks
+the resolver again, validates byte length, dimensions and SHA-256, and passes detached
+bytes in transient `ModelRequest.imageData`, keyed by SHA-256. The Responses and Codex
+adapters map each image to `input_image` with a data URL and high detail; Grok uses
+the xAI Responses equivalent. Missing, revoked, replaced or unresolvable bytes return
+`{ outcome: "images-unavailable", input, model, usage }`, with no affected provider call or
+result. Cancellation/deadline outcomes retain precedence. Input remains accepted;
+callers must not retry it as a new unsent draft. Supplied models/resolvers remain
+trusted executable code and the embedder owns race fencing for deletion while a
+provider request is already in flight.
+
+Images contribute `1024 + ceil(width * height / 256)` estimated tokens each to native
+context pressure and compaction. This conservative deterministic estimate is not
+provider billing or quota evidence. Summarization receives a dimensions/MIME marker
+stating that image bytes are unavailable and content must not be inferred. Older
+visual evidence is consequently unavailable after its turn is compacted; recent
+turns retain their image references under the ordinary turn-boundary policy.
+
+The safer deletion design is **never persist bytes**. Only bounded references,
+metadata and hashes enter native history; request bytes and data URLs never enter
+session records, metadata, compaction input or snapshot artifacts. No image cache or
+`purgeInputImages` API is needed. Reopen and snapshot restore use the current resolver
+and current probe records; deleting Jit's derivative makes any retained reference
+unresolvable. Native format remains 4 with an additive user part; older Schway builds
+that reject image parts cannot resume image-bearing sessions. The embedder must still
+delete its own blobs/backups and use session retirement/deletion for derived model
+text when required; provider-held copies remain outside native deletion.
+
+The opt-in command is documented in [live checks](live-providers.md#image-input-probe).
+No passing evidence ships by default. Deterministic coverage in
+`tests/host-image-input.test.ts` and `tests/image-input-probe.test.ts` inspects production
+adapter bodies, snapshot/restored bytes, compaction and deletion between tool rounds.
 
 ## Auth routes and shared credential lifecycle
 
@@ -450,6 +571,22 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 
 | Export | Contract |
 | --- | --- |
+| `createImageContent` | Validate sanitized bytes and return a byte-free image reference. |
+| `HostImageError` | Typed image validation and transport rejection codes. |
+| `HostImageRoute` | Explicit Codex or Grok subscription image route. |
+| `HostImageProbeRecord` | Embedder-reviewed evidence for both image formats on one exact route/model. |
+| `HostImageResolver` | Fresh authorized lookup of embedder-owned sanitized image bytes. |
+| `HostImageOptions` | Explicit resolver and probe records captured at host creation. |
+| `HostImageRouteCapability` | Per-route passed models from explicit probe records. |
+| `HostImagesRejected` | Typed unsupported or unavailable image outcome without a result. |
+| `ImageContent` | Bounded PNG/JPEG reference and metadata without bytes. |
+| `IMAGE_INPUT_CONTRACT` | Independent reference-only image input contract version. |
+| `MAX_INPUT_IMAGES` | Per-input image count bound. |
+| `MAX_IMAGE_BYTES` | Per-image encoded byte bound. |
+| `MAX_IMAGE_DIMENSION` | Per-image width and height bound. |
+| `MAX_IMAGE_PIXELS` | Per-image pixel bound. |
+| `MAX_REQUEST_IMAGES` | Provider-request image count bound across replay. |
+| `MAX_REQUEST_IMAGE_BYTES` | Provider-request aggregate encoded image byte bound. |
 | `AssistantContent` | Native text, reasoning or tool-call block. |
 | `AssistantMessage` | Assembled native assistant response. |
 | `AssistantTelemetry` | Harness timing and reported model usage. |
@@ -503,7 +640,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostAuthSelection` | Explicit route/model binding without raw tokens. |
 | `HostAuthStatusCode` | Stable safe categories for readiness and failures. |
 | `HostCapabilities` | Static API features with no inference observation. |
-| `hostCapabilities` | Discover support without loading runtime or accounts. |
+| `hostCapabilities` | Discover support and caller-supplied image probe admissions without accounts or inference. |
 | `HostClock` | Injectable wall clock for deterministic backoff/deadline waits. |
 | `HostCompactionResult` | Durable native summary reference or explicit noop/error/cancelled/limit-exceeded result. |
 | `HostCredentialReference` | Opaque credential account and label. |
@@ -518,7 +655,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostDeviceSignInStart` | Pending approval, busy route or a safe startup failure. |
 | `HostEntryReference` | Exact native entry in a selected session branch. |
 | `HostError` | Safe typed startup/lifecycle/reference rejection. |
-| `HostInput` | Bounded plain user text accepted before inference. |
+| `HostInput` | Bounded text and optional byte-free image references accepted before inference. |
 | `HostLimits` | Explicit finite loop/context/input/deadline/retry bounds. |
 | `HostModelIdentity` | Selected model identity carried on terminal outcomes. |
 | `HostOptions` | Trusted paths, context, tool policy and limits. |
@@ -570,7 +707,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `ToolOutputChunk` | Native live tool-output chunk. |
 | `ToolResult` | Persisted native tool outcome. |
 | `ToolTelemetry` | Harness tool timing metadata. |
-| `UserContent` | Native user plain-text content. |
+| `UserContent` | Native user text or bounded image references. |
 | `UserMessage` | Identified persisted user input. |
 | `validateSnapshotShape` | Offline snapshot shape and integrity check. |
 | `Workspace` | Canonical root/launch/attached-root identity. |
@@ -585,6 +722,6 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 
 `bun test tests/host.test.ts` exercises a disposable external consumer that imports only `schway/host`, executes a scripted native tool round and reopens/continues in a fresh process. `bun test tests/host-tool-policy.test.ts` proves empty/narrow registries stay authoritative across retry/overflow/reopen, hook-mutated calls pass approval on effective arguments, and selected-provider bodies carry no hosted search even where an allowlist would admit it. `bun test tests/host-auth-routes.test.ts` proves explicit Grok/Codex route binding with opaque credential references, safe readiness and failure categories, shared single-flight renewal with cancellation/logout fencing, route isolation with API-key bait, lazy selected-adapter loading and disabled SDK retries, all with protocol fixtures and fake stores. `bun test tests/host-run-control.test.ts` proves finite deadline/retry bounds, transient progress, honest usage, terminal `completed`/`error`/`cancelled`/`max_turns`/`limit_exceeded` outcomes, cooperative cancel/settle, late-callback fencing and released ownership, all with scripted models and fake clocks. `bun test tests/host-managed-session-data.test.ts` proves retire blocks reopen, deletion removes only owned conversation, history, draft, undo, metadata and lease artifacts with honest `deleted`, `already-deleted`, `partial` and `blocked` status, busy and unknown writers delete nothing, symlink and traversal sentinels never escape, delayed completions never resurrect history, and CLI deletion, history and undo behavior is preserved. Preload sentinels reject provider/TUI initialization and runtime loading during static discovery, and only the selected adapter loads for route-bound runs. Other fixtures cover unsupported policies/options, durable input before inference, write failures, busy handles, cancellation, detached result reads and native terminal outcomes.
 
-Run `bun run typecheck` and full `bun test`. The declaration builder emits both entries; `bun scripts/extension-api-report.ts` checks unchanged extension declarations and `bun scripts/extension-api-report.ts --host` checks the host report. Intentional host API changes use `--host --update`, followed by inventory/declaration tests. No live provider call or human credential setup belongs in these deterministic checks.
+Run `bun run typecheck` and full `bun test`. The declaration builder emits both entries; `bun scripts/extension-api-report.ts` checks extension declarations and `bun scripts/extension-api-report.ts --host` checks the host report. Intentional host API changes use `--host --update`, followed by inventory/declaration tests. No live provider call or human credential setup belongs in these deterministic checks.
 
 Disposable fixture roots are canonicalized, including macOS temporary-directory aliases. Isolated CLI subprocesses disable Bun's ordinary transpiler cache so state-write assertions inspect application effects rather than OS-specific runtime cache locations.
