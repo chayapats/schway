@@ -98,7 +98,8 @@ after an intentional public contract change.
 | `ToolOutputChunk` | A stdout or stderr chunk emitted while a tool is running. |
 | `ToolResult` | Model-facing outcome linked to a tool-call id, with errors marked explicitly. |
 | `ToolTelemetry` | Harness-measured timing of one tool call from scheduler start to settlement, in whole milliseconds; never sent to a provider. |
-| `UserContent` | Content accepted in user messages, currently limited to plain text. |
+| `ImageContent` | Sanitized PNG/JPEG reference and bounded metadata; no persisted image bytes. |
+| `UserContent` | Text or bounded image references accepted in user messages. |
 | `UserMessage` | Identified user input stored in session history and sent to the model. |
 | `Workspace` | Workspace directories whose primary root anchors relative tool paths, with launch location and optional extra roots. |
 
@@ -327,8 +328,10 @@ same way: Schway sets the optional `ModelRequest.hostedTools` (such as
 input never has the field, so a hook cannot add, remove or change it, and a
 result that sets `hostedTools` is rejected as an unsupported field with the
 usual extension error. It is attached even when no `beforeModel` hook is
-registered. `ExtensionModelRequest` therefore omits `hostedTools`. An extension
-tool named `web_search` keeps its name; Schway then sends no hosted search for
+registered. Transient `ModelRequest.imageData` is also excluded from hook inputs
+and accepted returns; hooks see image references in conversation items, never
+image bytes. `ExtensionModelRequest` therefore omits `hostedTools` and `imageData`.
+An extension tool named `web_search` keeps its name; Schway then sends no hosted search for
 that session. Public types include `BeforeAgentInput`, `BeforeAgentHook`,
 `ContextHook`, `BeforeModelHook`, `ExtensionModelRequest`, `ExtensionDenial`,
 `ContextSection`, `ConversationItem`, `UserMessage`, `ModelTool`, and

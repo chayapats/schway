@@ -26,6 +26,9 @@ import { MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_SNAPSHOT_SESSIONS, MAX_SNAPSHOT_TOTAL_
   type HostSnapshotRestoreResult, type HostSnapshotSession, type HostSnapshotValidation } from "./snapshot.ts";
 import type { Model, ModelRequest } from "../model/model.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
+import { getEffectiveConversation } from "../context/compaction.ts";
+import { HostImageError, MAX_IMAGE_BYTES, inputImages, requestImages, validateImageBytes } from "../conversation/images.ts";
+import { imageProbeRecords, type HostImageRoute } from "./image-input.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
@@ -64,7 +67,13 @@ function keys(value: unknown, allowed: readonly string[]): asserts value is Reco
 }
 
 function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: ContextSourcePolicy } {
-  keys(input, ["workspaceRoot", "sessionDirectory", "homeDirectory", "context", "tools", "limits", "auth"]);
+  keys(input, ["workspaceRoot", "sessionDirectory", "homeDirectory", "context", "tools", "limits", "auth", "images"]);
+  let images: HostOptions["images"];
+  if (input.images !== undefined) {
+    keys(input.images, ["probes", "resolve"]);
+    if (typeof input.images.resolve !== "function") throw new HostError("invalid-options");
+    images = { resolve: input.images.resolve, probes: imageProbeRecords(input.images.probes) };
+  }
   keys(input.context, ["policy", "systemPrompt", "sections", "sources", "discovery"]);
   keys(input.tools, ["policy", "definitions", "hostedLookup"]);
   keys(input.limits, ["maxTurns", "maxConcurrentTools", "contextWindow", "maxInputChars", "deadlineMs", "maxAttempts"]);
@@ -125,7 +134,7 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
     }
     // Env key/value rules live in validateAuthSelection so direct API users get the same rejection.
   }
-  return { sourcePolicy, workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
+  return { sourcePolicy, ...(images ? { images } : {}), workspaceRoot: input.workspaceRoot, sessionDirectory: input.sessionDirectory, homeDirectory: input.homeDirectory,
     context: { policy: input.context.policy, systemPrompt: input.context.systemPrompt, sections: structuredClone(input.context.sections), sources: structuredClone(sources) },
     tools: { policy: input.tools.policy, hostedLookup: "off" as const, definitions },
     limits: { ...input.limits, deadlineMs, maxAttempts },
@@ -194,16 +203,18 @@ function sleepWithAbort(clock: HostClock, ms: number, signal?: AbortSignal): Pro
 }
 
 /** Normalize the trailing submit argument while keeping the legacy AbortSignal form. */
-function normalizeRunArgs(signalOrOptions?: AbortSignal | HostRunOptions): { signal?: AbortSignal; clock?: HostClock; onProgress?: (event: HostProgressEvent) => void } {
+function normalizeRunArgs(signalOrOptions?: AbortSignal | HostRunOptions): HostRunOptions {
   if (signalOrOptions === undefined) return {};
   if (isAbortSignal(signalOrOptions)) return { signal: signalOrOptions };
-  if (!record(signalOrOptions) || Object.keys(signalOrOptions).some(key => !["signal", "clock", "onProgress"].includes(key))) throw new HostError("invalid-input");
+  if (!record(signalOrOptions) || Object.keys(signalOrOptions).some(key => !["signal", "clock", "onProgress", "imageRoute"].includes(key))) throw new HostError("invalid-input");
+  const imageRoute = signalOrOptions.imageRoute;
+  if (imageRoute !== undefined && imageRoute !== "codex" && imageRoute !== "grok") throw new HostError("invalid-input");
   const { signal, clock, onProgress } = signalOrOptions as HostRunOptions;
   if (signal !== undefined && !isAbortSignal(signal)) throw new HostError("invalid-input");
   if (clock !== undefined && (!record(clock) || typeof (clock as HostClock).now !== "function" || typeof (clock as HostClock).sleep !== "function" ||
       ((clock as HostClock).monotonicNow !== undefined && typeof (clock as HostClock).monotonicNow !== "function"))) throw new HostError("invalid-input");
   if (onProgress !== undefined && typeof onProgress !== "function") throw new HostError("invalid-input");
-  return { ...(signal ? { signal } : {}), ...(clock ? { clock: clock as HostClock } : {}), ...(onProgress ? { onProgress: onProgress as (event: HostProgressEvent) => void } : {}) };
+  return { ...(imageRoute ? { imageRoute } : {}), ...(signal ? { signal } : {}), ...(clock ? { clock: clock as HostClock } : {}), ...(onProgress ? { onProgress: onProgress as (event: HostProgressEvent) => void } : {}) };
 }
 
 /** Translate one runtime event into a transient host progress observation. */
@@ -278,11 +289,43 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       if (native.activeBranchId !== reference.branchId) { conflict = true; throw new HostError("conflict"); }
     };
     // Capture route identity and method once; trusted adapters retain their own private receiver.
-    const snapshotModel = (model: Model): Model => {
+    const imageState: { failure?: HostImageError } = {};
+    const getImageFailure = (): HostImageError | undefined => imageState.failure;
+    const imageSupported = (route: HostImageRoute | undefined, model: string) =>
+      options.images?.probes.some(probe => probe.route === route && probe.model === model && probe.verdict === "pass") === true;
+    const hasImages = (images: readonly import("../conversation/types.ts").ImageContent[]) =>
+      images.length > 0 || getEffectiveConversation(native.items).some(item => item.type === "user" && item.content.some(block => block.type === "image"));
+    const snapshotModel = (model: Model, imageRoute?: HostImageRoute): Model => {
       const provider = model.provider, id = model.id, stream = model.stream.bind(model);
       return Object.freeze({ provider, id, async *stream(request, call) {
         check();
-        for await (const event of stream(structuredCloneRequest(request), call)) yield structuredClone(event);
+        const detached = structuredCloneRequest(request);
+        try {
+          const images = requestImages(detached.items);
+          if (images.length) {
+            if (!imageSupported(imageRoute, id)) throw new HostImageError("images-unavailable");
+            const imageData = new Map<string, Uint8Array>();
+            for (const image of images) {
+              detached.signal?.throwIfAborted();
+              let data: Uint8Array | null;
+              try { data = await options.images!.resolve(Object.freeze({ ...image }), detached.signal); }
+              catch { detached.signal?.throwIfAborted(); throw new HostImageError("images-unavailable"); }
+              detached.signal?.throwIfAborted();
+              if (!(data instanceof Uint8Array)) throw new HostImageError("images-unavailable");
+              if (data.byteLength > MAX_IMAGE_BYTES) throw new HostImageError("image-byte-limit");
+              if (data.byteLength !== image.byteLength) throw new HostImageError("images-unavailable");
+              const bytes = new Uint8Array(data);
+              validateImageBytes(image, bytes);
+              imageData.set(image.sha256, bytes);
+            }
+            detached.imageData = imageData;
+          }
+        } catch (error) {
+          if (error instanceof HostImageError) imageState.failure = error;
+          throw error;
+        }
+        check();
+        for await (const event of stream(detached, call)) yield structuredClone(event);
       } } as Model);
     };
     let disposed = false, busy = false;
@@ -306,7 +349,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       message: sanitizeDiagnostic(message), model, contextPolicy: options.context.policy, toolPolicy: "exact" as const,
     });
     function validateRouteInput(input: unknown, signal?: AbortSignal): void {
-      if (!record(input) || Object.keys(input).some(key => key !== "text") || typeof (input as { text?: unknown }).text !== "string" ||
+      if (!record(input) || Object.keys(input).some(key => !["text", "images"].includes(key)) || typeof (input as { text?: unknown }).text !== "string" ||
           !(input as { text: string }).text.trim() || (input as { text: string }).text.length > options.limits.maxInputChars) throw new HostError("invalid-input");
       if (signal?.aborted) throw new HostError("invalid-input");
     }
@@ -367,19 +410,22 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
       async submit(input, model, signalOrOptions) {
         requireIdle();
         const runArgs = normalizeRunArgs(signalOrOptions);
-        if (!record(input) || Object.keys(input).some(key => key !== "text") || typeof input.text !== "string" ||
+        if (!record(input) || Object.keys(input).some(key => !["text", "images"].includes(key)) || typeof input.text !== "string" ||
             !input.text.trim() || input.text.length > options.limits.maxInputChars || !model ||
             typeof model.stream !== "function" || typeof model.provider !== "string" || !model.provider ||
             typeof model.id !== "string" || !model.id) throw new HostError("invalid-input");
         if (runArgs.signal?.aborted) throw new HostError("invalid-input");
         check();
-        const route = snapshotModel(model);
+        const images = inputImages(input.images);
+        const route = snapshotModel(model, runArgs.imageRoute);
         const identity = modelIdentity(route);
+        if (hasImages(images) && !imageSupported(runArgs.imageRoute, route.id)) return { outcome: "images-unsupported", model: identity, usage: usageSummary([], 0, false) };
+        delete imageState.failure;
         busy = true;
         const release = native.acquireOperation();
         try {
           const id = crypto.randomUUID();
-          try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }] }); }
+          try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }, ...images] }); }
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
           const inputReference = ref(id);
           let reason: HostRunResult["outcome"] = "error";
@@ -404,6 +450,11 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           lastMessage = bounded.message;
           try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
           if (conflict) throw new HostError("conflict");
+          const imageFailure = getImageFailure();
+          if (imageFailure && reason !== "completed" && reason !== "cancelled" && reason !== "limit_exceeded") {
+            if (imageFailure.code !== "images-unavailable") throw imageFailure;
+            return { outcome: "images-unavailable", input: inputReference, model: identity, usage: usageSummary(usages, totalMs, false) };
+          }
           if (reason === "completed") {
             check();
             const message = native.items.findLast(item => item.type === "assistant");
@@ -430,12 +481,17 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         const runArgs = normalizeRunArgs(signalOrOptions);
         validateRouteInput(input, runArgs.signal);
         if (!authSelection || !authBinding) throw new HostError("invalid-options");
+        if (runArgs.imageRoute !== undefined && runArgs.imageRoute !== authSelection.route) throw new HostError("invalid-input");
+        const images = inputImages(input.images);
         check();
+        const imageIdentity = { provider: authSelection.route === "codex" ? "codex-subscription" : "xai", id: authSelection.model };
+        if (hasImages(images) && !imageSupported(authSelection.route, authSelection.model)) return { outcome: "images-unsupported", model: imageIdentity, usage: usageSummary([], 0, false) };
+        delete imageState.failure;
         busy = true;
         const release = native.acquireOperation();
         try {
           const id = crypto.randomUUID();
-          try { native.append({ type: "user", id, content: [{ type: "text", text: (input as { text: string }).text }] }); }
+          try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }, ...images] }); }
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
           const inputReference = ref(id);
           const emptyUsage = (totalMs: number): HostRunUsage => usageSummary([], totalMs, false);
@@ -446,7 +502,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             return { outcome: "error", input: inputReference, auth: readiness, usage: emptyUsage(0) };
           }
           let route: Model;
-          try { route = snapshotModel(await createAuthRouteModel(authSelection)); }
+          try { route = snapshotModel(await createAuthRouteModel(authSelection), authSelection.route); }
           catch (error) {
             if (error instanceof HostError) throw error;
             return { outcome: "error", input: inputReference, auth: classifyAuthError(error, authSelection), usage: emptyUsage(0) };
@@ -481,6 +537,11 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           totalMs = bounded.totalMs;
           try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
           if (conflict) throw new HostError("conflict");
+          const imageFailure = getImageFailure();
+          if (imageFailure && terminal !== "completed" && terminal !== "cancelled" && terminal !== "limit_exceeded") {
+            if (imageFailure.code !== "images-unavailable") throw imageFailure;
+            return { outcome: "images-unavailable", input: inputReference, model: imageIdentity, usage: usageSummary(usages, totalMs, false) };
+          }
           if (terminal === "completed") {
             check();
             const message = native.items.findLast(item => item.type === "assistant");
@@ -611,7 +672,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
   }
 
   return Object.freeze({
-    capabilities: hostCapabilities(),
+    capabilities: hostCapabilities(options.images?.probes),
     ...(authBinding ? { auth: authBinding } : {}),
     async createSession() {
       requireOpen(); opening++;

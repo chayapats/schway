@@ -9,7 +9,7 @@ export default defineExtension((extension) => {
 
   extension.beforeAgent(({ message, context, signal }) => {
     signal.throwIfAborted();
-    const task = message.content.map(block => block.text).join("\n");
+    const task = message.content.filter(block => block.type === "text").map(block => block.text).join("\n");
     return { context: [...context, { name: "current-task", content: task }] };
   });
 

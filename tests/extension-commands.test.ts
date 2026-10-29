@@ -28,7 +28,7 @@ async function commandFixture(dir: string, body: string, secrets: string[] = [],
     ...loaded, extensions: loaded.runtime, home, workspace, session, sessionId: "commands", secrets,
     provider: "scripted", modelId: "scripted", contextManager: createContextManager(workspace, { home }),
     model: createScriptedModel({ responses: [request => {
-      requests.push(...request.items.filter(item => item.type === "user").flatMap(item => item.content.map(block => block.text)));
+      requests.push(...request.items.filter(item => item.type === "user").flatMap(item => item.content.filter(block => block.type === "text").map(block => block.text)));
       return { text: "normal loop response" };
     }] }), ...options,
   });

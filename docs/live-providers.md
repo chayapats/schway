@@ -299,3 +299,30 @@ actual OS-supervised worker, and request-body fixtures are covered by
 `bun test tests/live-cli.test.ts tests/live-process.test.ts tests/live-smoke.test.ts`.
 These fixtures exercise OpenAI high, Codex medium, OpenRouter medium, and Grok
 medium in both rounds, plus unsupported-choice refusal, without paid remote calls.
+
+## Image input probe
+
+`bun --no-env-file src/live/image-input-probe.ts --route codex --model <exact-id>`
+(or `--route grok`) prints a skipped report without reading credentials or making
+requests. Add `--enable-live` only when deliberately authorizing two subscription
+calls; optional `--timeout-ms` is 1000–300000, default 120000 for the whole probe.
+The probe uses the selected route's OS secure-store login, never environment API
+keys or another route. Both routes use a timeout and cumulative response-byte limit,
+no SDK retry, no tools and `store: false`. Grok also receives a 1024-token output cap.
+Codex rejects output-token caps, so it relies on the time and byte limits.
+
+The first call transcribes a bundled synthetic PNG; the second transcribes a JPEG
+while replaying the first image and response. A completed stream and exact six-digit
+transcription are required for both formats. The report contains only route, model,
+revision, date, format/status and HTTP status. It contains no image bytes, request,
+answer, endpoint, header or credential. Exit 0 means both checks passed, 2 means
+skipped, and 1 means failed or invalid arguments. Truncation, wrong answers, missing
+credentials, cancellation and transport/output bounds never produce passing evidence.
+
+An embedder reviews the resulting `record` and explicitly supplies it in
+`HostOptions.images.probes` (or to `hostCapabilities(records)` for discovery).
+A passing record applies only to that route/model. No live probe runs during host
+creation or submission, and no route ships with a passing image record. A subsequent
+account, model or adapter change may require fresh evidence under embedder policy.
+Do not run this check in deterministic tests; fixture fetches cover both production
+adapters in `tests/image-input-probe.test.ts`.

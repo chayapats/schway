@@ -42,6 +42,13 @@
   and safe auth statuses; catalog GETs perform no inference, renewal or credential
   writes, honor renewal fences, and support offline fetch fixtures. The composed
   release contract remains `schway.host.release/v2` (#432).
+- Add `schway.host.image-input/v1`: PNG/JPEG user content held by embedder-owned
+  references, typed count/byte/pixel limits, per-route/model probe admission,
+  transient Responses/Codex/Grok image mapping, and image context accounting.
+  Native sessions, compaction and snapshots never store image bytes. Add an
+  explicit opt-in subscription image probe; no live evidence is enabled by
+  default. PDF stays text-extracted by the embedder. The composed release
+  contract remains `schway.host.release/v2` (#436).
 
 - Add `schway.host.core-tools/v1`: `coreToolDefinitions(backend, options?)`
   exports `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls` from

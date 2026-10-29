@@ -640,3 +640,14 @@ marks pending tool calls interrupted and never replays them or claims to undo th
 Test coverage for this guide: [release verification](release-verification.md#sessions).
 
 See the [stability policy](stability.md) for compatibility promises.
+
+## Host image references
+
+Embedding applications may submit PNG/JPEG image references through
+[`schway.host.image-input/v1`](host.md#reference-only-image-input). Native format 4
+accepts this additive user part; native history, metadata and snapshots contain
+only bounded references, dimensions, byte counts and hashes, never image bytes.
+Every retained image is re-resolved with current embedder authorization before a
+model call. Compaction summarizes an explicit unavailable-image marker; it never
+resolves or inlines image bytes. Older builds that reject image parts cannot
+resume image-bearing histories. The CLI has no image composer in this change.

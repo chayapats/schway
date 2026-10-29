@@ -152,7 +152,7 @@ export function buildTranscriptFromSession(items: readonly SessionRecord[]): Tui
   };
   for (const item of items) {
     if (item.type === "user") {
-      const text = item.content.map((block) => block.text).join("");
+      const text = item.content.filter(block => block.type === "text").map(block => block.text).join("");
       if (text.length > 0) {
         transcript.push({ id: nextId("user"), sessionRecordId: item.id, kind: "user", text });
       }

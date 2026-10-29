@@ -1,3 +1,4 @@
+import { validateImageContent } from "../conversation/images.ts";
 import { appendFileSync, writeFileSync, renameSync, unlinkSync, openSync, readSync, closeSync, readFileSync, lstatSync, fsyncSync, writeSync } from "node:fs";
 import { mkdir, open, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
 import { openDraftStore } from "../drafts/store.ts";
@@ -293,6 +294,11 @@ function openPersisted(path: string, header: SessionHeader, state: BranchState, 
   const session = createSession([], extraRoots, {
     state,
     writeOperation(operation) {
+      if (operation.type === "branch_append") for (const entry of operation.entries) {
+        if (entry.item.type === "user") for (const part of entry.item.content) {
+          if (part.type === "image") validateImageContent(part);
+        }
+      }
       const hasUndo = operation.type === "branch_append" && operation.entries.some(entry => entry.item.type === "turn_undo");
       const nextVersion = hasUndo ? 4 : Math.max(version, 3);
       const prefix = version < nextVersion ? JSON.stringify({ type: "session_format", version: nextVersion }) + "\n" : "";
@@ -545,6 +551,9 @@ function toolTelemetry(value: unknown): ToolTelemetry | undefined {
 }
 
 function isUserContent(value: unknown): value is UserContent {
+  if (isPlainObject(value) && value.type === "image") {
+    try { validateImageContent(value); return true; } catch { return false; }
+  }
   return (
     isPlainObject(value) && value.type === "text" && typeof value.text === "string"
   );
@@ -661,7 +670,7 @@ export function inspectSessionTranscript(text: string, id: string, incomplete: b
   const items = branchAncestry(state, state.branches.get(state.activeBranchId)!.headId).map(entry => entry.item);
   if (preview) {
     const latestTask = items.findLast(item => item.type === "user");
-    if (latestTask?.type === "user") result.task = latestTask.content.map(block => block.text).join(" ");
+    if (latestTask?.type === "user") result.task = latestTask.content.filter(block => block.type === "text").map(block => block.text).join(" ");
   }
   result.state = incomplete ? "partial" : torn || pendingCalls(items).length > 0 ? "interrupted" : !items.length ? "empty" : version < SESSION_FORMAT_VERSION ? "legacy" : "ready";
   return result;
@@ -731,7 +740,7 @@ async function readWindow(path: string, limit: number): Promise<string> {
 function taskTitle(item: SessionRecord): string {
   if (item.type !== "user") return "";
   // Credential entry never becomes a user record; additionally exclude saved command/callback payloads.
-  return safeTaskText(item.content.map(block => block.text).join(" "));
+  return safeTaskText(item.content.filter(block => block.type === "text").map(block => block.text).join(" "));
 }
 
 function safeTaskText(text: string): string {

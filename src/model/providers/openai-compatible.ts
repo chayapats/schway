@@ -1,3 +1,4 @@
+import { HostImageError } from "../../conversation/images.ts";
 import { CREDENTIAL_HEADER_NAMES, redactSecrets } from "../../auth/secrets.ts";
 import type {
   AssistantContent,
@@ -181,9 +182,10 @@ function toChatMessages(request: ModelRequest): unknown[] {
   const messages: unknown[] = [{ role: "system", content: system }];
   for (const item of request.items) {
     if (item.type === "user") {
+      if (item.content.some(block => block.type === "image")) throw new HostImageError("images-unsupported");
       messages.push({
         role: "user",
-        content: item.content.map((block) => block.text).join(""),
+        content: item.content.filter(block => block.type === "text").map(block => block.text).join(""),
       });
       continue;
     }

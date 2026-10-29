@@ -9,7 +9,7 @@ export type { ContextSection } from "../context/manager.ts";
 /** Native conversation and tool descriptions accepted by request hooks, without provider wire types. */
 export type {
   AssistantContent, AssistantMessage, ConversationItem, ProviderMetadata, TextContent,
-  ThinkingContent, ToolCallContent, ToolResult, UserContent, UserMessage,
+  ImageContent, ThinkingContent, ToolCallContent, ToolResult, UserContent, UserMessage,
 } from "../conversation/types.ts";
 /** Harness-measured model-call and tool-call telemetry carried by assistant messages and tool results. */
 export type { AssistantTelemetry, ToolTelemetry } from "../conversation/types.ts";
@@ -41,8 +41,8 @@ export type BeforeAgentHook = (input: BeforeAgentInput) => void | { context: rea
 export type ContextHook = (input: { context: readonly ContextSection[]; readonly signal: AbortSignal }) =>
   void | readonly ContextSection[] | Promise<void | readonly ContextSection[]>;
 
-/** Detached provider-independent request with a cancellation signal owned by Schway; Schway adds hosted tools after hooks, so hooks never see or set them. */
-export interface ExtensionModelRequest extends Omit<ModelRequest, "hostedTools"> { readonly signal: AbortSignal }
+/** Detached provider-independent request with Schway-owned cancellation, excluding hosted tools and transient image bytes. */
+export interface ExtensionModelRequest extends Omit<ModelRequest, "hostedTools" | "imageData"> { readonly signal: AbortSignal }
 
 /** Replace ephemeral request data, deny the request, or retain the preceding hook's result. */
 export type BeforeModelHook = (request: ExtensionModelRequest) =>

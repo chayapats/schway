@@ -82,7 +82,7 @@ export function branchTreePreviewForRecord(item: SessionRecord | undefined, limi
     if (!collapsed) return "(empty)";
     return collapsed.length <= bound ? collapsed : `${collapsed.slice(0, bound)}…`;
   };
-  if (item.type === "user") return oneLine(item.content.map(block => block.text).join(" ")) || "(empty)";
+  if (item.type === "user") return oneLine(item.content.filter(block => block.type === "text").map(block => block.text).join(" ")) || "(empty)";
   if (item.type === "assistant") {
     const text = item.content.filter(block => block.type === "text").map(block => (block as { text: string }).text).join(" ");
     if (text.trim()) return oneLine(text);

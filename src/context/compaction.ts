@@ -149,7 +149,7 @@ export function getEffectiveConversation(
 /** Render one conversation item as summarizer-facing text. */
 export function formatItemForSummary(item: ConversationItem): string {
   if (item.type === "user") {
-    return `User:\n${item.content.map((block) => block.text).join("\n")}`;
+    return `User:\n${item.content.map(block => block.type === "text" ? block.text : `[Attached ${block.mediaType} image, ${block.width}×${block.height}; image bytes are unavailable to this summary. Do not infer its contents.]`).join("\n")}`;
   }
   if (item.type === "tool_result") {
     return `Tool result (${item.toolCallId}${item.isError ? ", error" : ""}):\n${item.content}`;

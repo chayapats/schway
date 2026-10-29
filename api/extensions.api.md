@@ -170,13 +170,31 @@ export type ExtensionEventListener = (event: ExtensionEvent, context: {
 }) => void | Promise<void>;
 
 // @public
-export interface ExtensionModelRequest extends Omit<ModelRequest, "hostedTools"> {
+export interface ExtensionModelRequest extends Omit<ModelRequest, "hostedTools" | "imageData"> {
     // (undocumented)
     readonly signal: AbortSignal;
 }
 
 // @public
 export type HostedTool = "web_search";
+
+// @public
+export interface ImageContent {
+    // (undocumented)
+    byteLength: number;
+    // (undocumented)
+    height: number;
+    // (undocumented)
+    mediaType: "image/png" | "image/jpeg";
+    // (undocumented)
+    reference: string;
+    // (undocumented)
+    sha256: string;
+    // (undocumented)
+    type: "image";
+    // (undocumented)
+    width: number;
+}
 
 // @public
 export type JsonSchema = Record<string, unknown>;
@@ -186,6 +204,7 @@ export interface ModelRequest {
     // (undocumented)
     context: readonly ContextSection[];
     hostedTools?: readonly HostedTool[];
+    imageData?: ReadonlyMap<string, Uint8Array>;
     // (undocumented)
     items: readonly ConversationItem[];
     // (undocumented)
@@ -412,7 +431,7 @@ export interface ToolTelemetry {
 }
 
 // @public
-export type UserContent = TextContent;
+export type UserContent = TextContent | ImageContent;
 
 // @public
 export interface UserMessage {

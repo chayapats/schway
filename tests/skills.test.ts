@@ -391,7 +391,7 @@ test("real-loop invocation injects body plus arguments without persisting the bo
     expect(instructions?.content).toContain("PROJECT_RULE_MARKER");
     const userText = request.items
       .filter((item) => item.type === "user")
-      .map((item) => item.content.map((block) => block.text).join(""))
+      .map((item) => item.content.filter(block => block.type === "text").map(block => block.text).join(""))
       .join("\n");
     expect(userText).toContain("/review check the auth flow");
     const durable = JSON.stringify(session.items);
@@ -641,7 +641,7 @@ test("headless skill invocation reaches the model with body plus arguments", asy
     expect(active?.content).toContain("REVIEW_BODY_MARKER");
     const userText = requests[0]!.items
       .filter((item) => item.type === "user")
-      .map((item) => item.content.map((block) => block.text).join(""))
+      .map((item) => item.content.filter(block => block.type === "text").map(block => block.text).join(""))
       .join("\n");
     expect(userText).toContain("/review check the auth flow");
 
@@ -799,7 +799,7 @@ test("a skill turn starting while another turn runs is refused without activatin
     ).toBe(true);
     const userTexts = session.items
       .filter((item) => item.type === "user")
-      .flatMap((item) => item.content.map((block) => block.text));
+      .flatMap((item) => item.content.filter(block => block.type === "text").map(block => block.text));
     expect(userTexts).toEqual(["other prompt"]);
     const check = await manager.prepare(createSession());
     expect(check.context.some((entry) => entry.name === ACTIVE_SKILL_SECTION_NAME)).toBe(

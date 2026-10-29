@@ -1,3 +1,4 @@
+import { imageInputPart } from "../../conversation/images.ts";
 import type {
   ResponseFunctionToolCall,
   ResponseInput,
@@ -51,7 +52,7 @@ export function buildResponsesRequest<Reasoning extends ResponsesReasoning | und
     store: false as const,
     ...(input.reasoning !== undefined ? { reasoning: input.reasoning } : {}),
     instructions: toInstructions(input.request),
-    input: toResponsesInput(input.request.items, input.namespace, input.replayHostedItems === true),
+    input: toResponsesInput(input.request.items, input.namespace, input.replayHostedItems === true, input.request.imageData),
     max_output_tokens: input.maxOutputTokens,
     include: ["reasoning.encrypted_content"] as ["reasoning.encrypted_content"],
     ...(tools.length > 0 ? { tools } : {}),
@@ -140,16 +141,13 @@ function toHostedTools(hosted: readonly HostedTool[] | undefined) {
  * Convert Schway conversation items to Responses input for one metadata namespace.
  * Other providers' reasoning items, hosted items and function-call IDs are omitted.
  */
-function toResponsesInput(items: readonly ConversationItem[], namespace: ResponsesNamespace, replayHosted: boolean): ResponseInput {
+function toResponsesInput(items: readonly ConversationItem[], namespace: ResponsesNamespace, replayHosted: boolean, imageData?: ReadonlyMap<string, Uint8Array>): ResponseInput {
   const input: ResponseInput = [];
   for (const item of items) {
     if (item.type === "user") {
       input.push({
         role: "user",
-        content: item.content.map((block) => ({
-          type: "input_text" as const,
-          text: block.text,
-        })),
+        content: item.content.map(block => imageInputPart(block, imageData)),
       });
       continue;
     }

@@ -3,11 +3,16 @@ import type { ContextSection } from "../context/manager.ts";
 import type { AssistantMessage } from "../conversation/types.ts";
 import type { ToolDefinition } from "../tools/types.ts";
 import type { CoreToolOptions, ExecutionBackend } from "../tools/backend.ts";
+import { imageProbeRecords, imageRouteCapabilities, type HostImageProbeRecord } from "./image-input.ts";
+
+export { IMAGE_INPUT_CONTRACT } from "./image-input.ts";
+export type { HostImageRoute, HostImageProbeRecord, HostImageResolver, HostImageOptions, HostImageRouteCapability, HostImagesRejected } from "./image-input.ts";
+export { createImageContent, HostImageError, MAX_INPUT_IMAGES, MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS, MAX_REQUEST_IMAGES, MAX_REQUEST_IMAGE_BYTES } from "../conversation/images.ts";
 
 /** Native conversation blocks and results shared by host-supplied models and tools. */
 export type {
   AssistantContent, AssistantMessage, AssistantTelemetry, ConversationItem, ProviderMetadata,
-  TextContent, ThinkingContent, ToolCallContent, ToolResult, ToolTelemetry, UserContent, UserMessage,
+  TextContent, ImageContent, ThinkingContent, ToolCallContent, ToolResult, ToolTelemetry, UserContent, UserMessage,
 } from "../conversation/types.ts";
 /** Provider-independent model stream, request, reasoning, usage and tool-description contracts. */
 export type {
@@ -85,6 +90,8 @@ export interface HostCapabilities {
   readonly deviceSignInContract: "schway.host.device-sign-in/v1";
   readonly coreToolsContract: "schway.host.core-tools/v1";
   readonly modelCatalog: "schway.host.model-catalog/v1";
+  readonly imageInputContract: "schway.host.image-input/v1";
+  readonly imageInputRoutes: readonly import("./image-input.ts").HostImageRouteCapability[];
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -110,6 +117,7 @@ export interface HostOptions {
   tools: { policy: "exact"; definitions: readonly ToolDefinition[]; hostedLookup: "off" };
   limits: HostLimits;
   auth?: import("./auth-routes.ts").HostAuthSelection;
+  images?: import("./image-input.ts").HostImageOptions;
 }
 
 /** A native session and exact selected conversation branch within this host's managed directory. */
@@ -118,8 +126,8 @@ export interface HostSessionReference { readonly id: string; readonly branchId: 
 /** An exact persisted native entry, independent of transient model deltas. */
 export interface HostEntryReference { readonly session: HostSessionReference; readonly entryId: string }
 
-/** Plain user input accepted durably before the first model request. */
-export interface HostInput { text: string }
+/** User text and optional sanitized image references accepted durably before the first model request. */
+export interface HostInput { text: string; images?: readonly import("../conversation/types.ts").ImageContent[] }
 
 /** Selected model identity carried on every terminal run outcome. */
 export interface HostModelIdentity {
@@ -148,6 +156,8 @@ export type HostProgressEvent =
 
 /** Per-run options carrying cancellation, a fake clock and transient progress. */
 export interface HostRunOptions {
+  /** Explicit subscription route for host-supplied models with images; bound route submissions use their configured route. */
+  readonly imageRoute?: import("./image-input.ts").HostImageRoute;
   /** Cooperative cancellation for the model, backoff and compaction waits. */
   readonly signal?: AbortSignal;
   /** Injected clock for backoff and deadline waits; defaults to the system clock. */
@@ -180,6 +190,7 @@ export interface HostRunError {
 
 /** A native terminal observation; completed results include a persisted assistant entry. */
 export type HostRunResult =
+  | import("./image-input.ts").HostImagesRejected
   | { outcome: "completed"; input: HostEntryReference; result: HostEntryReference; message: AssistantMessage; usage: HostRunUsage; model: HostModelIdentity }
   | { outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded"; input: HostEntryReference; usage: HostRunUsage; model: HostModelIdentity; error: HostRunError };
 
@@ -280,10 +291,16 @@ const capabilities: HostCapabilities = Object.freeze({
   deviceSignInContract: "schway.host.device-sign-in/v1",
   coreToolsContract: "schway.host.core-tools/v1",
   modelCatalog: "schway.host.model-catalog/v1",
+  imageInputContract: "schway.host.image-input/v1",
+  imageInputRoutes: imageRouteCapabilities([]),
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */
-export function hostCapabilities(): HostCapabilities { return capabilities; }
+export function hostCapabilities(probes?: readonly HostImageProbeRecord[]): HostCapabilities {
+  if (probes === undefined) return capabilities;
+  try { return Object.freeze({ ...capabilities, imageInputRoutes: imageRouteCapabilities(imageProbeRecords(probes)) }); }
+  catch { throw new HostError("invalid-options"); }
+}
 
 /** Construct a validated host lazily; a supplied model is the only inference route in this base slice. */
 export async function createHost(options: HostOptions): Promise<HostRuntime> {
