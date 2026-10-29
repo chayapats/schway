@@ -109,6 +109,107 @@ Reopen constructs context from the current host options, including stricter opti
 
 Supported service-store expectations follow [credentials](credentials.md#platform-requirements-and-recovery): the OS secure store must be unlocked and, on Linux, a Secret Service such as GNOME Keyring or KWallet must be reachable in the desktop/D-Bus session. A locked or unavailable store reports `store-unavailable` with recovery guidance. This contract does not claim Linux unattended availability before S01 evidence and does not select a new secret backend, change billing or import foreign-CLI credentials. See ADR0013 and `tests/host-auth-routes.test.ts`.
 
+## Device-code sign-in
+
+`hostCapabilities().deviceSignInContract` is `"schway.host.device-sign-in/v1"`.
+This additive slice leaves `RELEASE_CONTRACT` at `schway.host.release/v2`; composing
+the next release contract is a separate integration step.
+
+```ts
+import { beginDeviceSignIn, checkAuthReadiness } from "schway/host";
+
+const attempt = new AbortController();
+const flow = await beginDeviceSignIn({
+  route: "codex", // or "grok"; no model or API key is needed
+  store: serviceIdentitySecretServiceStore,
+  credentialWriteGuard: assertCurrentSetupAttempt,
+  signal: attempt.signal,
+});
+if (flow.kind === "pending") {
+  // Show once, transiently. Do not log or persist this handle or approval data.
+  showDeviceApproval(flow.userCode, flow.verificationUri, flow.expiresAt);
+  const outcome = await flow.poll(attempt.signal);
+  if (outcome.kind === "ready") {
+    const readiness = await checkAuthReadiness({ route: flow.route, model: selectedModel, store: serviceIdentitySecretServiceStore });
+    // Run the application's existing route check next.
+  }
+}
+```
+
+The exact entry signatures are:
+
+```ts
+beginDeviceSignIn(options: HostDeviceSignInOptions): Promise<HostDeviceSignInStart>
+HostDeviceSignIn.poll(signal: AbortSignal): Promise<HostDeviceSignInOutcome>
+HostDeviceSignIn.cancel(): void
+```
+
+`HostDeviceSignInOptions` contains `route: HostAuthRoute`, optional `store:
+HostCredentialStore`, `fetch: HostAuthFetch`, `credentialWriteGuard:
+HostCredentialWriteGuard`, `signal: AbortSignal`, and `clock: HostClock`. Unknown
+fields and malformed options reject sanitized `HostError("invalid-options")`.
+The optional `fetch` and clock are trusted deterministic fixture seams; production
+uses native fetch and the system clock. A clock's cancellable `sleep` must support
+concurrent deadline and poll waits. The dependencies and route are captured at start.
+
+Every returned variant has `route` and `containsNoSecrets: true`. Start returns
+`kind: "pending"`, a terminal failure, or `kind: "busy"`. Only `pending` includes
+`userCode`, `verificationUri`, `expiresAt` (Unix milliseconds), `poll` and `cancel`.
+Polling returns exactly `ready`, `expired`, `denied`, `cancelled`, `provider-error`
+or `store-error`. `store-error` also has `cleanupUncertain: boolean`. No provider
+payload, token, private device grant, authorization code, verifier or raw diagnostic
+crosses this boundary. Only the user code and HTTPS verification URI are approval
+text. Keep them outside application databases, logs, exports, models and history;
+Jit can retain its own flow id, expiry and state, with the handle in service memory.
+
+The API reuses the CLI's existing selected-provider authorization, polling, PKCE
+exchange and subscription-save functions. There is no browser, TTY, inference,
+model discovery, foreign credential import, API-key fallback or plaintext fallback.
+`ready` means the local credential write committed, then passed its final fence;
+it is not remote model-access evidence. The application chooses a model and runs
+its usual readiness/route check afterward.
+
+A start request has a 30-second total deadline, including body reads. A grant expires
+at its provider lifetime or fifteen minutes from issuance, whichever comes first;
+missing lifetimes default to fifteen minutes. Waiting before calling `poll` consumes
+that lifetime. Provider poll intervals apply (Codex makes its initial check immediately,
+Grok waits its first interval), with five seconds added after each `slow_down`.
+Requests, bodies and Codex exchange are bounded by the same expiry, even if a
+transport ignores abort. `signal` cancels startup and the entire flow; `cancel()`
+also cancels an unpolled handle. Repeated polls share one operation and terminal
+result; aborting any attached signal cancels that operation for every caller.
+
+Concurrency rule: the first start reserves that route in this process, including
+while authorization is being requested. A second start for the same route returns
+`busy` without network or store access, even with another store. Different routes
+can sign in concurrently. Cancellation/expiry releases an unpolled handle; a polling
+handle releases only after its operation and any write cleanup settle. Independent
+processes do not share this admission rule; native mutations still use the existing
+cross-process store lock. The embedder owns cross-process setup-attempt fencing.
+
+Writes use only the selected store and subscription identity. Omitting `store`
+uses the service process's native OS secure store; Jit must run as its service identity
+with that identity's Secret Service available and unlocked. The existing effective
+store runs the application fence before and after writing, combined with local
+cancellation and expiry checks. A cancelled, expired, refused or failed write removes
+only this attempt's exact value, preferring atomic `compareAndDelete`; the existing
+read/delete fallback is serialized within the subscription write lifecycle and has
+its documented limits against unfenced writers. Newer credentials are preserved.
+A backend that commits then rejects gets the same exact-value cleanup. Cleanup
+failures return `store-error` with `cleanupUncertain: true`; the credential may still
+be visible, so restore and verify store access before retrying. No arbitrary backend
+can guarantee removal while its cleanup operations fail. Store writes are awaited
+through cleanup, rather than racing an uncancellable native mutation and claiming
+cancellation has already removed it. These are the existing fence/lock guarantees,
+not a new secret backend or a transaction with Jit's database.
+
+Deterministic evidence is in `tests/host-device-sign-in.test.ts` and the shared
+Codex/Grok protocol suites. No live sign-in is performed. An opt-in service check
+needs an explicitly authorized account, the installed host artifact, an unlocked
+service-identity Secret Service and its D-Bus session, a person approving the displayed
+code/link, and checks for expiry, cancel, denial and unavailable storage. Collect only
+sanitized outcome/route evidence; never retain tokens or approval codes.
+
 ## Run control, progress and terminal outcomes
 
 `schway.host.run-control/v1` bounds every admitted run by finite `maxTurns`, `maxConcurrentTools`, `deadlineMs` and `maxAttempts`, with no unlimited or malformed values admitted. The deadline covers model rounds, transport retry backoff, overflow recovery and compaction waits. `submit`, `submitWithRoute` and `compact` accept `AbortSignal | HostRunOptions`; `HostRunOptions` carries an optional cooperative `signal`, an injectable `HostClock` for deterministic backoff/deadline waits and an optional transient `onProgress` observer.
@@ -293,6 +394,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `AssistantContent` | Native text, reasoning or tool-call block. |
 | `AssistantMessage` | Assembled native assistant response. |
 | `AssistantTelemetry` | Harness timing and reported model usage. |
+| `beginDeviceSignIn` | Start bounded selected-route device approval without exposing tokens. |
 | `checkAuthReadiness` | Check selected-route store readiness without network or inference. |
 | `classifyAuthError` | Map a route-bound failure to a safe status without secrets. |
 | `containsNoSecrets` | Test helper confirming sentinels are absent from returned data. |
@@ -347,6 +449,11 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostCredentialWriteGuard` | Embedding-application fence for credential-store writes. |
 | `HostDeletedArtifact` | Owned artifact inventory for deletion reporting. |
 | `HostedTool` | Native closed hosted-lookup union; host sends none. |
+| `HostDeviceSignIn` | Ephemeral approval handle with shared polling and cancellation. |
+| `HostDeviceSignInFailure` | Secret-free failure categories and cleanup uncertainty. |
+| `HostDeviceSignInOptions` | Selected route, store, fence, cancellation and protocol/clock seams. |
+| `HostDeviceSignInOutcome` | Local ready or an explicit terminal failure category. |
+| `HostDeviceSignInStart` | Pending approval, busy route or a safe startup failure. |
 | `HostEntryReference` | Exact native entry in a selected session branch. |
 | `HostError` | Safe typed startup/lifecycle/reference rejection. |
 | `HostInput` | Bounded plain user text accepted before inference. |

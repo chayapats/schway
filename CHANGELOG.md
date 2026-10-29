@@ -19,6 +19,15 @@
   bound output inside an escaped `untrusted_data` envelope and support fixture
   DNS/transport and app-owned search providers. Host fetch creates no spill
   files; the composed release contract remains `schway.host.release/v2` (#434).
+- Add `beginDeviceSignIn` and `schway.host.device-sign-in/v1` for embedding
+  applications signing in to Codex or Grok without a TTY. Host and CLI share
+  device authorization, bounded polling and subscription persistence. Approval
+  handles expose only the user code, HTTPS link and expiry; terminal outcomes
+  contain no secrets. Polling supports cancellation, provider intervals and
+  slow-down, with deterministic fetch/clock seams. Same-route concurrent starts
+  return `busy` in this process. Selected-store writes retain pre/post fences,
+  exact-value cleanup and native locking, including explicit cleanup uncertainty.
+  The composed release contract remains `schway.host.release/v2` (#435).
 
 - Add `schway.host.core-tools/v1`: `coreToolDefinitions(backend, options?)`
   exports `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls` from

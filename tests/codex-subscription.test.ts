@@ -514,7 +514,7 @@ test("device authorization request failures stay actionable without leaking tran
         throw new Error("socket-sentinel");
       }) satisfies CodexFetchLike,
     }),
-  ).rejects.toThrow(/device sign-in failed/);
+  ).rejects.toThrow(/device sign-in failed/i);
 });
 
 test("device exchange expiry remaps to restart with --device and stays actionable", async () => {

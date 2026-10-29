@@ -1,3 +1,4 @@
+import { DeviceFlowError, deviceFlowExpiresAt, sleepDeviceFlow, validateDeviceVerificationUri, withinDeviceFlow, type DeviceFlowAuthorization } from "../../auth/device-flow.ts";
 import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, type CredentialStore } from "../../auth/store.ts";
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
 import { boundedCatalogFetch, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
@@ -143,44 +144,49 @@ export async function requestDeviceAuthorization(input: { fetch?: GrokFetch; sig
   if (!response.ok) throw new Error(`Starting Grok device sign-in failed (HTTP ${response.status}).`);
   const data = await payload(response, input.signal);
   if (typeof data.verification_uri !== "string" || typeof data.device_code !== "string" || !data.device_code.trim() || typeof data.user_code !== "string" || !data.user_code.trim()) throw new Error("Grok device sign-in returned an incomplete authorization.");
-  try { if (new URL(data.verification_uri).protocol !== "https:") throw new Error(); }
-  catch { throw new Error("Grok device sign-in requires an HTTPS verification address."); }
-  return { verificationUri: data.verification_uri, deviceCode: data.device_code, userCode: data.user_code, expiresIn: positive(data.expires_in, 900), interval: positive(data.interval, 5) };
-}
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  aborted(signal);
-  await new Promise<void>((resolve, reject) => {
-    const stop = () => { clearTimeout(timer); signal?.removeEventListener("abort", stop); reject(new DOMException("Aborted", "AbortError")); };
-    const timer = setTimeout(() => { signal?.removeEventListener("abort", stop); resolve(); }, ms);
-    signal?.addEventListener("abort", stop, { once: true });
-  });
+  validateDeviceVerificationUri(data.verification_uri);
+  return { verificationUri: data.verification_uri, deviceCode: data.device_code, userCode: data.user_code, expiresIn: typeof data.expires_in === "number" && Number.isFinite(data.expires_in) ? Math.max(0, data.expires_in) : 900, interval: positive(data.interval, 5) };
 }
 /** Poll with RFC device intervals, a strict deadline and cancellable waits. */
-export async function pollDeviceAuthorization(input: GrokDeviceAuthorization & { fetch?: GrokFetch; signal?: AbortSignal; now?: () => number; sleep?: (ms: number, signal?: AbortSignal) => Promise<void> }): Promise<GrokTokens> {
-  const now = input.now ?? Date.now, wait = input.sleep ?? sleep;
-  const deadline = now() + input.expiresIn * 1000;
-  let interval = input.interval * 1000;
-  const expired = () => new Error("Grok device sign-in timed out waiting for approval. Restart /login grok --device.");
-  for (;;) {
-    aborted(input.signal);
-    const remaining = deadline - now(); if (remaining <= 0) throw expired();
-    await wait(Math.min(interval, remaining), input.signal); aborted(input.signal);
-    if (now() >= deadline) throw expired();
-    const timeout = AbortSignal.timeout(Math.max(1, deadline - now()));
-    const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
-    let response: Response;
-    try { response = await formRequest(GROK_TOKEN_URL, { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: input.deviceCode, referrer: GROK_REFERRER }, { fetch: input.fetch, signal }); }
-    catch (error) { aborted(input.signal); if (timeout.aborted || now() >= deadline) throw expired(); throw error; }
-    const data = await payload(response, signal);
-    if (now() >= deadline) throw expired();
-    if (response.ok) return tokensFromPayload(data, now());
-    if (data.error === "authorization_pending") continue;
-    if (data.error === "slow_down") { interval += 5000; continue; }
-    if (data.error === "access_denied") throw new Error("Grok device sign-in was denied. Restart /login grok --device.");
-    if (data.error === "expired_token") throw new Error("The Grok device code expired. Restart /login grok --device.");
-    throw new Error(`Grok device sign-in failed (HTTP ${response.status}). Restart /login grok --device.`);
-  }
+export async function pollDeviceAuthorization(input: GrokDeviceAuthorization & { expiresAt?: number; fetch?: GrokFetch; signal?: AbortSignal; now?: () => number; sleep?: (ms: number, signal?: AbortSignal) => Promise<void> }): Promise<GrokTokens> {
+  const now = input.now ?? Date.now, wait = input.sleep ?? sleepDeviceFlow;
+  const deadline = input.expiresAt ?? deviceFlowExpiresAt(input.expiresIn, now());
+  return withinDeviceFlow({ expiresAt: deadline, signal: input.signal, now,
+    expiredMessage: "Grok device sign-in timed out waiting for approval. Restart /login grok --device." }, async signal => {
+    let interval = input.interval * 1000;
+    const expired = () => new DeviceFlowError("expired", "Grok device sign-in timed out waiting for approval. Restart /login grok --device.");
+    for (;;) {
+      aborted(signal);
+      const remaining = deadline - now(); if (remaining <= 0) throw expired();
+      await wait(Math.min(interval, remaining), signal); aborted(signal);
+      if (now() >= deadline) throw expired();
+      let response: Response;
+      try { response = await formRequest(GROK_TOKEN_URL, { grant_type: "urn:ietf:params:oauth:grant-type:device_code", device_code: input.deviceCode, referrer: GROK_REFERRER }, { fetch: input.fetch, signal }); }
+      catch (error) { aborted(signal); if (now() >= deadline) throw expired(); throw error; }
+      const data = await payload(response, signal);
+      if (now() >= deadline) throw expired();
+      if (response.ok) return tokensFromPayload(data, now());
+      if (data.error === "authorization_pending") continue;
+      if (data.error === "slow_down") { interval += 5000; continue; }
+      if (data.error === "access_denied") throw new DeviceFlowError("denied", "Grok device sign-in was denied. Restart /login grok --device.");
+      if (data.error === "expired_token") throw new DeviceFlowError("expired", "The Grok device code expired. Restart /login grok --device.");
+      throw new Error(`Grok device sign-in failed (HTTP ${response.status}). Restart /login grok --device.`);
+    }
+  });
 }
+/** Capture one device grant and its issuance deadline for both CLI and embedding sign-in. */
+export async function beginDeviceAuthorization(input: {
+  fetch?: GrokFetch; signal?: AbortSignal; now?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+}): Promise<DeviceFlowAuthorization<GrokTokens>> {
+  const issuedAt = (input.now ?? Date.now)();
+  const grant = await requestDeviceAuthorization({ fetch: input.fetch, signal: input.signal });
+  const expiresAt = deviceFlowExpiresAt(grant.expiresIn, issuedAt);
+  return { userCode: grant.userCode, verificationUri: grant.verificationUri, expiresAt,
+    poll: signal => pollDeviceAuthorization({ ...grant, expiresAt, signal, fetch: input.fetch, now: input.now, sleep: input.sleep }),
+  };
+}
+
 /** Injectable login side effects keep browser opening, panels and storage under the caller's control. */
 export interface GrokLoginDependencies { fetch?: GrokFetch; saveTokens(tokens: GrokTokens): Promise<void>; onSaved?: () => void; onApproval?: (approval: GrokApproval) => void; onProgress?: (message: string) => void }
 /** Complete explicit browser approval and save only after a final cancellation check. */
@@ -199,9 +205,9 @@ export async function loginWithBrowserFlow(input: { signal: AbortSignal; deps: G
 }
 /** Complete explicit device approval without putting its user code in notices. */
 export async function loginWithDeviceFlow(input: { signal: AbortSignal; deps: GrokLoginDependencies & { now?: () => number; sleep?: (ms: number, signal?: AbortSignal) => Promise<void> } }): Promise<GrokTokens> {
-  const grant = await requestDeviceAuthorization({ fetch: input.deps.fetch, signal: input.signal });
-  input.deps.onApproval?.({ kind: "device", verificationUri: grant.verificationUri, userCode: grant.userCode });
-  const tokens = await pollDeviceAuthorization({ ...grant, fetch: input.deps.fetch, signal: input.signal, now: input.deps.now, sleep: input.deps.sleep });
+  const authorization = await beginDeviceAuthorization({ fetch: input.deps.fetch, signal: input.signal, now: input.deps.now, sleep: input.deps.sleep });
+  input.deps.onApproval?.({ kind: "device", verificationUri: authorization.verificationUri, userCode: authorization.userCode });
+  const tokens = await authorization.poll(input.signal);
   aborted(input.signal); await input.deps.saveTokens(tokens); input.deps.onSaved?.(); return tokens;
 }
 

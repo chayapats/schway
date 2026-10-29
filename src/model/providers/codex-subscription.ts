@@ -1,3 +1,4 @@
+import { DeviceFlowError, deviceFlowExpiresAt, sleepDeviceFlow, validateDeviceVerificationUri, withinDeviceFlow, type DeviceFlowAuthorization } from "../../auth/device-flow.ts";
 import { abortableCatalogOperation, boundedCatalogFetch, fetchProviderModelListResult, type ModelListResult } from "../model-list.ts";
 import { assertThinking } from "../thinking.ts";
 import type {
@@ -107,6 +108,8 @@ export interface CodexLoginDeps {
 export interface CodexDeviceDeps {
   fetch?: CodexFetchLike;
   onProgress?: CodexProgress;
+  now?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Called immediately before the non-cancellable secure-store write starts. */
   onSaving?: () => void;
   /** Called only after the secure-store write resolves successfully. */
@@ -398,6 +401,7 @@ export async function exchangeCodeForTokens(input: {
   redirectUri?: string;
   fetch?: CodexFetchLike;
   signal?: AbortSignal;
+  now?: () => number;
 }): Promise<CodexTokens> {
   throwIfAborted(input.signal);
   const body = new URLSearchParams({
@@ -418,7 +422,7 @@ export async function exchangeCodeForTokens(input: {
   if (!response.ok) {
     throw new Error(mapTokenEndpointError(response.status, payload));
   }
-  return toCodexTokens(payload);
+  return toCodexTokens(payload, (input.now ?? Date.now)());
 }
 
 /** Renew short-lived access with the offline_access refresh token in one transport attempt. */
@@ -831,6 +835,7 @@ export function waitForLocalhostCallback(input: {
 export async function requestDeviceAuthorization(input: {
   fetch?: CodexFetchLike;
   signal?: AbortSignal;
+  now?: () => number;
 }): Promise<CodexDeviceAuthorization> {
   throwIfAborted(input.signal);
   let response: Response;
@@ -841,9 +846,9 @@ export async function requestDeviceAuthorization(input: {
       body: JSON.stringify({ client_id: CODEX_CLIENT_ID }),
       signal: input.signal,
     });
-  } catch (error) {
+  } catch {
     throwIfAborted(input.signal);
-    throw new Error(`Starting device sign-in failed (${messageOf(error)}). Retry /login chatgpt --device.`);
+    throw new DeviceFlowError("provider-error", "Device sign-in failed · /login chatgpt --device retry");
   }
   throwIfAborted(input.signal);
   let payload: Record<string, unknown>;
@@ -863,7 +868,8 @@ export async function requestDeviceAuthorization(input: {
   const verificationUri = typeof payload.verification_uri === "string" && payload.verification_uri.trim()
     ? payload.verification_uri.trim()
     : CODEX_DEVICE_VERIFY_URL;
-  const expiresIn = parseDeviceExpiresIn(payload);
+  validateDeviceVerificationUri(verificationUri);
+  const expiresIn = parseDeviceExpiresIn(payload, (input.now ?? Date.now)());
   const interval = parseDeviceIntervalSeconds(payload.interval);
   return {
     userCode,
@@ -882,87 +888,110 @@ export async function pollDeviceAuthorization(input: {
   timeoutMs?: number;
   pollIntervalMs?: number;
   fetch?: CodexFetchLike;
+  expiresAt?: number;
+  now?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
 }): Promise<CodexTokens> {
-  const timeoutMs = input.timeoutMs ?? CODEX_DEVICE_TIMEOUT_MS;
-  let intervalMs = input.pollIntervalMs ?? 5_000;
-  const started = Date.now();
-  const runFetch = input.fetch ?? fetch;
-  for (;;) {
-    throwIfAborted(input.signal);
-    if (Date.now() - started >= timeoutMs) {
-      throw new Error("Device sign-in timed out after 900s without approval. Restart /login chatgpt --device for a fresh code.");
-    }
-    let response: Response;
-    try {
-      response = await runFetch(CODEX_DEVICE_TOKEN_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          client_id: CODEX_CLIENT_ID,
-          device_auth_id: input.deviceAuthId,
-          user_code: input.userCode,
-        }),
-        signal: input.signal,
-      });
-    } catch {
-      throwIfAborted(input.signal);
-      throw new Error("Device sign-in polling failed. Check the connection and retry device approval.");
-    }
-    throwIfAborted(input.signal);
-    let payload: Record<string, unknown>;
-    try {
-      payload = (await response.json()) as Record<string, unknown>;
-    } catch {
-      throw new Error("Device sign-in polling returned an unreadable response. Retry /login chatgpt --device.");
-    }
-    const authorizationCode = typeof payload.authorization_code === "string" ? payload.authorization_code.trim() : "";
-    const codeVerifier = typeof payload.code_verifier === "string" ? payload.code_verifier.trim() : "";
-    const success = response.ok && (
-      payload.status === "success"
-      || (authorizationCode.length > 0 && codeVerifier.length > 0)
-    );
-    if (success) {
-      if (!authorizationCode || !codeVerifier) {
-        throw new Error("Device sign-in polling returned an incomplete authorization. Retry /login chatgpt --device.");
+  const now = input.now ?? Date.now;
+  const expiresAt = input.expiresAt ?? now() + Math.min(input.timeoutMs ?? CODEX_DEVICE_TIMEOUT_MS, CODEX_DEVICE_TIMEOUT_MS);
+  return withinDeviceFlow({ expiresAt, signal: input.signal, now }, async signal => {
+    let intervalMs = input.pollIntervalMs ?? 5_000;
+    const wait = input.sleep ?? sleepDeviceFlow;
+    const runFetch = input.fetch ?? fetch;
+    for (;;) {
+      throwIfAborted(signal);
+      if (now() >= expiresAt) {
+        throw new DeviceFlowError("expired", "Device sign-in timed out · /login chatgpt --device retry");
       }
+      let response: Response;
       try {
-        return await exchangeCodeForTokens({
-          code: authorizationCode,
-          verifier: codeVerifier,
-          redirectUri: CODEX_DEVICE_REDIRECT_URI,
-          fetch: runFetch,
-          signal: input.signal,
+        response = await runFetch(CODEX_DEVICE_TOKEN_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            client_id: CODEX_CLIENT_ID,
+            device_auth_id: input.deviceAuthId,
+            user_code: input.userCode,
+          }),
+          signal,
         });
-      } catch (error) {
-        throwIfAborted(input.signal);
-        const message = messageOf(error);
-        if (/^The sign-in code expired/.test(message)) {
-          throw new Error("The device sign-in code expired before it was exchanged. Restart /login chatgpt --device for a fresh code.");
-        }
-        if (/^(ChatGPT sign-in was denied|The sign-in response has no access token|The sign-in endpoint|Exchanging the sign-in code failed)/.test(message)) {
-          throw error instanceof Error ? error : new Error(message);
-        }
-        throw new Error(`Device sign-in code exchange failed (${message}). Retry /login chatgpt --device.`);
+      } catch {
+        throwIfAborted(signal);
+        throw new Error("Device sign-in polling failed. Check the connection and retry device approval.");
       }
+      throwIfAborted(signal);
+      let payload: Record<string, unknown>;
+      try {
+        payload = (await response.json()) as Record<string, unknown>;
+      } catch {
+        throw new Error("Device sign-in polling returned an unreadable response. Retry /login chatgpt --device.");
+      }
+      const authorizationCode = typeof payload.authorization_code === "string" ? payload.authorization_code.trim() : "";
+      const codeVerifier = typeof payload.code_verifier === "string" ? payload.code_verifier.trim() : "";
+      const success = response.ok && (
+        payload.status === "success"
+        || (authorizationCode.length > 0 && codeVerifier.length > 0)
+      );
+      if (success) {
+        if (!authorizationCode || !codeVerifier) {
+          throw new Error("Device sign-in polling returned an incomplete authorization. Retry /login chatgpt --device.");
+        }
+        try {
+          return await exchangeCodeForTokens({
+            code: authorizationCode,
+            verifier: codeVerifier,
+            redirectUri: CODEX_DEVICE_REDIRECT_URI,
+            fetch: runFetch,
+            signal,
+            now,
+          });
+        } catch (error) {
+          throwIfAborted(signal);
+          const message = messageOf(error);
+          if (/^The sign-in code expired/.test(message)) {
+            throw new DeviceFlowError("expired", "The device sign-in code expired before it was exchanged. Restart /login chatgpt --device for a fresh code.");
+          }
+          if (/^ChatGPT sign-in was denied/.test(message)) throw new DeviceFlowError("denied", codexDeniedError());
+          if (/^(ChatGPT sign-in was denied|The sign-in response has no access token|The sign-in endpoint|Exchanging the sign-in code failed)/.test(message)) {
+            throw error instanceof Error ? error : new Error(message);
+          }
+          throw new DeviceFlowError("provider-error", "Device approval failed · /login chatgpt --device retry");
+        }
+      }
+      const error = devicePollErrorCode(payload, response.status);
+      if (isDevicePendingError(error)) {
+        await wait(Math.min(Math.max(0, intervalMs), Math.max(0, expiresAt - now())), signal);
+        continue;
+      }
+      if (isDeviceSlowDownError(error)) {
+        intervalMs += 5_000;
+        await wait(Math.min(Math.max(0, intervalMs), Math.max(0, expiresAt - now())), signal);
+        continue;
+      }
+      if (isDeviceDeniedError(error)) {
+        throw new DeviceFlowError("denied", codexDeniedError());
+      }
+      if (isDeviceExpiredError(error)) {
+        throw new DeviceFlowError("expired", codexExpiredCodeError());
+      }
+      throw new DeviceFlowError("provider-error", "Device sign-in failed · /login chatgpt --device retry");
     }
-    const error = devicePollErrorCode(payload, response.status);
-    if (isDevicePendingError(error)) {
-      await sleepCancellable(intervalMs, input.signal);
-      continue;
-    }
-    if (isDeviceSlowDownError(error)) {
-      intervalMs += 5_000;
-      await sleepCancellable(intervalMs, input.signal);
-      continue;
-    }
-    if (isDeviceDeniedError(error)) {
-      throw new Error(codexDeniedError());
-    }
-    if (isDeviceExpiredError(error)) {
-      throw new Error(codexExpiredCodeError());
-    }
-    throw new Error(`Device sign-in polling failed (${error}). Retry /login chatgpt --device.`);
-  }
+  });
+}
+
+/** Capture one device grant and its issuance deadline for both CLI and embedding sign-in. */
+export async function beginDeviceAuthorization(input: {
+  fetch?: CodexFetchLike; signal?: AbortSignal; now?: () => number;
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  timeoutMs?: number; pollIntervalMs?: number;
+}): Promise<DeviceFlowAuthorization<CodexTokens>> {
+  const now = input.now ?? Date.now, issuedAt = now();
+  const grant = await requestDeviceAuthorization({ fetch: input.fetch, signal: input.signal, now });
+  const expiresAt = Math.min(deviceFlowExpiresAt(grant.expiresIn, issuedAt), issuedAt + (input.timeoutMs ?? CODEX_DEVICE_TIMEOUT_MS));
+  return { userCode: grant.userCode, verificationUri: grant.verificationUri, expiresAt,
+    poll: signal => pollDeviceAuthorization({ ...grant, expiresAt, signal, fetch: input.fetch, now, sleep: input.sleep,
+      pollIntervalMs: input.pollIntervalMs ?? (grant.interval !== undefined ? grant.interval * 1000 : undefined) }),
+  };
 }
 
 /** Run the explicit headless beta device login, persisting tokens at the subscription identity. */
@@ -975,23 +1004,17 @@ export async function loginWithDeviceFlow(input: {
 }): Promise<CodexTokens> {
   const deps = input.deps ?? {};
   throwIfAborted(input.signal);
-  const authorization = await requestDeviceAuthorization({ fetch: deps.fetch, signal: input.signal });
+  const now = deps.now ?? Date.now;
+  const authorization = await beginDeviceAuthorization({ fetch: deps.fetch, signal: input.signal,
+    now, sleep: deps.sleep, timeoutMs: input.timeoutMs, pollIntervalMs: input.pollIntervalMs });
   deps.onProgress?.(`Enter this code at ${authorization.verificationUri}: ${authorization.userCode}`);
   throwIfAborted(input.signal);
-  const tokens = await pollDeviceAuthorization({
-    deviceAuthId: authorization.deviceAuthId,
-    userCode: authorization.userCode,
-    signal: input.signal,
-    timeoutMs: input.timeoutMs,
-    pollIntervalMs: input.pollIntervalMs
-      ?? (authorization.interval !== undefined ? Math.max(0, authorization.interval) * 1000 : undefined),
-    fetch: deps.fetch,
-  });
+  const tokens = await authorization.poll(input.signal);
   throwIfAborted(input.signal);
   const enriched: CodexTokens = {
     ...tokens,
     accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken),
-    obtainedAt: Date.now(),
+    obtainedAt: now(),
   };
   await commitInteractiveLogin(input.store, enriched, deps, input.signal);
   return enriched;
@@ -1545,16 +1568,16 @@ function mapTokenEndpointError(status: number, payload: Record<string, unknown>)
 
 /** Parse a deviceauth usercode interval that may arrive as a number or numeric string. */
 function parseDeviceIntervalSeconds(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value.trim());
-    if (Number.isFinite(parsed)) return parsed;
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
   }
   return undefined;
 }
 
 /** Prefer expires_in seconds; otherwise derive remaining lifetime from expires_at. */
-function parseDeviceExpiresIn(payload: Record<string, unknown>): number | undefined {
+function parseDeviceExpiresIn(payload: Record<string, unknown>, now: number): number | undefined {
   if (typeof payload.expires_in === "number" && Number.isFinite(payload.expires_in)) {
     return payload.expires_in;
   }
@@ -1564,11 +1587,11 @@ function parseDeviceExpiresIn(payload: Record<string, unknown>): number | undefi
   }
   if (typeof payload.expires_at === "string" && payload.expires_at.trim()) {
     const at = Date.parse(payload.expires_at);
-    if (Number.isFinite(at)) return Math.max(0, Math.floor((at - Date.now()) / 1000));
+    if (Number.isFinite(at)) return Math.max(0, Math.floor((at - now) / 1000));
   }
   if (typeof payload.expires_at === "number" && Number.isFinite(payload.expires_at)) {
     const at = payload.expires_at > 1e12 ? payload.expires_at : payload.expires_at * 1000;
-    return Math.max(0, Math.floor((at - Date.now()) / 1000));
+    return Math.max(0, Math.floor((at - now) / 1000));
   }
   return undefined;
 }
@@ -1610,7 +1633,7 @@ function isDeviceExpiredError(code: string): boolean {
 }
 
 /** Normalize a token endpoint payload into stored subscription tokens. */
-function toCodexTokens(payload: Record<string, unknown>): CodexTokens {
+function toCodexTokens(payload: Record<string, unknown>, now = Date.now()): CodexTokens {
   const accessToken = typeof payload.access_token === "string" ? payload.access_token.trim() : "";
   if (!accessToken) {
     throw new Error("The sign-in response has no access token. Restart /login chatgpt for a fresh attempt.");
@@ -1624,7 +1647,7 @@ function toCodexTokens(payload: Record<string, unknown>): CodexTokens {
   return {
     accessToken,
     ...(refreshToken !== undefined ? { refreshToken } : {}),
-    ...(expiresIn !== undefined ? { expiresAt: Date.now() + expiresIn * 1000 } : {}),
+    ...(expiresIn !== undefined ? { expiresAt: now + expiresIn * 1000 } : {}),
     accountId: accountIdFromAccessToken(accessToken),
   };
 }
@@ -1709,31 +1732,6 @@ function splitCodexSse(buffer: string, final: boolean): { events: CodexStreamEve
     }
   }
   return { events, rest };
-}
-
-/** Sleep until the next device poll, settling early on Schway cancellation. */
-function sleepCancellable(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) {
-    throwIfAborted(signal);
-    return Promise.resolve();
-  }
-  if (!signal) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-  if (signal.aborted) {
-    return Promise.reject(new DOMException("Aborted", "AbortError"));
-  }
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new DOMException("Aborted", "AbortError"));
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-  });
 }
 
 /** Race a settling promise against Schway cancellation without leaving dangling handlers. */

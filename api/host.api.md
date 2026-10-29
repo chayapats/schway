@@ -32,6 +32,9 @@ export interface AssistantTelemetry {
 }
 
 // @public
+export function beginDeviceSignIn(options: HostDeviceSignInOptions): Promise<HostDeviceSignInStart>;
+
+// @public
 export function checkAuthReadiness(selection: HostAuthSelection): Promise<HostAuthReadiness>;
 
 // @public
@@ -314,6 +317,8 @@ export interface HostCapabilities {
     // (undocumented)
     readonly dataContract: "schway.host.managed-session-data/v1";
     // (undocumented)
+    readonly deviceSignInContract: "schway.host.device-sign-in/v1";
+    // (undocumented)
     readonly extensionDiscovery: "disabled-only";
     // (undocumented)
     readonly features: readonly ["host-supplied-model", "native-result-reference", "explicit-compaction"];
@@ -379,6 +384,66 @@ export type HostCredentialWriteGuard = (identity: HostCredentialReference) => Pr
 
 // @public
 export type HostDeletedArtifact = "conversation" | "metadata" | "history" | "draft" | "undo" | "lease";
+
+// @public
+export interface HostDeviceSignIn {
+    cancel(): void;
+    // (undocumented)
+    readonly containsNoSecrets: true;
+    // (undocumented)
+    readonly expiresAt: number;
+    // (undocumented)
+    readonly kind: "pending";
+    poll(signal: AbortSignal): Promise<HostDeviceSignInOutcome>;
+    // (undocumented)
+    readonly route: HostAuthRoute;
+    // (undocumented)
+    readonly userCode: string;
+    // (undocumented)
+    readonly verificationUri: string;
+}
+
+// @public
+export type HostDeviceSignInFailure = {
+    readonly kind: "expired" | "denied" | "cancelled" | "provider-error";
+    readonly route: HostAuthRoute;
+    readonly containsNoSecrets: true;
+} | {
+    readonly kind: "store-error";
+    readonly route: HostAuthRoute;
+    readonly containsNoSecrets: true;
+    readonly cleanupUncertain: boolean;
+};
+
+// @public
+export interface HostDeviceSignInOptions {
+    // (undocumented)
+    clock?: HostClock;
+    // (undocumented)
+    credentialWriteGuard?: HostCredentialWriteGuard;
+    // (undocumented)
+    fetch?: HostAuthFetch;
+    // (undocumented)
+    route: HostAuthRoute;
+    // (undocumented)
+    signal?: AbortSignal;
+    // (undocumented)
+    store?: HostCredentialStore;
+}
+
+// @public
+export type HostDeviceSignInOutcome = HostDeviceSignInFailure | {
+    readonly kind: "ready";
+    readonly route: HostAuthRoute;
+    readonly containsNoSecrets: true;
+};
+
+// @public
+export type HostDeviceSignInStart = HostDeviceSignIn | HostDeviceSignInFailure | {
+    readonly kind: "busy";
+    readonly route: HostAuthRoute;
+    readonly containsNoSecrets: true;
+};
 
 // @public
 export type HostedTool = "web_search";
