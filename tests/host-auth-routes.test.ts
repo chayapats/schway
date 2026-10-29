@@ -801,7 +801,7 @@ for (const fixture of GROK_ERROR_FIXTURES) test(`route-bound Grok ${fixture.name
     try {
       const run = await session.submitWithRoute({ text: "fixture only" });
       expect(run.outcome).toBe("error");
-      if (run.outcome !== "completed") {
+      if (run.outcome === "error") {
         expect(run.auth.status).toBe(fixture.expected);
         if (fixture.expected === "quota-exceeded") expect(run.auth.nextAction).toContain("https://grok.com/?_s=usage");
       }
