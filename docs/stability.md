@@ -91,6 +91,11 @@ supported behavior set, the packed artifact ships `schway/host` with reachable
 `dist/types` declarations and the `examples/host` embedded consumer, and an
 external temporary consumer installs that tarball without private source access
 to prove the composed restrictions, lifecycle, route fixtures and compatibility.
+The additive `schway.host.web-tools/v1` slice exports vendor-neutral search and
+pinned, SSRF-guarded fetch tools, admitted explicitly with hosted lookup off.
+Their bounded host results carry escaped `untrusted_data` envelopes; the app owns
+search credentials, auditing and disclosure policy. This slice does not change
+`RELEASE_CONTRACT`; the integration owner composes the next release.
 Capability/configuration claims stay distinct from S01 Pi/account support:
 `observedInference` remains `not-checked` until a committed route-bound run,
 and Linux store availability is documented without claiming unattended support.

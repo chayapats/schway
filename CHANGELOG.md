@@ -12,6 +12,14 @@
 
 ### Added
 
+- Export `SearchProvider`, `createWebSearchTool(provider, options?)` and
+  `createWebFetchTool(options?)` through `schway/host`, advertised by
+  `webToolsContract: "schway.host.web-tools/v1"`. Explicit read-only tools keep
+  hosted lookup off, apply the address baseline before application URL policy,
+  bound output inside an escaped `untrusted_data` envelope and support fixture
+  DNS/transport and app-owned search providers. Host fetch creates no spill
+  files; the composed release contract remains `schway.host.release/v2` (#434).
+
 - Add `schway.host.core-tools/v1`: `coreToolDefinitions(backend, options?)`
   exports `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls` from
   `schway/host` over a host-supplied `ExecutionBackend`, with the CLI's
