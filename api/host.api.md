@@ -943,7 +943,7 @@ export interface WebFetchDetails {
 }
 
 // @public
-export type WebFetchErrorKind = "invalid-url" | "unsupported-scheme" | "userinfo" | "blocked-address" | "dns" | "connection-refused" | "connection-reset" | "tls" | "network" | "response-deadline" | "total-deadline" | "redirect-limit" | "http-status" | "unsupported-content-type" | "body-cap";
+export type WebFetchErrorKind = "invalid-url" | "unsupported-scheme" | "userinfo" | "blocked-address" | "dns" | "connection-refused" | "connection-reset" | "tls" | "network" | "response-deadline" | "total-deadline" | "redirect-limit" | "http-status" | "unsupported-content-type" | "unsupported-content-encoding" | "body-cap";
 
 // @public
 export interface WebFetchOptions extends WebFetchAddressPolicy {

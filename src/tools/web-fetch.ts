@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { version } from "../../package.json";
 import { BlockedWebAddress, checkedWebAddress, resolveWebAddresses, type WebFetchAddressPolicy, type WebFetchResolver } from "./web-address.ts";
-import { connectWebAddress, type WebFetchConnect } from "./web-transport.ts";
+import { connectWebAddress, UnsupportedWebContentEncoding, type WebFetchConnect } from "./web-transport.ts";
 import { abortError } from "./fs.ts";
 import { htmlToText } from "./html-text.ts";
 import { utf8ByteLength as utf8Length, utf8Prefix } from "./output-budget.ts";
@@ -65,6 +65,7 @@ export type WebFetchErrorKind =
   | "redirect-limit"
   | "http-status"
   | "unsupported-content-type"
+  | "unsupported-content-encoding"
   | "body-cap";
 
 /** Structured outcome of one web_fetch call: URLs, HTTP status, byte counts, truncation, spill path, timing and failure class. */
@@ -382,6 +383,7 @@ function maskedUrl(value: string): string {
 
 /** Map a fetch rejection to a plain failure class and message. */
 function networkOutcome(error: unknown, url: URL): Outcome {
+  if (error instanceof UnsupportedWebContentEncoding) return { kind: "unsupported-content-encoding", message: error.message };
   const record = typeof error === "object" && error !== null ? error as { code?: unknown; message?: unknown; cause?: unknown } : {};
   const nested = typeof record.cause === "object" && record.cause !== null ? record.cause as { code?: unknown; message?: unknown } : {};
   const code = `${String(record.code ?? "")} ${String(nested.code ?? "")}`;
