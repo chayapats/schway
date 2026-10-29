@@ -2,7 +2,7 @@
 
 Greptile reviews this repo for free under its open-source program, with 100 credits a month. Spend them where a review finds bugs.
 
-`.greptile/config.json` turns off automatic reviews (`"autoReview": []`), so opening a PR or pushing to one spends nothing. It also tells Greptile to ignore Markdown, `docs/`, screen-catalog goldens, images and lockfiles.
+`greptile.json` turns off automatic reviews (`"skipReview": "AUTOMATIC"` and `"autoReview": []`), so opening a PR or pushing to one spends nothing. It also tells Greptile to ignore Markdown, `docs/`, screen-catalog goldens, images and lockfiles. Greptile reads it from the PR's source branch, so branches made before it landed still use the dashboard settings. If a new PR still gets an automatic review, turn off automatic reviews in the Greptile dashboard too.
 
 ## When to request a review
 

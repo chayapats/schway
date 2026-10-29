@@ -1,5 +1,7 @@
 {
+  "skipReview": "AUTOMATIC",
   "autoReview": [],
+  "triggerOnUpdates": false,
   "triggerOnDrafts": false,
   "ignorePatterns": "**/*.md\ndocs/**\ntests/screen-catalog/goldens/**\n*.png\n*.gif\nbun.lock\nCHANGELOG.md"
 }
