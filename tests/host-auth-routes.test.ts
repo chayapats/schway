@@ -5,6 +5,7 @@ import { createHost, hostCapabilities, HostError, checkAuthReadiness, classifyAu
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir, buildIsolatedCliEnv } from "./helpers.ts";
 import { encodeXaiSse, XAI_TEXT_EVENTS } from "./fixtures/xai.ts";
+import { GROK_ERROR_FIXTURES, grokErrorResponse } from "./fixtures/grok-errors.ts";
 import { CODEX_RESPONSES_URL } from "../src/model/providers/codex-subscription.ts";
 import { grokSubscriptionIdentity, codexSubscriptionIdentity } from "../src/auth/store.ts";
 
@@ -786,4 +787,26 @@ test("uncertain cleanup errors survive preserveRefusal and classify distinctly",
   const clean = credentialWriteRefusedError(new Error("owner stopped"));
   expect(isCleanupUncertain(clean)).toBe(false);
   expect(classifyAuthError(clean, selection).nextAction).toMatch(/No credential was changed/);
+});
+
+for (const fixture of GROK_ERROR_FIXTURES) test(`route-bound Grok ${fixture.name} keeps its safe status`, async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore();
+    await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "route-access-sentinel", obtainedAt: 0 }));
+    let calls = 0;
+    const config = await options(dir, { route: "grok", model: "grok-4.7", store, env: { XAI_API_KEY: "billing-bait" }, fetch: async () => { calls++; return grokErrorResponse(fixture); } });
+    config.limits.maxAttempts = 1;
+    const host = await createHost(config);
+    const session = await host.createSession();
+    try {
+      const run = await session.submitWithRoute({ text: "fixture only" });
+      expect(run.outcome).toBe("error");
+      if (run.outcome !== "completed") {
+        expect(run.auth.status).toBe(fixture.expected);
+        if (fixture.expected === "quota-exceeded") expect(run.auth.nextAction).toContain("https://grok.com/?_s=usage");
+      }
+      expect(calls).toBe(1);
+      expect(JSON.stringify(run)).not.toMatch(/untrusted-body-sentinel|route-access-sentinel|billing-bait/);
+    } finally { await session.close(); await host.close(); }
+  });
 });

@@ -1,3 +1,4 @@
+import { GROK_QUOTA_ERROR } from "../src/model/grok-errors.ts";
 import { expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -341,5 +342,17 @@ test("forbidden credentials do not imply expiry and retain diagnostic details", 
     expect(tui.inspectRecovery()).toBe(true);
     expect(tui.snapshot().transcript.at(-1)?.text).toContain("account access forbidden");
     tui.dispose();
+  });
+});
+
+test("Grok quota recovery keeps continuation and shows subscription usage", async () => {
+  await withTempDir(async dir => {
+    const tui = controller(dir, Array.from({ length: 3 }, () => ({ error: GROK_QUOTA_ERROR, status: 429 })));
+    await tui.submit("fixture task");
+    const snapshot = tui.snapshot();
+    expect(snapshot.recovery?.category).toBe("rate-limit");
+    expect(snapshot.recovery?.actions).toContain("continue");
+    expect(snapshot.transcript.some(entry => entry.text.includes("https://grok.com/?_s=usage"))).toBe(true);
+    expect(snapshot.transcript.some(entry => entry.text.includes("Use an xAI API key instead"))).toBe(false);
   });
 });

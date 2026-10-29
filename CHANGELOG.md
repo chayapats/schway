@@ -10,6 +10,13 @@
   IPs. Exact host allowlists only tighten access; local development needs the
   named `dangerouslyAllowPrivateAddressesForDevelopment` opt-in (#433).
 
+### Fixed
+
+- Classify Grok subscription spending-limit denials as `quota-exceeded`, with
+  a subscription usage link and no API-key billing fallback. Catalog, inference
+  and host status agree; plan rejection remains distinct from transient
+  Cloudflare challenges, and provider response prose stays private (#431).
+
 ### Added
 
 - Export `SearchProvider`, `createWebSearchTool(provider, options?)` and

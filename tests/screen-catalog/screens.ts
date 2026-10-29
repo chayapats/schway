@@ -241,6 +241,7 @@ export const SCREENS: readonly Screen[] = [
     ui.mockInput.pressKey("l", { meta: true }); await ui.settle(); ui.mockInput.pressEnter();
   }, ready: s => s.status === "error" && s.loginChooser?.level === "chatgpt" },
   { id: "grok-plan-error", title: "Grok plan restriction", description: "A plan restriction retains the saved login and offers another connection.", drive: ui => grokLogin(ui), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.includes("Your Grok plan doesn't include API access")) },
+  { id: "grok-quota-error", title: "Grok usage limit", description: "An exhausted subscription retains its route and points to subscription usage.", noColorWidths: true, drive: ui => grokLogin(ui), ready: s => s.status === "error" && s.transcript.some(entry => entry.text.includes("https://grok.com/?_s=usage")) },
   { id: "model-picker", title: "Model picker", description: "A short connected list shows readable model names and access routes.", noColorWidths: true, drive: async ui => { ui.mockInput.pressKey("m", { meta: true }); }, ready: s => !!s.modelPicker && !s.modelPicker.loading },
   { id: "details-model", title: "Model details", description: "F2 reveals the selected model's exact ID and capacity without changing the connection.", noColorWidths: true, drive: async ui => {
     ui.mockInput.pressKey("m", { meta: true }); await ui.waitFor(s => !!s.modelPicker && !s.modelPicker.loading); openDetails(ui);

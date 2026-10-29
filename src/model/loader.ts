@@ -82,7 +82,14 @@ async function loadSelectedModel(input: ProviderLoaderInput, fetchFn?: FetchLike
         apiKey: signal => refresher.getValidAccessToken(signal),
         refreshCredential: (token, signal) => refresher.getValidAccessToken(signal, token),
         authError: status => new Error(status === 403 ? grok.GROK_PLAN_ERROR : grok.grokRevokedSessionError()),
-        model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, authRoute: "grok", fetch: fetchFn,
+        model: input.model, maxTokens: input.maxTokens, thinking: input.thinking, modelCapability: input.modelCapability, authRoute: "grok",
+        fetch: async (url, init) => {
+          const response = await (fetchFn ?? fetch)(url, init);
+          const failure = await grok.subscriptionApiError(response, init?.signal ?? undefined);
+          // Normalize before SDK parsing: xAI's top-level code otherwise disappears
+          // when its `error` field is prose rather than an OpenAI error object.
+          return failure ? Response.json({ error: { message: failure.message } }, { status: failure.status }) : response;
+        },
         replayHostedItems: input.replayHostedItems,
       }));
     }

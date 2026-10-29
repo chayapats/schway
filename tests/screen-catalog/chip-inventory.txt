@@ -28,6 +28,7 @@ grok-device-approval | Esc cancel sign-in
 sign-in-browser-not-opened | ↑↓ select | Enter continue | Esc cancel sign-in
 sign-in-timeout | F2 details | Esc back | ↑↓ select | Enter continue
 grok-plan-error | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
+grok-quota-error | Shift+Tab change mode | Enter send | Ctrl+F find | Alt+I inspect
 model-picker | ↑↓ select | Enter use | Esc back
 details-model | ↑↓ select | Enter use | Esc back
 model-picker-unconnected | Esc back | ↑↓ select | Enter open

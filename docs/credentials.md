@@ -179,3 +179,10 @@ alongside the pin. Account visibility and authentication checks still apply.
 `--provider xai --xai-auth grok` uses only the saved Grok login. Access refresh is shared across simultaneous requests; a 401 gets one refresh and resend. Revocation and plan-level 403 errors never fall back to API-key billing. `/logout grok` removes only this login. See [route configuration](configuration.md#grok-subscription-xai-oauth).
 
 Test coverage for this guide: [release verification](release-verification.md#credentials).
+
+Grok API denials are classified by their error code. A `*:spending-limit`
+401/403 reports `quota-exceeded` and points to <https://grok.com/?_s=usage>;
+wait for subscription usage to reset before retrying. A plan rejection stays
+`rejected`. A `cf-mitigated: challenge` response is temporarily unavailable.
+Catalog reads, inference and host status share these categories without exposing
+provider response prose, refreshing a quota denial, or switching billing.

@@ -1,3 +1,4 @@
+import { GROK_QUOTA_ERROR } from "../model/grok-errors.ts";
 import { openUndoStore } from "../undo/store.ts";
 import { runAgentLoop } from "../agent/loop.ts";
 import { relative } from "node:path";
@@ -537,6 +538,10 @@ export abstract class TurnLayer extends CompactionLayer {
       case "error": {
         this.markProvisionalIncomplete();
         this.clearRetryNotice();
+        if (event.message.includes(GROK_QUOTA_ERROR)) {
+          this.offerRecovery("rate-limit", true, GROK_QUOTA_ERROR, event.message, operationId);
+          return;
+        }
         if (event.message === "Your Grok plan doesn't include API access. Use an xAI API key instead.") { this.fail(event.message); return; }
         if (event.origin === "harness" && event.category !== "session-write") {
           this.fail(redactSecrets(event.message, this.secrets));

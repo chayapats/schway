@@ -1,3 +1,4 @@
+import { GROK_QUOTA_ERROR } from "../model/grok-errors.ts";
 import { isOpenRouterEndpoint, resolveThinkingSelection } from "../model/thinking.ts";
 import { openRouterModelCapabilities } from "../model/model-list.ts";
 import { isOpenAIAuthPreference, resolveProviderCredential } from "../auth/credentials.ts";
@@ -278,7 +279,7 @@ export abstract class ModelsLayer extends CommandsLayer {
     if (this.modelPickerAccess?.grok === "Grok" && this.credentials?.listGrokModels) {
       tasks.push((async () => {
         try { const models = filterXaiModels(await this.boundedPickerTask(signal, this.credentials!.listGrokModels!(signal))); if (current()) { this.grokModels = models; this.grokModelsUnavailable = false; this.pickerRouteFailures.delete("grok"); } }
-        catch (error) { if (current()) { this.grokModels = undefined; this.grokModelsUnavailable = true; this.pickerRouteFailures.set("grok", this.pickerDiagnostic(error)); if (error instanceof Error && error.message.startsWith("Your Grok plan")) this.fail(error.message); } }
+        catch (error) { if (current()) { this.grokModels = undefined; this.grokModelsUnavailable = true; this.pickerRouteFailures.set("grok", this.pickerDiagnostic(error)); if (error instanceof Error && (error.message.startsWith("Your Grok plan") || error.message.includes(GROK_QUOTA_ERROR))) this.fail(error.message); } }
       })());
     }
     await Promise.all(tasks.map(task => task.finally(() => {
