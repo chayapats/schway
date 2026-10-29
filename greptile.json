@@ -1,0 +1,7 @@
+{
+  "autoReview": ["open"],
+  "triggerOnDrafts": false,
+  "disabledLabels": ["documentation"],
+  "ignoreKeywords": "no-greptile",
+  "ignorePatterns": "bun.lock\ntests/fixtures/sessions/**\ntests/screen-catalog/goldens/**\ndocs/demo/*.gif\n**/*.gif\n**/*.png\n**/*.jpg\n**/*.jpeg\n**/*.webp\n**/*.ico\n**/*.woff\n**/*.woff2\n**/*.ttf\n**/*.otf\n**/*.mp4\n**/*.mov\n**/*.webm\n**/*.pdf\n**/*.zip\n**/*.tgz\n**/*.wasm"
+}
