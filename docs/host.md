@@ -210,6 +210,65 @@ service-identity Secret Service and its D-Bus session, a person approving the di
 code/link, and checks for expiry, cancel, denial and unavailable storage. Collect only
 sanitized outcome/route evidence; never retain tokens or approval codes.
 
+## Read-only model catalog
+
+`hostCapabilities().modelCatalog` is `"schway.host.model-catalog/v1"`. This is an
+additive capability; `RELEASE_CONTRACT` stays `"schway.host.release/v2"`.
+Applications can offer the signed-in account's models without asking users to
+type a model ID:
+
+```ts
+import { listRouteModels, type HostAuthSelection, type HostRouteModels } from "schway/host";
+
+const selection: Omit<HostAuthSelection, "model"> = { route: "grok", store, fetch: fixtureFetch };
+const result: HostRouteModels = await listRouteModels(selection);
+if (result.status === "listed") {
+  // Render result.models as choices and mark the recommended row.
+  console.log(result.models);
+} else {
+  console.log(result.status, result.nextAction);
+}
+```
+
+The exact public signature is
+`listRouteModels(selection: Omit<HostAuthSelection, "model">): Promise<HostRouteModels>`.
+`HostModelChoice` carries `readonly id: string`, `readonly recommended: boolean`
+and optional `readonly contextWindow?: number`. `HostRouteModels` is a union:
+
+- `{ readonly status: "listed"; readonly route: HostAuthRoute; readonly models: readonly HostModelChoice[]; readonly containsNoSecrets: true }`
+- `{ readonly status: Exclude<HostAuthStatusCode, "configured-unverified">; readonly route: HostAuthRoute; readonly nextAction: string; readonly containsNoSecrets: true }`
+
+The selection uses the same route, optional store, environment, protocol-fixture
+`fetch` and `credentialWriteGuard` as `HostAuthSelection`, without `model`. Raw
+credentials, API-key routes and extra fields are rejected. Only the selected
+subscription identity is read. Shared account discovery validates IDs, visibility,
+context metadata and credential reflections under its five-second deadline and
+1 MiB body limit. Only IDs selectable by host auth are returned, with at most 64
+rows. The existing recommendation helper chooses a provider-marked default,
+a route fallback present in the list, a known listed model, then the first listed
+model. The selected recommendation is retained when the list is bounded; an
+absent fallback is never invented. No API-key catalog or cached catalog replaces
+a failed subscription catalog.
+
+Listing sends catalog GETs only: no inference, quota-consuming probe, token
+refresh request, credential write, session or application-state mutation. Renewal
+is refused before HTTP because a rotating refresh could invalidate the saved
+credential even without a store write. If renewal would be needed, a supplied
+`credentialWriteGuard` is consulted; refusal returns `store-unavailable` without
+provider or guard error text. Otherwise listing returns `needs-login` with guidance
+to renew through normal sign-in or a route-bound request, then list again. A
+successful list proves catalog visibility only; `observedInference` remains
+`"not-checked"` in host capabilities.
+
+Non-listed results preserve the auth status vocabulary, including local
+`needs-login`, `invalid-store`, `store-unavailable`, remote `rejected`,
+`quota-exceeded`, `model-unavailable` and `integration-unavailable`. Grok
+`*:spending-limit` 401/403 denials return `quota-exceeded` and the subscription
+usage link <https://grok.com/?_s=usage>; a real plan rejection stays `rejected`,
+and a `cf-mitigated: challenge` response is temporarily unavailable. No error
+body, unknown error code, token, account ID or native store diagnostic is returned.
+Offline evidence is in `tests/host-route-models.test.ts` and the packed consumer.
+
 ## Run control, progress and terminal outcomes
 
 `schway.host.run-control/v1` bounds every admitted run by finite `maxTurns`, `maxConcurrentTools`, `deadlineMs` and `maxAttempts`, with no unlimited or malformed values admitted. The deadline covers model rounds, transport retry backoff, overflow recovery and compaction waits. `submit`, `submitWithRoute` and `compact` accept `AbortSignal | HostRunOptions`; `HostRunOptions` carries an optional cooperative `signal`, an injectable `HostClock` for deterministic backoff/deadline waits and an optional transient `onProgress` observer.
@@ -396,6 +455,9 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `AssistantTelemetry` | Harness timing and reported model usage. |
 | `beginDeviceSignIn` | Start bounded selected-route device approval without exposing tokens. |
 | `checkAuthReadiness` | Check selected-route store readiness without network or inference. |
+| `listRouteModels` | List a bounded selected-account catalog without inference or credential writes. |
+| `HostModelChoice` | Selectable model with recommendation and observed context limit. |
+| `HostRouteModels` | Listed models or safe route failure with `containsNoSecrets`. |
 | `classifyAuthError` | Map a route-bound failure to a safe status without secrets. |
 | `containsNoSecrets` | Test helper confirming sentinels are absent from returned data. |
 | `ContextSection` | Named host/native dynamic context. |

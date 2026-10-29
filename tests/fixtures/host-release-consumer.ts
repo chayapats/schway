@@ -6,6 +6,8 @@ import {
   createWebSearchTool,
   type SearchProvider,
   hostCapabilities,
+  listRouteModels,
+  credentialReferenceForRoute,
   validateSnapshotShape,
   hashSnapshotBytes,
   RELEASE_CONTRACT,
@@ -21,6 +23,7 @@ import {
 
 type Input =
   | { action: "capabilities" }
+  | { action: "catalog"; route: "codex" | "grok" }
   | { action: "release"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string; restoreDirectory: string }
   | { action: "codex-route" | "grok-route"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
@@ -63,6 +66,22 @@ const input = (await Bun.stdin.json()) as Input;
 if (input.action === "capabilities") {
   const caps = hostCapabilities();
   console.log(JSON.stringify(caps));
+} else if (input.action === "catalog") {
+  const store = fakeStore();
+  await store.set(credentialReferenceForRoute(input.route), JSON.stringify({ accessToken: "packed-catalog-fixture", obtainedAt: 0 }));
+  let requests = 0, writes = 0;
+  const result = await listRouteModels({ route: input.route, store: {
+    get: store.get,
+    set: async () => { writes++; throw new Error("unexpected write"); },
+    delete: async () => { writes++; throw new Error("unexpected delete"); },
+  }, fetch: async (_url, init) => {
+    if (init?.method !== "GET") throw new Error("unexpected non-catalog request");
+    requests++;
+    return Response.json(input.route === "grok"
+      ? { data: [{ id: "grok-4.7", context_length: 64000 }] }
+      : { models: [{ slug: "gpt-6-astra", visibility: "list", context_window: 64000 }] });
+  } });
+  console.log(JSON.stringify({ result, requests, writes }));
 } else if (input.action === "codex-route" || input.action === "grok-route") {
   const route = input.action === "codex-route" ? "codex" : "grok";
   const modelId = route === "codex" ? "gpt-5.4" : "grok-4.7";

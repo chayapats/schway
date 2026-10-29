@@ -35,6 +35,13 @@
   return `busy` in this process. Selected-store writes retain pre/post fences,
   exact-value cleanup and native locking, including explicit cleanup uncertainty.
   The composed release contract remains `schway.host.release/v2` (#435).
+- Export `listRouteModels(selection)` from `schway/host`, with the additive
+  `modelCatalog: "schway.host.model-catalog/v1"` capability. The selected
+  subscription account supplies at most 64 selectable models, shared
+  recommendations and observed context limits. Results carry `containsNoSecrets`
+  and safe auth statuses; catalog GETs perform no inference, renewal or credential
+  writes, honor renewal fences, and support offline fetch fixtures. The composed
+  release contract remains `schway.host.release/v2` (#432).
 
 - Add `schway.host.core-tools/v1`: `coreToolDefinitions(backend, options?)`
   exports `read`, `write`, `edit`, `bash`, `grep`, `find` and `ls` from
