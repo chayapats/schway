@@ -88,7 +88,10 @@ async function loadSelectedModel(input: ProviderLoaderInput, fetchFn?: FetchLike
           const failure = await grok.subscriptionApiError(response, init?.signal ?? undefined);
           // Normalize before SDK parsing: xAI's top-level code otherwise disappears
           // when its `error` field is prose rather than an OpenAI error object.
-          return failure ? Response.json({ error: { message: failure.message } }, { status: failure.status }) : response;
+          return failure ? Response.json({ error: { message: failure.message } }, {
+            status: failure.status,
+            headers: response.headers.has("Retry-After") ? { "Retry-After": response.headers.get("Retry-After")! } : {},
+          }) : response;
         },
         replayHostedItems: input.replayHostedItems,
       }));

@@ -38,3 +38,26 @@ for (const fixture of GROK_ERROR_FIXTURES) for (const path of ["model list", "di
     expect(calls).toEqual([path === "inference" ? "https://api.x.ai/v1/responses" : "https://api.x.ai/v1/models"]);
   });
 }
+
+for (const fixture of GROK_ERROR_FIXTURES.filter(fixture => fixture.expected !== "rejected")) {
+  test(`Grok ${fixture.name} preserves Retry-After through inference error normalization`, async () => {
+    const store = fakeCredentialStore();
+    await saveSubscriptionTokens(store, { accessToken: "fixture-access-sentinel", refreshToken: "fixture-refresh-sentinel", obtainedAt: 0 });
+    let requests = 0;
+    const model = await loadProviderModel({ provider: "xai", xaiAuth: "grok", grokStore: store, model: "grok-4.7" }, async () => {
+      requests++;
+      const response = grokErrorResponse(fixture);
+      response.headers.set("Retry-After", "17");
+      return response;
+    });
+    let error: unknown;
+    try { await collect(model.stream(sampleRequest())); }
+    catch (caught) { error = caught; }
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error & { status: number }).status).toBe(fixture.expected === "quota-exceeded" ? 429 : 503);
+    expect((error as Error & { headers: Headers }).headers.get("Retry-After")).toBe("17");
+    expect(String(error)).toContain(fixture.message);
+    expect(String(error)).not.toContain("untrusted-body-sentinel");
+    expect(requests).toBe(1);
+  });
+}
