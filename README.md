@@ -1,5 +1,8 @@
 # Schway
 
+[![GitHub stars](https://img.shields.io/github/stars/chayapats/schway?style=social)](https://github.com/chayapats/schway/stargazers)
+[![Greptile: The War on Bugs](https://www.greptile.com/badge.svg)](https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source)
+
 A lean, fast coding agent for your terminal.
 
 ![Schway fixes a clamp function, runs its test, and reviews the changes.](https://raw.githubusercontent.com/chayapats/schway/main/docs/demo/schway-demo.gif)
