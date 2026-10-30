@@ -177,11 +177,147 @@ test("all caller fences refusing a renewal remove a late write without retaining
   });
 });
 
-async function drain(model: Model): Promise<void> {
-  for await (const _event of model.stream({ systemPrompt: "fixture", context: [], items: [] })) { /* Drain protocol fixture. */ }
+async function drain(model: Model, signal?: AbortSignal): Promise<void> {
+  for await (const _event of model.stream({ systemPrompt: "fixture", context: [], items: [], signal })) { /* Drain protocol fixture. */ }
 }
 
 for (const route of ["codex", "grok"] as const) {
+  for (const scenario of ["control", "cancel", "logout"] as const) {
+    test(`${route} readiness participation retains its admitted epoch through ${scenario}`, async () => {
+      await withTempDir(async dir => {
+        const base = fakeCredentialStore(); await base.set(identity(route), expired);
+        const entered = deferred(), release = deferred();
+        let sends = 0;
+        const lifecycle = createHostCredentialLifecycle({ store: { ...base, async get(key) {
+          entered.resolve(); await release.promise; return base.get(key);
+        } } });
+        const owner = await createHost({ ...await options(dir, "a"), auth: { route, model: "fixture-model", lifecycle,
+          fetch: async () => { sends++; return response(route); } } });
+        const session = await owner.createSession();
+        const pending = session.submitWithRoute({ text: "waiting for readiness" }, { clock: fakeClock() });
+        await entered.promise;
+        if (scenario === "cancel") session.cancel();
+        if (scenario === "logout") await lifecycle.logout(route);
+        // Replacement sign-in must not let work admitted before revocation adopt the new epoch.
+        const signedIn = JSON.stringify({ accessToken: "replacement-secret", expiresAt: Date.now() + 3_600_000, obtainedAt: 1 });
+        await base.set(identity(route), signedIn); release.resolve();
+        const result = await pending;
+        expect(result.outcome).toBe(scenario === "control" ? "completed" : scenario === "cancel" ? "cancelled" : "error");
+        expect(sends).toBe(scenario === "control" ? 1 : 0);
+        expect(await base.get(identity(route))).toBe(signedIn);
+        await session.close(); await owner.close(); await lifecycle.close();
+      });
+    });
+  }
+
+  for (const scenario of ["single-failure", "overlap-failure", "overlap-first-failure", "overlap-success"] as const) {
+    test(`${route} logout quarantine survives ${scenario} with replacement sign-in`, async () => {
+      await withTempDir(async dir => {
+        const base = fakeCredentialStore(); await base.set(identity(route), expired);
+        const entered = deferred(), release = deferred(), queued = deferred(), finish = deferred();
+        let deletes = 0, sends = 0;
+        const lifecycle = createHostCredentialLifecycle({ store: {
+          get: key => base.get(key), set: (key, value) => base.set(key, value),
+          async delete(key) {
+            const call = ++deletes;
+            if (call === 1) { entered.resolve(); await release.promise; }
+            if (call === 2 && scenario !== "single-failure") { queued.resolve(); await finish.promise; }
+            if ((call === 1 && (scenario === "single-failure" || scenario === "overlap-first-failure")) || (call === 2 && scenario === "overlap-failure")) throw new Error("store-secret");
+            return base.delete(key);
+          },
+        } });
+        const owner = await createHost({ ...await options(dir, "a"), auth: { route, model: "fixture-model", lifecycle,
+          fetch: async () => { sends++; return response(route); } } });
+        const session = await owner.createSession();
+        const first = lifecycle.logout(route).then(() => undefined, error => error);
+        await entered.promise;
+        const second = scenario === "single-failure" ? undefined : lifecycle.logout(route).then(() => undefined, error => error);
+        release.resolve();
+        const firstResult = await first;
+        if (scenario === "single-failure" || scenario === "overlap-first-failure") expect(firstResult).toMatchObject({ code: "storage" });
+        else expect(firstResult).toBeUndefined();
+        if (second) await queued.promise;
+        // Native sign-in is outside the owner and can replace a value while deletion is queued.
+        const signedIn = JSON.stringify({ accessToken: "replacement-secret", expiresAt: Date.now() + 3_600_000, obtainedAt: 1 });
+        await base.set(identity(route), signedIn);
+        finish.resolve();
+        const secondResult = await second;
+        if (scenario === "overlap-success" || scenario === "overlap-first-failure") {
+          expect(secondResult).toBeUndefined();
+          expect((await owner.auth!.checkReadiness()).status).toBe("needs-login");
+        } else {
+          if (second) expect(secondResult).toMatchObject({ code: "storage" });
+          expect(await base.get(identity(route))).toBe(signedIn);
+          expect((await owner.auth!.checkReadiness()).status).toBe("store-unavailable");
+          expect(await session.submitWithRoute({ text: "quarantined" }, { clock: fakeClock() })).toMatchObject({ outcome: "error", auth: { status: "store-unavailable" } });
+          expect(sends).toBe(0);
+          await lifecycle.logout(route);
+          expect((await owner.auth!.checkReadiness()).status).toBe("needs-login");
+        }
+        await base.set(identity(route), signedIn);
+        expect((await session.submitWithRoute({ text: "after successful logout" }, { clock: fakeClock() })).outcome).toBe("completed");
+        expect(sends).toBe(1);
+        await session.close(); await owner.close(); await lifecycle.close();
+      });
+    });
+  }
+
+  for (const entry of ["stream", "submitWithRoute"] as const) {
+    for (const phase of ["before-write", "after-write"] as const) {
+      for (const scenario of ["control", "cancel", "guard", "both-fenced", "logout"] as const) {
+        test(`${route} ${entry} retains rotating renewal for a late sibling ${phase}/${scenario}`, async () => {
+          await withTempDir(async dir => {
+            const base = fakeCredentialStore(); await base.set(identity(route), expired);
+            const guarded = deferred(), release = deferred();
+            let calls = 0, allowed = true, refreshes = 0, sends = 0;
+            const lifecycle = createHostCredentialLifecycle({ store: base });
+            const guardA: HostCredentialWriteGuard = async () => {
+              if (++calls === (phase === "before-write" ? 2 : 3)) { guarded.resolve(); await release.promise; }
+              if (!allowed) throw new Error("guard-secret");
+            };
+            const fetch = async (url: string | URL | Request) => {
+              if (String(url).includes("/oauth/token") || String(url).includes("auth.x.ai")) {
+                if (++refreshes > 1) return Response.json({ error: "invalid_grant" }, { status: 400 });
+                return Response.json({ access_token: "fresh-secret", refresh_token: "rotated-secret", expires_in: 3600 });
+              }
+              sends++; return response(route);
+            };
+            const a = await createHost({ ...await options(dir, "a"), auth: { route, model: "fixture-model", lifecycle, fetch, credentialWriteGuard: guardA } });
+            const b = await createHost({ ...await options(dir, "b"), auth: { route, model: "fixture-model", lifecycle, fetch,
+              credentialWriteGuard: () => { if (scenario === "both-fenced") throw new Error("peer-guard-secret"); } } });
+            const sa = await a.createSession(), sb = await b.createSession();
+            const ma = await a.auth!.createModel(), mb = await b.auth!.createModel(), stop = new AbortController();
+            const run = (model: Model, session: typeof sa, signal?: AbortSignal) => entry === "stream"
+              ? drain(model, signal).then(() => ({ outcome: "completed" }), () => ({ outcome: signal?.aborted ? "cancelled" : "error" }))
+              : session.submitWithRoute({ text: "renew" }, { clock: fakeClock(), signal });
+            const ra = run(ma, sa, stop.signal);
+            await guarded.promise;
+            // Direct streams attach synchronously; submitted runs are still waiting in local readiness.
+            const rb = run(mb, sb);
+            if (scenario === "cancel") { if (entry === "stream") stop.abort(); else sa.cancel(); }
+            if (scenario === "guard" || scenario === "both-fenced") allowed = false;
+            const logout = scenario === "logout" ? lifecycle.logout(route) : undefined;
+            release.resolve();
+            const results = await Promise.all([ra, rb]); await logout;
+            expect(refreshes).toBe(1);
+            if (scenario === "logout") {
+              expect(results.every(result => result.outcome !== "completed")).toBe(true);
+              expect(sends).toBe(0); expect(await base.get(identity(route))).toBeNull();
+            } else if (scenario === "both-fenced") {
+              expect(results.map(result => result.outcome)).toEqual(["error", "error"]);
+              expect(sends).toBe(0); expect(await base.get(identity(route))).toBe(phase === "before-write" ? expired : null);
+            } else {
+              expect(results.map(result => result.outcome)).toEqual([scenario === "control" ? "completed" : scenario === "cancel" ? "cancelled" : "error", "completed"]);
+              expect(sends).toBe(scenario === "control" ? 2 : 1);
+              expect(JSON.parse((await base.get(identity(route)))!).refreshToken).toBe("rotated-secret");
+            }
+            await sa.close(); await sb.close(); await a.close(); await b.close(); await lifecycle.close();
+          });
+        });
+      }
+    }
+  }
+
   test(`${route} uncertain cleanup blocks subsequent credential use until logout succeeds`, async () => {
     await withTempDir(async dir => {
       const base = fakeCredentialStore(); await base.set(identity(route), expired);
@@ -226,7 +362,7 @@ test("different store identities and routes renew independently while handles fo
         } } });
     }));
     const models = await Promise.all(hosts.map(item => item.auth!.createModel()));
-    const pending = models.map(drain); await entered.promise;
+    const pending = models.map(model => drain(model)); await entered.promise;
     expect(refreshes).toBe(3); release.resolve(); await Promise.all(pending);
     // A second handle for the same store sees the already-renewed credential.
     const peer = await createHost({ ...await options(dir, "peer"), auth: { route: "codex", model: "fixture-model", lifecycle: sameStore, fetch: async () => response("codex") } });

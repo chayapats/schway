@@ -1,5 +1,5 @@
 import type { Model } from "../model/model.ts";
-import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
+import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 
 export { isCleanupUncertain, isCredentialWriteRefused };
@@ -39,7 +39,9 @@ export type HostAuthFetch = (input: string | URL | Request, init?: RequestInit) 
  * management flows use raw stores outside any embedding attempt. The guard runs
  * before every write and is rechecked after the backend write completes: a
  * refusal after the write removes exactly the value just written (compare and
- * delete), so no post-terminal credential stays visible. */
+ * delete) unless a shared lifecycle's valid sibling still authorizes it. With a
+ * lifecycle, guards can run during readiness before the caller's stream starts;
+ * refusal fences that caller even when a sibling retains the renewed value. */
 export type HostCredentialWriteGuard = (identity: HostCredentialReference) => Promise<void> | void;
 
 /** Explicit route/model binding without raw tokens or API-key material. */
@@ -272,13 +274,18 @@ export async function checkAuthReadiness(selection: HostAuthSelection): Promise<
 
 /** Create only the selected subscription adapter; the unselected route and TUI never load. */
 export async function createAuthRouteModel(selection: HostAuthSelection): Promise<Model> {
+  return createAuthRouteModelForRun(selection);
+}
+
+/** Bind an admitted run to its original route epoch and readiness participation. @internal */
+export async function createAuthRouteModelForRun(selection: HostAuthSelection, admitted?: CredentialLifecycleLease): Promise<Model> {
   const valid = validateAuthSelection(selection);
-  const store = effectiveStore(selection);
+  const store = admitted?.store ?? effectiveStore(selection);
   const { loadProviderModel } = await import("../model/loader.ts");
   const model = valid.route === "codex"
     ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store }, valid.fetch)
     : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store }, valid.fetch);
-  return valid.lifecycle ? lifecycleModel(valid.lifecycle, valid.route, store, model, valid.credentialWriteGuard) : model;
+  return valid.lifecycle ? lifecycleModel(valid.lifecycle, valid.route, store, model, valid.credentialWriteGuard, admitted) : model;
 }
 
 function httpStatusOf(error: unknown): number | undefined {

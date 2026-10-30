@@ -8,7 +8,7 @@ import { HostError } from "./index.ts";
 export interface HostCredentialLifecycle {
   /** Fence existing route work before deleting its credential; other routes remain independent. */
   logout(route: HostAuthRoute): Promise<void>;
-  /** Dispose this idle owner without logging out; active streams refuse with busy. */
+  /** Dispose this idle owner without logging out; active work refuses with busy. */
   close(): Promise<void>;
 }
 
@@ -19,6 +19,14 @@ type Interest = { owner: Owner; controller: AbortController; guard?: HostCredent
 type Route = { epoch: number; store: CredentialStore; interests: Set<Interest>; writes: Promise<void>; uncertain?: boolean };
 type State = { base: CredentialStore; routes: Map<HostAuthRoute, Route> };
 type Owner = { state: State; closed: boolean; active: number };
+
+/** One admitted run's route authority, retained from readiness through settlement. @internal */
+export interface CredentialLifecycleLease {
+  readonly store: CredentialStore;
+  readonly interest: Interest;
+  /** Release this participant once all of its admitted work has settled. */
+  release(): void;
+}
 const owners = new WeakMap<HostCredentialLifecycle, Owner>();
 const states = new WeakMap<HostCredentialStore, State>();
 let native: CredentialStore | undefined;
@@ -51,14 +59,25 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
   const current = () => { if (epoch !== route.epoch) throw credentialWriteRefusedError(); };
   const authorize = async () => {
     current();
-    const allowed = await Promise.all([...route.interests].map(async interest => {
-      if (interest.owner.closed || interest.controller.signal.aborted) return false;
-      try { await interest.guard?.(identity); }
-      catch { interest.refused = true; return false; }
-      return !interest.controller.signal.aborted && !interest.owner.closed;
-    }));
+    const checked = new Set<Interest>(), allowed = new Set<Interest>();
+    const active = (interest: Interest) => route.interests.has(interest) && !interest.refused &&
+      !interest.owner.closed && !interest.controller.signal.aborted;
+    // Guards can yield while a sibling joins, including during that sibling's readiness.
+    // Check every new participant before deciding that no authority remains.
+    for (;;) {
+      current();
+      const pending = [...route.interests].filter(interest => !checked.has(interest));
+      if (!pending.length) break;
+      await Promise.all(pending.map(async interest => {
+        checked.add(interest);
+        if (!active(interest)) return;
+        try { await interest.guard?.(identity); }
+        catch { interest.refused = true; return; }
+        if (active(interest)) allowed.add(interest);
+      }));
+    }
     current();
-    if (!allowed.some(Boolean)) throw credentialWriteRefusedError();
+    if (![...allowed].some(active)) throw credentialWriteRefusedError();
     // Refused peers must detach before a valid peer can use the shared renewal.
     // When all peers refuse, let the write/cleanup error reach every waiter first.
     for (const interest of route.interests) if (interest.refused) interest.controller.abort();
@@ -78,6 +97,7 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
       for (const owner of writers) owner.active++;
       return serialized(route, async () => {
         await authorize();
+        current();
         try {
           await state.base.set(identity, value);
           await authorize();
@@ -115,12 +135,17 @@ export function createHostCredentialLifecycle(options: HostCredentialLifecycleOp
       if (name !== "codex" && name !== "grok") throw new HostError("invalid-options");
       const route = routeFor(owner.state, name);
       // Rotate store identity synchronously: old provider refreshers can never write in the new epoch.
-      route.epoch++;
+      const epoch = ++route.epoch;
       route.uncertain = true;
       route.store = routeStore(owner.state, route, name);
       for (const interest of route.interests) { interest.refused = true; interest.controller.abort(); }
       owner.active++;
-      try { await serialized(route, async () => { await owner.state.base.delete(credentialReferenceForRoute(name)); route.uncertain = false; }); }
+      try { await serialized(route, async () => {
+        try { await owner.state.base.delete(credentialReferenceForRoute(name)); }
+        catch { route.uncertain = true; throw new HostError("storage"); }
+        // A later queued revocation must remain quarantined until its own deletion succeeds.
+        if (route.epoch === epoch) route.uncertain = false;
+      }); }
       catch { throw new HostError("storage"); }
       finally { owner.active--; }
     },
@@ -137,11 +162,22 @@ export function createHostCredentialLifecycle(options: HostCredentialLifecycleOp
 /** Validate the opaque owner without reading credentials or loading an adapter. @internal */
 export function validateCredentialLifecycle(handle: HostCredentialLifecycle): void { ownerFor(handle); }
 
-/** Pin the owner through an admitted route operation, including local readiness, tools and retries. @internal */
-export function acquireCredentialLifecycle(handle: HostCredentialLifecycle): () => void {
-  const owner = ownerFor(handle); owner.active++;
+/** Register route authority before readiness and pin it through tools, retries and settlement. @internal */
+export function acquireCredentialLifecycle(handle: HostCredentialLifecycle, name: HostAuthRoute, guard?: HostCredentialWriteGuard, signal?: AbortSignal): CredentialLifecycleLease {
+  const owner = ownerFor(handle), route = routeFor(owner.state, name);
+  const controller = new AbortController();
+  const interest: Interest = { owner, controller, guard, refused: false };
+  const abort = () => controller.abort();
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
+  owner.active++; route.interests.add(interest);
   let released = false;
-  return () => { if (!released) { released = true; owner.active--; } };
+  return { store: route.store, interest, release() {
+    if (released) return;
+    released = true;
+    signal?.removeEventListener("abort", abort);
+    route.interests.delete(interest); owner.active--;
+  } };
 }
 
 /** Resolve the current shared route store without publishing it on the lifecycle handle. @internal */
@@ -150,19 +186,19 @@ export function credentialLifecycleStore(handle: HostCredentialLifecycle, name: 
 }
 
 /** Attach one stream's cancellation and write fence without changing its siblings' authority. @internal */
-export function lifecycleModel(handle: HostCredentialLifecycle, name: HostAuthRoute, store: CredentialStore, model: Model, guard?: HostCredentialWriteGuard): Model {
+export function lifecycleModel(handle: HostCredentialLifecycle, name: HostAuthRoute, store: CredentialStore, model: Model, guard?: HostCredentialWriteGuard, admitted?: CredentialLifecycleLease): Model {
   return Object.freeze({ provider: model.provider, id: model.id, async *stream(request, call) {
     const owner = ownerFor(handle), route = routeFor(owner.state, name);
     if (route.store !== store) throw credentialWriteRefusedError();
-    const controller = new AbortController();
-    const interest: Interest = { owner, controller, guard, refused: false };
+    const lease = admitted ?? acquireCredentialLifecycle(handle, name, guard);
+    const { interest } = lease, { controller } = interest;
     const abort = () => controller.abort();
     request.signal?.addEventListener("abort", abort, { once: true });
     if (request.signal?.aborted) abort();
-    owner.active++; route.interests.add(interest);
     try {
       try { await guard?.(credentialReferenceForRoute(name)); }
       catch { interest.refused = true; throw credentialWriteRefusedError(); }
+      if (interest.refused) throw credentialWriteRefusedError();
       controller.signal.throwIfAborted();
       for await (const event of model.stream({ ...request, signal: controller.signal }, call)) yield event;
     } catch (error) {
@@ -171,7 +207,7 @@ export function lifecycleModel(handle: HostCredentialLifecycle, name: HostAuthRo
       throw error;
     } finally {
       request.signal?.removeEventListener("abort", abort);
-      route.interests.delete(interest); owner.active--;
+      if (!admitted) lease.release();
     }
   } } as Model);
 }
