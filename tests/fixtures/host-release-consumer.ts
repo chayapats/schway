@@ -2,6 +2,7 @@ import {
   CORE_TOOLS_CONTRACT,
   coreToolDefinitions,
   createHost,
+  createHostCredentialLifecycle,
   createWebFetchTool,
   createWebSearchTool,
   type SearchProvider,
@@ -27,6 +28,7 @@ type Input =
   | { action: "release"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string; restoreDirectory: string }
   | { action: "codex-route" | "grok-route"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
+  | { action: "inventory"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "core-tools" | "web-tools"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
 
 function fakeStore() {
@@ -336,6 +338,24 @@ if (input.action === "capabilities") {
     restored: restored.status,
     executions: state.executions,
   }));
+} else if (input.action === "inventory") {
+  const config: HostOptions = { workspaceRoot: input.workspaceRoot, homeDirectory: input.homeDirectory, sessionDirectory: input.sessionDirectory,
+    context: { policy: "strict", systemPrompt: "recovery", sections: [] }, tools: { policy: "exact", hostedLookup: "off", definitions: [] },
+    limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 } };
+  const owner = await createHost(config), recovery = await createHost(config);
+  const orphan = await owner.createSession(); // No app reference is committed.
+  const found = (await recovery.listSessions({ limit: 1 })).sessions[0]!;
+  if (found.reference.id !== orphan.reference.id || found.state !== "active") throw new Error("Orphan discovery failed");
+  const busy = await recovery.deleteSession(found.reference);
+  if (busy.status !== "blocked" || busy.reason !== "busy") throw new Error("Discovery bypassed lease");
+  await orphan.close(); await owner.close();
+  await recovery.retireSession(found.reference);
+  const retired = (await recovery.listSessions()).sessions[0]!.state;
+  const deleted = (await recovery.deleteSession(found.reference)).status;
+  const retry = (await recovery.deleteSession(found.reference)).status;
+  const tombstone = (await recovery.listSessions()).sessions[0]!.state;
+  await recovery.close();
+  console.log(JSON.stringify({ retired, deleted, retry, tombstone }));
 } else if (input.action === "renewal") {
   const { route, workspaceRoot, homeDirectory, sessionDirectory } = input;
   const modelId = route === "codex" ? "gpt-5.4" : "grok-4.7";
@@ -343,6 +363,13 @@ if (input.action === "capabilities") {
   const other = route === "codex" ? "grok" : "codex";
   const otherAccount = other === "codex" ? "codex-subscription:chatgpt" : "grok-subscription:xai";
   const store = fakeStore();
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>(), joined = Promise.withResolvers<void>();
+  let secondEntered = false, refreshing = false;
+  const tracked = { ...store, async get(identity: { account: string }) {
+    if (secondEntered && refreshing) joined.resolve();
+    return store.get(identity);
+  } };
+  const lifecycle = createHostCredentialLifecycle({ store: tracked });
   await store.set({ account }, JSON.stringify({
     accessToken: `${route}-stale-token`,
     refreshToken: `${route}-shared-refresh`,
@@ -361,27 +388,30 @@ if (input.action === "capabilities") {
     const target = String(url);
     if (target.includes("/oauth/token") || target.includes("auth.x.ai")) {
       refreshes++;
-      await Bun.sleep(20);
+      refreshing = true; started.resolve(); await release.promise;
       return Response.json({ access_token: `${route}-fresh-token`, refresh_token: `${route}-shared-refresh`, expires_in: 3600 });
     }
     inferences++;
     return route === "codex" ? codexOk() : grokOk();
   }) as never;
-  const host = await createHost({
+  const config: HostOptions = {
     workspaceRoot,
     homeDirectory,
     sessionDirectory,
     context: { policy: "strict", systemPrompt: "Release renewal probe", sections: [] },
     tools: { policy: "exact", hostedLookup: "off", definitions: [] },
     limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 },
-    auth: { route, model: modelId, store, fetch },
-  } as unknown as HostOptions);
-  const first = await host.createSession();
-  const second = await host.createSession();
-  const [one, two] = await Promise.all([
-    first.submitWithRoute({ text: "renewal one" }),
-    second.submitWithRoute({ text: "renewal two" }),
-  ]);
+    auth: { route, model: modelId, lifecycle, fetch },
+  };
+  const host = await createHost(config);
+  const peer = await createHost({ ...config, context: { ...config.context, systemPrompt: "independent operator" },
+    auth: { ...config.auth!, credentialWriteGuard: () => { secondEntered = true; } } });
+  const first = await host.createSession(), second = await peer.createSession();
+  const pendingOne = first.submitWithRoute({ text: "renewal one" });
+  await started.promise;
+  const pendingTwo = second.submitWithRoute({ text: "renewal two" });
+  await joined.promise; release.resolve();
+  const [one, two] = await Promise.all([pendingOne, pendingTwo]);
   if (one.outcome !== "completed" || two.outcome !== "completed") throw new Error("Expected concurrent renewal to complete");
   if (refreshes !== 1) throw new Error(`Expected one shared refresh, got ${refreshes}`);
   if (inferences !== 2) throw new Error(`Expected two route inferences, got ${inferences}`);
@@ -394,6 +424,7 @@ if (input.action === "capabilities") {
   await first.close();
   await second.close();
   await host.close();
+  await peer.close(); await lifecycle.close();
   console.log(JSON.stringify({ outcome: "completed", refreshes, inferences }));
 } else if (input.action === "core-tools") {
   const { workspaceRoot, homeDirectory, sessionDirectory } = input;

@@ -92,6 +92,8 @@ test("packed release artifact installs without private source access and adverti
       toolContract: "schway.host.tool-policy/v1",
       sessionContract: "schway.host.durable-sessions/v1",
       authContract: "schway.host.auth-routes/v1",
+      credentialLifecycleContract: "schway.host.credential-lifecycle/v1",
+      sessionInventoryContract: "schway.host.session-inventory/v1",
       runContract: "schway.host.run-control/v1",
       dataContract: "schway.host.managed-session-data/v1",
       snapshotContract: "schway.host.session-snapshot/v1",
@@ -130,6 +132,19 @@ test("packed release consumer composes strict review, lifecycle, cancel and snap
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}, 120_000);
+
+test("packed release consumer discovers and retires orphans through metadata only", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  try {
+    const { consumer } = await packAndInstall(dir);
+    const workspaceRoot = join(consumer, "work"), homeDirectory = join(consumer, "home"), sessionDirectory = join(consumer, "sessions");
+    await mkdir(workspaceRoot); await mkdir(homeDirectory);
+    expect(await packedConsumer(consumer, { action: "inventory", workspaceRoot, homeDirectory, sessionDirectory },
+      `await Bun.plugin({name:'inventory-guard',setup(builder){
+        builder.onLoad({filter:/(?:[/\\\\](?:providers|tui)[/\\\\]|@opentui|[/\\\\]openai[/\\\\])/},()=>{throw new Error('Metadata loaded provider or TUI');});
+      }});`)).toEqual({ retired: "retired", deleted: "deleted", retry: "already-deleted", tombstone: "deleted" });
+  } finally { await rm(dir, { recursive: true, force: true }); }
 }, 120_000);
 
 test("packed release consumer runs core tools over a fake backend through the exact policy", async () => {

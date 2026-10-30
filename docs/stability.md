@@ -105,6 +105,20 @@ Adding a member to an exported union such as `ExtensionEvent` or
 `ConversationItem`, or adding a new optional field, is a minor change. Removing
 or renaming a member, or making a field required, is a major change.
 
+The additive `schway.host.credential-lifecycle/v1` and
+`schway.host.session-inventory/v1` slices remain under `schway.host.release/v2`.
+The first adds an opaque process-local secure-store owner shared across separate
+hosts, with per-caller guards/cancellation, selected-route logout fencing and
+idle disposal. The second adds bounded store/workspace metadata enumeration and
+durable deletion intent before conversation removal, with no transcript access,
+execution, lease bypass or automatic app-job resumption. Existing JSONL and
+snapshot formats, branch/result references, retry policy and route/model/billing
+selection are unchanged. Inventory uses existing retirement tombstones,
+including deleted identities; complete sweeps converge under quiescent app
+creation, and corrupt metadata stays explicitly unresolved. This is a minor,
+additive host API change; capability names must be checked by consumers. See
+[host contracts](host.md) and [S14 conformance](host-s14-conformance.md).
+
 ## Core tool semantics
 
 The core tools are `read`, `write`, `edit`, `bash`, `web_fetch`, `grep`, `find`

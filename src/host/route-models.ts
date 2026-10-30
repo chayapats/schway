@@ -31,7 +31,7 @@ export async function listRouteModels(selection: Omit<HostAuthSelection, "model"
   // Catalog operations have their own read-only lifecycle, so they cannot join
   // an execution refresh that would persist tokens through the original store.
   const readOnlyStore = { get: store.get.bind(store), set: refuseRefresh, delete: refuseRefresh };
-  const ready = await checkAuthReadiness({ ...valid, store: readOnlyStore });
+  const ready = await checkAuthReadiness({ route: valid.route, model: valid.model, store: readOnlyStore });
   if (ready.status !== "configured-unverified") return failure(ready.status, ready.nextAction);
   const { discoverModels } = await import("../model/catalog-discovery.ts");
   const result = await discoverModels({
