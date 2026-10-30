@@ -29,6 +29,7 @@ import type { RuntimeEvent } from "../agent/events.ts";
 import { getEffectiveConversation } from "../context/compaction.ts";
 import { HostImageError, MAX_IMAGE_BYTES, inputImages, requestImages, validateImageBytes } from "../conversation/images.ts";
 import { imageProbeRecords, type HostImageRoute } from "./image-input.ts";
+import { managedSessionInventory, type HostSessionInventoryOptions } from "./session-inventory.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
@@ -140,6 +141,7 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
     limits: { ...input.limits, deadlineMs, maxAttempts },
     ...(authSelection ? { auth: { route: authSelection.route, model: authSelection.model,
       ...(authSelection.store ? { store: authSelection.store } : {}),
+      ...(authSelection.lifecycle ? { lifecycle: authSelection.lifecycle } : {}),
       ...(authSelection.env ? { env: { ...authSelection.env } } : {}),
       ...(authSelection.fetch ? { fetch: authSelection.fetch } : {}),
       ...(authSelection.credentialWriteGuard ? { credentialWriteGuard: authSelection.credentialWriteGuard } : {}) } } : {}) };
@@ -674,6 +676,11 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
   return Object.freeze({
     capabilities: hostCapabilities(options.images?.probes),
     ...(authBinding ? { auth: authBinding } : {}),
+    async listSessions(options?: HostSessionInventoryOptions) {
+      requireOpen(); opening++;
+      try { return await managedSessionInventory(directory, root, options); }
+      finally { opening--; }
+    },
     async createSession() {
       requireOpen(); opening++;
       try {
