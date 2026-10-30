@@ -98,6 +98,9 @@ export function createAuthRouteModel(selection: HostAuthSelection): Promise<Mode
 export function createHost(options: HostOptions): Promise<HostRuntime>;
 
 // @public
+export function createHostCredentialLifecycle(options?: HostCredentialLifecycleOptions): HostCredentialLifecycle;
+
+// @public
 export function createImageContent(reference: string, mediaType: ImageContent["mediaType"], data: Uint8Array): ImageContent;
 
 // @public
@@ -292,6 +295,7 @@ export interface HostAuthSelection {
     env?: Record<string, string | undefined>;
     // (undocumented)
     fetch?: HostAuthFetch;
+    lifecycle?: HostCredentialLifecycle;
     // (undocumented)
     model: string;
     // (undocumented)
@@ -318,6 +322,8 @@ export interface HostCapabilities {
     // (undocumented)
     readonly coreToolsContract: "schway.host.core-tools/v1";
     // (undocumented)
+    readonly credentialLifecycleContract: "schway.host.credential-lifecycle/v1";
+    // (undocumented)
     readonly dataContract: "schway.host.managed-session-data/v1";
     // (undocumented)
     readonly deviceSignInContract: "schway.host.device-sign-in/v1";
@@ -341,6 +347,8 @@ export interface HostCapabilities {
     readonly runContract: "schway.host.run-control/v1";
     // (undocumented)
     readonly sessionContract: "schway.host.durable-sessions/v1";
+    // (undocumented)
+    readonly sessionInventoryContract: "schway.host.session-inventory/v1";
     // (undocumented)
     readonly sessionOwnership: "exclusive-local-process-lease";
     // (undocumented)
@@ -371,6 +379,18 @@ export type HostCompactionResult = {
     outcome: "noop" | "error" | "cancelled" | "limit_exceeded";
     usage: HostRunUsage;
 };
+
+// @public
+export interface HostCredentialLifecycle {
+    close(): Promise<void>;
+    logout(route: HostAuthRoute): Promise<void>;
+}
+
+// @public
+export interface HostCredentialLifecycleOptions {
+    // (undocumented)
+    readonly store?: HostCredentialStore;
+}
 
 // @public
 export interface HostCredentialReference {
@@ -706,6 +726,7 @@ export interface HostRuntime {
     close(): Promise<void>;
     createSession(): Promise<HostSession>;
     deleteSession(reference: HostSessionReference): Promise<HostSessionDeletion>;
+    listSessions(options?: HostSessionInventoryOptions): Promise<HostSessionInventoryPage>;
     openSession(reference: HostSessionReference): Promise<HostSession>;
     restoreSessionSnapshot(snapshot: unknown, options?: HostSnapshotRestoreOptions): Promise<HostSnapshotRestoreResult>;
     retireSession(reference: HostSessionReference): Promise<void>;
@@ -758,6 +779,30 @@ export type HostSessionDeletion = {
     reason: "busy" | "conflict";
     nextAction: string;
 };
+
+// @public
+export interface HostSessionInventoryEntry {
+    // (undocumented)
+    readonly reference: HostSessionReference;
+    // (undocumented)
+    readonly state: "active" | "retired" | "deleted";
+}
+
+// @public
+export interface HostSessionInventoryOptions {
+    // (undocumented)
+    readonly after?: string;
+    // (undocumented)
+    readonly limit?: number;
+}
+
+// @public
+export interface HostSessionInventoryPage {
+    // (undocumented)
+    readonly next?: string;
+    // (undocumented)
+    readonly sessions: readonly HostSessionInventoryEntry[];
+}
 
 // @public
 export interface HostSessionReference {

@@ -559,6 +559,159 @@ cookies, uses no environment proxy and shares no sockets across hops. `now` is a
 optional monotonic timing fixture. Import and capability discovery remain lazy:
 no tool, TUI or provider adapter loads until a factory is called.
 
+## Shared credential ownership
+
+`hostCapabilities().credentialLifecycleContract` advertises
+`schway.host.credential-lifecycle/v1`, an additive slice under `release/v2` for
+[#442](https://github.com/chayapats/schway/issues/442).
+
+```ts
+import { createHost, createHostCredentialLifecycle } from "schway/host";
+
+const lifecycle = createHostCredentialLifecycle(); // No keychain or network operation yet.
+const first = await createHost({ ...firstRunOptions,
+  auth: { route: "codex", model: "gpt-6.1-sol", lifecycle, credentialWriteGuard: firstRunFence } });
+const second = await createHost({ ...secondRunOptions,
+  auth: { route: "codex", model: "gpt-6.1-sol", lifecycle, credentialWriteGuard: secondRunFence } });
+// Each host keeps its own context, tools, limits, workspace, sessions and cancellation.
+// Cancel admitted work and await settlement before closing its host.
+await first.close();
+await second.close();
+await lifecycle.close(); // Does not log out.
+```
+
+The exact factory is
+`createHostCredentialLifecycle(options?: { readonly store?: HostCredentialStore }): HostCredentialLifecycle`.
+The opaque handle has only `logout(route: HostAuthRoute): Promise<void>` and
+`close(): Promise<void>`. `HostAuthSelection.lifecycle` and `store` are mutually
+exclusive. A forged or disposed handle is rejected. `store` remains an explicit
+trusted secure-store seam for fixtures; production omission selects Schway's OS
+store and never another CLI's cache, an API key, or plaintext storage.
+
+Default factories share one process-stable OS-store identity. Factories given
+the same store object also share identity; distinct store objects do not. Codex
+and Grok have separate renewal/write scopes. Account qualifiers within one route
+remain outside this contract (#413). All participating hosts must use lifecycle
+handles; legacy hosts without one, CLI management, other processes and direct
+keychain writers do not join this process-local renewal owner.
+
+The existing selected-provider refresher owns protocol, single-flight renewal
+and retries. Streams remain concurrent; the shared resource is credential
+renewal. Each direct stream registers its own cancellation and write guard;
+`submitWithRoute` registers before awaiting local readiness and retains that
+participation through settlement. A renewal may persist while any interested,
+unfenced participant authorizes it, including a sibling that joins while an
+asynchronous guard is pending or is still waiting in readiness. A refused
+participant cannot proceed to inference on that renewal, and cannot disable a
+valid sibling. Guards run before and after the backend write, and can run before
+that participant's stream starts; they must not wait for its readiness or stream
+to finish. If every interested participant is cancelled or fenced, a late write
+is removed by exact-value cleanup; uncertain cleanup blocks later reads until
+successful logout. No raw credential is returned in the handle, readiness,
+outcomes, progress or diagnostics.
+
+The embedding application owns the lifecycle handle. Hosts borrow it; closing a
+host never disposes the owner or logs out. An admitted `submitWithRoute` pins its
+owner from readiness through terminal settlement, including tools and retry
+waits. Direct `createAuthRouteModel` streams and in-flight credential writes also
+pin it. `close()` refuses `busy` while pinned, is idempotent when idle, and fences
+later auth use through that handle. It does not cancel streams, erase credentials
+or dispose sibling owner handles. Close hosts after their runs settle, then
+dispose the owner. A provider request already sent cannot be recalled.
+
+`logout(route)` synchronously fences all existing participating route streams,
+rotates the provider lifecycle identity, then serializes deletion behind earlier
+writes and their cleanup. An old refresher cannot re-store credentials even if
+its transport ignores cancellation. Other routes remain usable. Failure throws
+sanitized `HostError("storage")` and restores quarantine. Only successful deletion
+for the newest logout epoch clears quarantine; an earlier success cannot clear
+it while a later logout is queued or fails. Reads wait for queued mutations and
+remain blocked after failure, even if native sign-in has written a replacement.
+Repeated logout is safe. For replacement sign-in, first await all pending logout
+calls, retry any failure successfully, and settle old runs, then use Schway's
+existing native device or CLI sign-in before admitting new runs. An already
+admitted run keeps its original epoch even while waiting in readiness and cannot
+adopt a replacement sign-in after revocation. Sign-in itself is not a method on
+this owner.
+
+The OS-store mutation lock is unchanged. [#428](https://github.com/chayapats/schway/issues/428)
+still tracks its cross-process stale-breaker race and lock-location override.
+Readiness abort/deadline and provider-request accounting remain
+[#415](https://github.com/chayapats/schway/issues/415); this slice adds neither.
+
+## Session metadata recovery
+
+`hostCapabilities().sessionInventoryContract` advertises
+`schway.host.session-inventory/v1`, an additive slice under `release/v2` for
+[#414](https://github.com/chayapats/schway/issues/414). Its public method is
+`HostRuntime.listSessions(options?: HostSessionInventoryOptions): Promise<HostSessionInventoryPage>`:
+
+```ts
+interface HostSessionInventoryOptions { readonly limit?: number; readonly after?: string }
+interface HostSessionInventoryEntry {
+  readonly reference: HostSessionReference;
+  readonly state: "active" | "retired" | "deleted";
+}
+interface HostSessionInventoryPage {
+  readonly sessions: readonly HostSessionInventoryEntry[];
+  readonly next?: string;
+}
+```
+
+The scope is exactly the host's canonical `sessionDirectory` and primary
+`workspaceRoot`, excluding attached-root sessions. Embedders should dedicate the
+managed directory to their service. Discovery reads bounded first metadata
+records, never opens or repairs a session, starts a model, calls a tool, renews
+credentials, exposes transcripts, or grants execution/lease authority. A
+still-live session can be discovered; retire, delete and snapshot continue to
+refuse its exclusive lease. References use the stable `main` branch for
+id-wide management. They do not identify the last selected conversation branch
+or authorize resuming it; execution recovery needs the app's saved exact branch.
+
+Every ordinary `createSession()` creates a distinct random UUID with exclusive
+file creation; a collision fails with `storage`, never replaces or returns an
+existing session. There is no caller correlation key or create deduplication.
+Persist app intent before creation, sweep inventory after restart, correlate
+known references, and explicitly reconcile the remaining service-owned orphans.
+
+`limit` is an integer 1–100 (default 100), bounding **returned entries**.
+`after` is a UUID compared lexically. `next`, when present, is the last returned
+UUID from this workspace and means another matching identity was observed.
+Other workspaces' identities never appear in entries or continuations. The
+implementation scans across empty filtered ranges internally, including a
+lookahead for another match; `limit` does not bound directory reads or scanned
+identities. Metadata reads remain bounded per record. An empty page has no
+continuation, and a complete quiescent traversal terminates without skipping
+matching identities. Follow `next` until absent.
+Unknown fields, invalid UUID cursors and invalid limits reject `invalid-input`.
+Pages are advisory observations, not a snapshot. Concurrent creation before a
+cursor can require another sweep from the beginning. Fence app creation and
+repeat a complete sweep to converge; absence never proves authority to recreate
+or resume a job. Discovery does not bypass native leases or quiesce live work.
+
+`active` means conversation metadata exists without retirement; it does not mean
+idle or safe to execute. `retired` retains a conversation plus its tombstone.
+`deleted` retains only the tombstone and may still need sidecar cleanup after an
+interrupted deletion. Use the existing idempotent `deleteSession` and inspect
+its honest `partial`/`blocked`/`already-deleted` result. Tombstones remain in
+inventory indefinitely, prevent reopen and snapshot resurrection, and are never
+removed or revived by discovery. Deletion now records retirement inside the
+existing cleanup transaction before removing the conversation, preserving an
+addressable identity at either side of that crash boundary; history/undo lock
+refusals before removal retain their prior behavior.
+
+A torn or unreadable metadata record rejects the page with sanitized `storage`;
+aliases or inconsistent identity metadata reject `conflict`. Do not infer an
+empty inventory from a refusal. A live/uncertain native lease or abandoned
+admission gate still yields `busy` from management operations. Keep those app
+intents unresolved until storage/ownership is repaired. A torn transcript after
+a valid header is left untouched. No discovery result resurrects grants,
+retained content or permission for a deleted app context: the app may retire and
+delete a discovered orphan under the normal lease without reopening it.
+
+See [S14 conformance and Jit vendoring](host-s14-conformance.md) for deterministic
+crash fixtures, exact artifact commands and the migration from `2068b71`.
+
 ## Release artifact and downstream pinning
 
 `schway.host.release/v2` is the composed downstream contract for Jit. `hostCapabilities()` advertises it as `releaseContract` alongside the nine sliced contracts (`base`, `context-policy`, `tool-policy`, `durable-sessions`, `auth-routes`, `run-control`, `managed-session-data`, `session-snapshot`, `core-tools`); `RELEASE_CONTRACT` exports the same version string. `release/v2` is `release/v1` plus `schway.host.core-tools/v1`; every `release/v1` behavior is unchanged. The packed npm artifact (`bun pm pack`) ships `schway/host` with reachable `dist/types/host/index.d.ts` declarations, the `examples/host/review.ts` embedded consumer, and the host user docs. An external temporary consumer installs that tarball without private source access or local path aliases and imports only `schway/host` with no `node:` or `bun:` specifier.
@@ -571,6 +724,12 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 
 | Export | Contract |
 | --- | --- |
+| `createHostCredentialLifecycle` | Create an opaque native credential owner shared across independent hosts. |
+| `HostCredentialLifecycle` | Selected-route logout and idle owner disposal without credential access. |
+| `HostCredentialLifecycleOptions` | Optional isolated secure-store seam. |
+| `HostSessionInventoryEntry` | Opaque management reference and active, retired or deleted state. |
+| `HostSessionInventoryOptions` | Bounded lexical store/workspace traversal. |
+| `HostSessionInventoryPage` | Metadata entries and optional continuation cursor. |
 | `createImageContent` | Validate sanitized bytes and return a byte-free image reference. |
 | `HostImageError` | Typed image validation and transport rejection codes. |
 | `HostImageRoute` | Explicit Codex or Grok subscription image route. |

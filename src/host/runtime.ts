@@ -16,7 +16,7 @@ import type { ToolDefinition } from "../tools/types.ts";
 import { HostError, hostCapabilities, type HostClock, type HostOptions, type HostProgressEvent,
   type HostRunAttemptUsage, type HostRunError, type HostRunOptions, type HostRunResult, type HostRunUsage, type HostSessionDeletion,
   type HostRuntime, type HostSession, type HostSessionReference, type HostEntryReference } from "./index.ts";
-import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, credentialReferenceForRoute, validateAuthSelection,
+import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, createAuthRouteModelForRun, credentialReferenceForRoute, validateAuthSelection,
   type HostAuthReadiness, type HostAuthRunResult, type HostAuthSelection } from "./auth-routes.ts";
 import { acquireSessionLease, type SessionLease } from "./lease.ts";
 import { deleteManagedSession, isManagedRetired, isManagedRetiredSync, markManagedRetired, readManagedHeader } from "./managed-data.ts";
@@ -29,6 +29,8 @@ import type { RuntimeEvent } from "../agent/events.ts";
 import { getEffectiveConversation } from "../context/compaction.ts";
 import { HostImageError, MAX_IMAGE_BYTES, inputImages, requestImages, validateImageBytes } from "../conversation/images.ts";
 import { imageProbeRecords, type HostImageRoute } from "./image-input.ts";
+import { managedSessionInventory, type HostSessionInventoryOptions } from "./session-inventory.ts";
+import { acquireCredentialLifecycle, type CredentialLifecycleLease } from "./credential-lifecycle.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
@@ -140,6 +142,7 @@ function optionsSnapshot(input: HostOptions): HostOptions & { sourcePolicy: Cont
     limits: { ...input.limits, deadlineMs, maxAttempts },
     ...(authSelection ? { auth: { route: authSelection.route, model: authSelection.model,
       ...(authSelection.store ? { store: authSelection.store } : {}),
+      ...(authSelection.lifecycle ? { lifecycle: authSelection.lifecycle } : {}),
       ...(authSelection.env ? { env: { ...authSelection.env } } : {}),
       ...(authSelection.fetch ? { fetch: authSelection.fetch } : {}),
       ...(authSelection.credentialWriteGuard ? { credentialWriteGuard: authSelection.credentialWriteGuard } : {}) } } : {}) };
@@ -355,7 +358,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
     }
     /** Run one admitted turn under the finite wall-clock bound with transient progress. */
     async function runBounded(run: (signal: AbortSignal, report: (event: HostProgressEvent) => void, collect: (usage: HostRunAttemptUsage) => void, clock: HostClock) => Promise<{ reason: "completed" | "error" | "cancelled" | "max_turns"; message?: string }>,
-      runOptions: { signal?: AbortSignal; clock?: HostClock; onProgress?: (event: HostProgressEvent) => void }): Promise<{ reason: "completed" | "error" | "cancelled" | "max_turns" | "limit_exceeded"; usages: HostRunAttemptUsage[]; totalMs: number; message?: string }> {
+      runOptions: { signal?: AbortSignal; clock?: HostClock; onProgress?: (event: HostProgressEvent) => void }, admittedAbort?: AbortController): Promise<{ reason: "completed" | "error" | "cancelled" | "max_turns" | "limit_exceeded"; usages: HostRunAttemptUsage[]; totalMs: number; message?: string }> {
       const clock = runOptions.clock ?? systemHostClock();
       const usages: HostRunAttemptUsage[] = [];
       const start = monotonicNow(clock);
@@ -363,7 +366,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         try { runOptions.onProgress?.(event); } catch { /* Observer failures never alter the admitted run. */ }
       };
       const collect = (usage: HostRunAttemptUsage): void => { usages.push(usage); };
-      const combined = new AbortController();
+      const combined = admittedAbort ?? new AbortController();
       const source = runOptions.signal;
       const onSourceAbort = (): void => combined.abort();
       if (source) {
@@ -489,7 +492,13 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         delete imageState.failure;
         busy = true;
         const release = native.acquireOperation();
+        let credentials: CredentialLifecycleLease | undefined;
+        const previousAbort = runAbort;
+        const admittedAbort = authSelection.lifecycle ? new AbortController() : undefined;
+        if (admittedAbort) runAbort = admittedAbort;
         try {
+          if (authSelection.lifecycle) credentials = acquireCredentialLifecycle(authSelection.lifecycle, authSelection.route,
+            authSelection.credentialWriteGuard, runArgs.signal ? AbortSignal.any([admittedAbort!.signal, runArgs.signal]) : admittedAbort!.signal);
           const id = crypto.randomUUID();
           try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }, ...images] }); }
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
@@ -502,7 +511,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             return { outcome: "error", input: inputReference, auth: readiness, usage: emptyUsage(0) };
           }
           let route: Model;
-          try { route = snapshotModel(await createAuthRouteModel(authSelection), authSelection.route); }
+          try { route = snapshotModel(await createAuthRouteModelForRun(authSelection, credentials), authSelection.route); }
           catch (error) {
             if (error instanceof HostError) throw error;
             return { outcome: "error", input: inputReference, auth: classifyAuthError(error, authSelection), usage: emptyUsage(0) };
@@ -531,7 +540,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               }
             }
             return { reason };
-          }, runArgs);
+          }, runArgs, admittedAbort);
           terminal = bounded.reason;
           usages = bounded.usages;
           totalMs = bounded.totalMs;
@@ -568,7 +577,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             if (lastCategory === "rate-limit") return { outcome: terminal, input: inputReference, auth: classifyAuthError(Object.assign(new Error("rate-limited"), { status: 429 }), authSelection), usage: usageSummary(usages, totalMs, false) };
           }
           return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false) };
-        } finally { release(); busy = false; }
+        } finally { credentials?.release(); if (admittedAbort) runAbort = previousAbort; release(); busy = false; }
       },
       async compact(model, signalOrOptions) {
         requireIdle();
@@ -674,6 +683,11 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
   return Object.freeze({
     capabilities: hostCapabilities(options.images?.probes),
     ...(authBinding ? { auth: authBinding } : {}),
+    async listSessions(options?: HostSessionInventoryOptions) {
+      requireOpen(); opening++;
+      try { return await managedSessionInventory(directory, root, options); }
+      finally { opening--; }
+    },
     async createSession() {
       requireOpen(); opening++;
       try {

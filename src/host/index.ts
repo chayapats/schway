@@ -5,6 +5,10 @@ import type { ToolDefinition } from "../tools/types.ts";
 import type { CoreToolOptions, ExecutionBackend } from "../tools/backend.ts";
 import { imageProbeRecords, imageRouteCapabilities, type HostImageProbeRecord } from "./image-input.ts";
 
+export { createHostCredentialLifecycle } from "./credential-lifecycle.ts";
+export type { HostCredentialLifecycle, HostCredentialLifecycleOptions } from "./credential-lifecycle.ts";
+export type { HostSessionInventoryEntry, HostSessionInventoryOptions, HostSessionInventoryPage } from "./session-inventory.ts";
+
 export { IMAGE_INPUT_CONTRACT } from "./image-input.ts";
 export type { HostImageRoute, HostImageProbeRecord, HostImageResolver, HostImageOptions, HostImageRouteCapability, HostImagesRejected } from "./image-input.ts";
 export { createImageContent, HostImageError, MAX_INPUT_IMAGES, MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS, MAX_REQUEST_IMAGES, MAX_REQUEST_IMAGE_BYTES } from "../conversation/images.ts";
@@ -81,6 +85,8 @@ export interface HostCapabilities {
   readonly hostedLookup: "disabled-only";
   readonly observedInference: "not-checked";
   readonly authContract: "schway.host.auth-routes/v1";
+  readonly credentialLifecycleContract: "schway.host.credential-lifecycle/v1";
+  readonly sessionInventoryContract: "schway.host.session-inventory/v1";
   readonly authRoutes: readonly ["codex", "grok"];
   readonly runContract: "schway.host.run-control/v1";
   readonly dataContract: "schway.host.managed-session-data/v1";
@@ -242,6 +248,8 @@ export interface HostAuthBinding {
 export interface HostRuntime {
   readonly capabilities: HostCapabilities;
   readonly auth?: HostAuthBinding;
+  /** Discover bounded lifecycle metadata in this store and workspace without running or reopening sessions. */
+  listSessions(options?: import("./session-inventory.ts").HostSessionInventoryOptions): Promise<import("./session-inventory.ts").HostSessionInventoryPage>;
   /** Create one native session in the configured managed directory. */
   createSession(): Promise<HostSession>;
   /** Reopen the exact saved native branch within this configured workspace and store. */
@@ -283,6 +291,8 @@ const capabilities: HostCapabilities = Object.freeze({
   hostedLookup: "disabled-only",
   observedInference: "not-checked",
   authContract: "schway.host.auth-routes/v1",
+  credentialLifecycleContract: "schway.host.credential-lifecycle/v1",
+  sessionInventoryContract: "schway.host.session-inventory/v1",
   authRoutes: Object.freeze(["codex", "grok"] as const),
   runContract: "schway.host.run-control/v1",
   dataContract: "schway.host.managed-session-data/v1",

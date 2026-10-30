@@ -749,7 +749,7 @@ function safeTaskText(text: string): string {
 }
 
 /** Delete a selected saved session after clearing its draft and undo data, removing history evidence under the history lock. */
-export async function deleteJsonlSession(options: { directory: string; id: string; home: string }): Promise<void> {
+export async function deleteJsonlSession(options: { directory: string; id: string; home: string; beforeDelete?: () => Promise<void> }): Promise<void> {
   const path = sessionFilePath(options.directory, options.id);
   const firstLine = await readFirstLine(path);
   const header: unknown = JSON.parse(firstLine ?? "null");
@@ -760,6 +760,8 @@ export async function deleteJsonlSession(options: { directory: string; id: strin
   await deleteHistorySession({ home: options.home, sessionId: header.id }, async () => {
     openDraftStore({ home: options.home, workspaceRoot: header.workspaceRoot, sessionId: header.id }).clear(Number.MAX_SAFE_INTEGER);
     await deleteUndoSession({ home: options.home, sessionId: header.id });
+    // Host retirement is durable before the last discoverable native identity can disappear.
+    await options.beforeDelete?.();
     await unlink(path);
     try { await unlink(`${path}.meta`); } catch (error) { if (!isNotFound(error)) throw error; }
   });

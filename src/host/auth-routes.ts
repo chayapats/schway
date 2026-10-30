@@ -1,4 +1,5 @@
 import type { Model } from "../model/model.ts";
+import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 
 export { isCleanupUncertain, isCredentialWriteRefused };
@@ -38,7 +39,9 @@ export type HostAuthFetch = (input: string | URL | Request, init?: RequestInit) 
  * management flows use raw stores outside any embedding attempt. The guard runs
  * before every write and is rechecked after the backend write completes: a
  * refusal after the write removes exactly the value just written (compare and
- * delete), so no post-terminal credential stays visible. */
+ * delete) unless a shared lifecycle's valid sibling still authorizes it. With a
+ * lifecycle, guards can run during readiness before the caller's stream starts;
+ * refusal fences that caller even when a sibling retains the renewed value. */
 export type HostCredentialWriteGuard = (identity: HostCredentialReference) => Promise<void> | void;
 
 /** Explicit route/model binding without raw tokens or API-key material. */
@@ -46,6 +49,8 @@ export interface HostAuthSelection {
   route: HostAuthRoute;
   model: string;
   store?: HostCredentialStore;
+  /** Shared opaque credential owner; mutually exclusive with store. */
+  lifecycle?: HostCredentialLifecycle;
   env?: Record<string, string | undefined>;
   fetch?: HostAuthFetch;
   /** Optional fence invoked before every credential-store write; reads stay unfenced. */
@@ -103,12 +108,17 @@ export function validateAuthSelection(input: unknown): HostAuthSelection {
   if (typeof input !== "object" || input === null || Array.isArray(input)) throw new Error("invalid");
   const record = input as Record<string, unknown>;
   const keys = Object.keys(record);
-  if (keys.some(key => !["route", "model", "store", "env", "fetch", "credentialWriteGuard"].includes(key))) throw new Error("invalid");
+  if (keys.some(key => !["route", "model", "store", "lifecycle", "env", "fetch", "credentialWriteGuard"].includes(key))) throw new Error("invalid");
   const route = record["route"];
   if (route !== "codex" && route !== "grok") throw new Error("unsupported");
   const model = record["model"];
   if (typeof model !== "string" || !MODEL_PATTERN.test(model.trim())) throw new Error("invalid");
   const store = record["store"];
+  const lifecycle = record["lifecycle"] as HostCredentialLifecycle | undefined;
+  if (lifecycle !== undefined) {
+    if (store !== undefined) throw new Error("invalid");
+    validateCredentialLifecycle(lifecycle);
+  }
   if (store !== undefined) {
     if (typeof store !== "object" || store === null || typeof (store as HostCredentialStore).get !== "function" ||
         typeof (store as HostCredentialStore).set !== "function" || typeof (store as HostCredentialStore).delete !== "function") throw new Error("invalid");
@@ -126,6 +136,7 @@ export function validateAuthSelection(input: unknown): HostAuthSelection {
   const credentialWriteGuard = record["credentialWriteGuard"];
   if (credentialWriteGuard !== undefined && typeof credentialWriteGuard !== "function") throw new Error("invalid");
   return { route, model: (model as string).trim(), ...(store !== undefined ? { store: store as HostCredentialStore } : {}),
+    ...(lifecycle !== undefined ? { lifecycle } : {}),
     ...(env !== undefined ? { env: env as Record<string, string | undefined> } : {}),
     ...(fetch !== undefined ? { fetch: fetch as HostAuthFetch } : {}),
     ...(credentialWriteGuard !== undefined ? { credentialWriteGuard: credentialWriteGuard as HostCredentialWriteGuard } : {}) };
@@ -145,6 +156,7 @@ const guardedStores = new WeakMap<object, { guard: HostCredentialWriteGuard; sto
  * route runs on one runtime share one renewal lifecycle for the default native store.
  */
 export function effectiveStore(selection: HostAuthSelection): CredentialStore {
+  if (selection.lifecycle) return credentialLifecycleStore(selection.lifecycle, selection.route);
   const base = (() => {
     if (selection.store) return selection.store as CredentialStore;
     let cached = defaultNativeStores.get(selection);
@@ -262,13 +274,18 @@ export async function checkAuthReadiness(selection: HostAuthSelection): Promise<
 
 /** Create only the selected subscription adapter; the unselected route and TUI never load. */
 export async function createAuthRouteModel(selection: HostAuthSelection): Promise<Model> {
+  return createAuthRouteModelForRun(selection);
+}
+
+/** Bind an admitted run to its original route epoch and readiness participation. @internal */
+export async function createAuthRouteModelForRun(selection: HostAuthSelection, admitted?: CredentialLifecycleLease): Promise<Model> {
   const valid = validateAuthSelection(selection);
-  const store = effectiveStore(selection);
+  const store = admitted?.store ?? effectiveStore(selection);
   const { loadProviderModel } = await import("../model/loader.ts");
-  if (valid.route === "codex") {
-    return loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store }, valid.fetch);
-  }
-  return loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store }, valid.fetch);
+  const model = valid.route === "codex"
+    ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store }, valid.fetch)
+    : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store }, valid.fetch);
+  return valid.lifecycle ? lifecycleModel(valid.lifecycle, valid.route, store, model, valid.credentialWriteGuard, admitted) : model;
 }
 
 function httpStatusOf(error: unknown): number | undefined {

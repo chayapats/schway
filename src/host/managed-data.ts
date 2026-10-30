@@ -278,7 +278,8 @@ export async function deleteManagedSession(options: {
     }
 
     try {
-      await deleteJsonlSession({ directory, home, id: reference.id });
+      await deleteJsonlSession({ directory, home, id: reference.id,
+        beforeDelete: () => markManagedRetired(directory, reference.id, workspaceRoot) });
     } catch (error) {
       if (isBusyStore(error)) {
         const after = await inventory(directory, home, workspaceRoot, reference.id);
