@@ -30,6 +30,7 @@ import { getEffectiveConversation } from "../context/compaction.ts";
 import { HostImageError, MAX_IMAGE_BYTES, inputImages, requestImages, validateImageBytes } from "../conversation/images.ts";
 import { imageProbeRecords, type HostImageRoute } from "./image-input.ts";
 import { managedSessionInventory, type HostSessionInventoryOptions } from "./session-inventory.ts";
+import { acquireCredentialLifecycle } from "./credential-lifecycle.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
@@ -491,7 +492,9 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         delete imageState.failure;
         busy = true;
         const release = native.acquireOperation();
+        let releaseCredentials: (() => void) | undefined;
         try {
+          if (authSelection.lifecycle) releaseCredentials = acquireCredentialLifecycle(authSelection.lifecycle);
           const id = crypto.randomUUID();
           try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }, ...images] }); }
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
@@ -570,7 +573,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             if (lastCategory === "rate-limit") return { outcome: terminal, input: inputReference, auth: classifyAuthError(Object.assign(new Error("rate-limited"), { status: 429 }), authSelection), usage: usageSummary(usages, totalMs, false) };
           }
           return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false) };
-        } finally { release(); busy = false; }
+        } finally { releaseCredentials?.(); release(); busy = false; }
       },
       async compact(model, signalOrOptions) {
         requireIdle();
