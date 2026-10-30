@@ -1,14 +1,11 @@
 import { expect, test } from "bun:test";
 import { appendFile, link, mkdir, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createHost, hostCapabilities, type HostOptions, type HostRuntime, type HostSessionReference } from "schway/host";
-import type { HostSessionInventoryOptions, HostSessionInventoryPage } from "../src/host/session-inventory.ts";
+import { createHost, hostCapabilities, type HostOptions, type HostSessionInventoryOptions, type HostSessionReference } from "schway/host";
 import { withTempDir, buildIsolatedCliEnv } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
-// The integration owner adds this declaration to the public barrel in the batched PR.
-type InventoryHost = HostRuntime & { listSessions(options?: HostSessionInventoryOptions): Promise<HostSessionInventoryPage> };
-async function host(options: HostOptions): Promise<InventoryHost> { return await createHost(options) as InventoryHost; }
+const host = createHost;
 
 async function options(dir: string): Promise<HostOptions> {
   const workspaceRoot = join(dir, "work"), homeDirectory = join(dir, "home");
@@ -178,3 +175,39 @@ test("delete records retirement inside the cleanup transaction before removing t
 test("inventory contract remains additive under release/v2", () => {
   expect(hostCapabilities().releaseContract).toBe("schway.host.release/v2");
 });
+
+for (const boundary of ["before-unlink", "after-unlink"] as const) {
+  test(`process crash ${boundary} during deletion retains discoverable retirement`, async () => {
+    await withTempDir(async dir => {
+      const config = await options(dir);
+      // The child pauses inside the real deletion operation, using a source-load barrier only in this fixture.
+      const needle = boundary === "before-unlink" ? "await options.beforeDelete?.();" : "await unlink(path);";
+      const barrier = `console.log(JSON.stringify({id: options.id, branchId: 'main'})); await Bun.stdin.text();`;
+      const script = `await Bun.plugin({name:'crash-barrier',setup(builder){
+        builder.onLoad({filter:/[/\\\\]session[/\\\\]jsonl\\.ts$/},async args=>{
+          const source = await Bun.file(args.path).text();
+          if (!source.includes(${JSON.stringify(needle)})) throw new Error('Missing crash barrier');
+          return {contents:source.replace(${JSON.stringify(needle)},${JSON.stringify(needle + barrier)}),loader:'ts'};
+        });
+      }});
+      const {createHost} = await import('schway/host');
+      const owner = await createHost(${JSON.stringify(config)});
+      const session = await owner.createSession(); const ref = session.reference; await session.close();
+      await owner.deleteSession(ref);`;
+      const child = Bun.spawn([process.execPath, "--no-env-file", "--eval", script], { cwd: join(import.meta.dir, ".."),
+        env: buildIsolatedCliEnv(config.homeDirectory), stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      try {
+        const reader = child.stdout.getReader(); let output = "";
+        while (!output.includes("\n")) { const next = await reader.read(); if (next.done) throw new Error(await new Response(child.stderr).text()); output += new TextDecoder().decode(next.value); }
+        reader.releaseLock(); const ref: HostSessionReference = JSON.parse(output);
+        child.kill("SIGKILL"); await child.exited;
+        const recovery = await host(config), entry = (await recovery.listSessions()).sessions[0]!;
+        expect(entry.reference).toEqual(ref);
+        expect(entry.state).toBe(boundary === "before-unlink" ? "retired" : "deleted");
+        await expect(recovery.openSession(ref)).rejects.toMatchObject({ code: "closed" });
+        expect(["deleted", "already-deleted"]).toContain((await recovery.deleteSession(ref)).status);
+        expect((await recovery.deleteSession(ref)).status).toBe("already-deleted"); await recovery.close();
+      } finally { child.kill(); await child.exited; }
+    });
+  });
+}
