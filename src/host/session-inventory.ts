@@ -9,13 +9,13 @@ export interface HostSessionInventoryEntry {
   readonly state: "active" | "retired" | "deleted";
 }
 
-/** Bounded lexical traversal within one configured store and canonical primary workspace. */
+/** Limit returned metadata entries in lexical order within one store and canonical primary workspace. */
 export interface HostSessionInventoryOptions {
   readonly limit?: number;
   readonly after?: string;
 }
 
-/** An advisory metadata page whose cursor resumes after the last scanned native identity. */
+/** An advisory metadata page whose cursor resumes after its last returned workspace identity. */
 export interface HostSessionInventoryPage {
   readonly sessions: readonly HostSessionInventoryEntry[];
   readonly next?: string;
@@ -62,9 +62,9 @@ export async function managedSessionInventory(directory: string, workspaceRoot: 
     return match && idPattern.test(match[1]!) ? [match[1]!] : [];
   }))].filter(id => options.after === undefined || id > options.after).sort();
   const sessions: HostSessionInventoryEntry[] = [];
-  // Bound scanned identities, including other workspaces, so every cursor makes progress.
-  const selected = ids.slice(0, limit);
-  for (const id of selected) {
+  let more = false;
+  // Scan through foreign ranges internally; no foreign UUID may escape through a cursor.
+  for (const id of ids) {
     const header = await metadata(join(directory, `${id}.jsonl`));
     const retired = await metadata(join(directory, `${id}.host-retired`));
     if (header && (header.type !== "session" || header.id !== id || !Number.isSafeInteger(header.version) ||
@@ -74,7 +74,8 @@ export async function managedSessionInventory(directory: string, workspaceRoot: 
     if (header && retired && header.workspaceRoot !== retired.workspaceRoot) throw new HostError("conflict");
     if ((header ?? retired)?.workspaceRoot !== workspaceRoot) continue;
     if (header && (header.extraRoots as unknown[]).length) continue;
+    if (sessions.length === limit) { more = true; break; }
     sessions.push(Object.freeze({ reference: Object.freeze({ id, branchId: "main" }), state: retired ? header ? "retired" : "deleted" : "active" }));
   }
-  return Object.freeze({ sessions: Object.freeze(sessions), ...(ids.length > selected.length ? { next: selected.at(-1)! } : {}) });
+  return Object.freeze({ sessions: Object.freeze(sessions), ...(more ? { next: sessions.at(-1)!.reference.id } : {}) });
 }

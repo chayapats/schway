@@ -48,7 +48,7 @@ test("inventory pages discover live, retired and deleted identities without tran
   });
 });
 
-test("inventory scopes store/workspace, validates cursors and does not skip empty filtered pages", async () => {
+test("inventory scopes store/workspace and validates cursors", async () => {
   await withTempDir(async dir => {
     const config = await options(dir), first = await host(config);
     const otherRoot = join(dir, "other"); await mkdir(otherRoot);
@@ -68,6 +68,41 @@ test("inventory scopes store/workspace, validates cursors and does not skip empt
     }
     expect((await first.listSessions({ after: "ffffffff-ffff-ffff-ffff-ffffffffffff" })).sessions).toEqual([]);
     await first.close(); await other.close();
+  });
+});
+
+test("inventory cursors expose only matching identities across empty workspace ranges", async () => {
+  await withTempDir(async dir => {
+    const config = await options(dir), owner = await host(config);
+    const otherRoot = join(dir, "other"), absentRoot = join(dir, "absent");
+    await mkdir(otherRoot); await mkdir(absentRoot);
+    const other = await host({ ...config, workspaceRoot: otherRoot });
+    const absent = await host({ ...config, workspaceRoot: absentRoot });
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+    // Foreign identities bracket and separate all matching states, including a tombstone-only identity.
+    for (let n = 1; n <= 9; n++) {
+      const workspaceRoot = [2, 4, 6, 8].includes(n) ? config.workspaceRoot : otherRoot;
+      if (n !== 8) await writeFile(join(config.sessionDirectory, `${id(n)}.jsonl`), JSON.stringify({ type: "session", id: id(n), version: 4, workspaceRoot, extraRoots: n === 4 ? [otherRoot] : [] }) + "\n");
+      if (n === 6 || n === 8) await writeFile(join(config.sessionDirectory, `${id(n)}.host-retired`), JSON.stringify({ version: 1, id: id(n), workspaceRoot }));
+    }
+    for (const [reader, expected] of [[owner, [2, 6, 8]], [other, [1, 3, 5, 7, 9]]] as const) {
+      let after: string | undefined;
+      const seen: string[] = [];
+      for (let pageNumber = 0; pageNumber < expected.length; pageNumber++) {
+        const page = await reader.listSessions({ limit: 1, ...(after ? { after } : {}) });
+        expect(page.sessions.map(row => row.reference.id)).toEqual([id(expected[pageNumber]!)]);
+        const last = page.sessions[0]!.reference.id;
+        expect(page.next).toBe(pageNumber === expected.length - 1 ? undefined : last);
+        if (after) expect(last > after).toBe(true);
+        seen.push(last); after = page.next;
+      }
+      expect(after).toBeUndefined(); expect(seen).toEqual(expected.map(id));
+    }
+    expect((await owner.listSessions()).sessions.map(row => row.state)).toEqual(["active", "retired", "deleted"]);
+    expect(await absent.listSessions({ limit: 1 })).toEqual({ sessions: [] });
+    expect(await owner.listSessions({ limit: 1, after: id(8) })).toEqual({ sessions: [] });
+    expect((await owner.listSessions({ limit: 1, after: id(3) })).next).toBe(id(6));
+    await owner.close(); await other.close(); await absent.close();
   });
 });
 
