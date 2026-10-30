@@ -47,7 +47,7 @@ function routeFor(state: State, name: HostAuthRoute): Route {
 }
 
 function routeStore(state: State, route: Route, name: HostAuthRoute): CredentialStore {
-  const epoch = route.epoch, identity = credentialReferenceForRoute(name);
+  const epoch = route.epoch, identity = Object.freeze(credentialReferenceForRoute(name));
   const current = () => { if (epoch !== route.epoch) throw credentialWriteRefusedError(); };
   const authorize = async () => {
     current();
@@ -102,7 +102,7 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
 
 /** Create an opaque owner sharing renewal by secure-store identity and route across distinct hosts. */
 export function createHostCredentialLifecycle(options: HostCredentialLifecycleOptions = {}): HostCredentialLifecycle {
-  if (!options || typeof options !== "object" || Object.keys(options).some(key => key !== "store") ||
+  if (!options || typeof options !== "object" || Array.isArray(options) || Object.keys(options).some(key => key !== "store") ||
       (options.store !== undefined && (!options.store || typeof options.store.get !== "function" ||
         typeof options.store.set !== "function" || typeof options.store.delete !== "function"))) throw new HostError("invalid-options");
   const base = options.store ?? (native ??= createNativeCredentialStore());

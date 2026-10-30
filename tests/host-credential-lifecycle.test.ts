@@ -39,7 +39,7 @@ function fakeClock(): HostClock {
 }
 
 for (const route of ["codex", "grok"] as const) {
-  for (const scenario of ["overlap", "failure", "cancel", "guard", "logout", "logout-write", "dispose"] as const) {
+  for (const scenario of ["overlap", "failure", "cancel", "guard", "mutate", "logout", "logout-write", "dispose"] as const) {
     test(`${route} isolated hosts share renewal through ${scenario} barriers`, async () => {
       await withTempDir(async dir => {
         const base = fakeCredentialStore(); await base.set(identity(route), expired);
@@ -67,7 +67,10 @@ for (const route of ["codex", "grok"] as const) {
           expect(String(init?.body)).not.toContain("rotated-secret");
           return response(route);
         };
-        const guardA: HostCredentialWriteGuard = () => { if (!firstAllowed) throw new Error("guard-secret"); };
+        const guardA: HostCredentialWriteGuard = key => {
+          if (scenario === "mutate") (key as { account: string }).account = "api-key:openai";
+          if (!firstAllowed) throw new Error("guard-secret");
+        };
         const guardB: HostCredentialWriteGuard = () => { secondEntered = true; };
         const a = await createHost({ ...await options(dir, "a"), auth: { route, model: "fixture-model", lifecycle, fetch, credentialWriteGuard: guardA } });
         const b = await createHost({ ...await options(dir, "b"), auth: { route, model: "fixture-model", lifecycle, fetch, credentialWriteGuard: guardB } });
@@ -102,10 +105,11 @@ for (const route of ["codex", "grok"] as const) {
         expect(refreshes).toBe(1);
         if (scenario === "overlap") expect(results.map(result => result.outcome)).toEqual(["completed", "completed"]);
         if (scenario === "cancel") expect(results.map(result => result.outcome)).toEqual(["cancelled", "completed"]);
-        if (scenario === "guard") {
+        if (scenario === "guard" || scenario === "mutate") {
           expect(results[0]!.outcome).toBe("error");
           expect(results[1]!.outcome).toBe("completed");
           expect(sends).toBe(1);
+          expect(await base.get({ account: "api-key:openai", label: "bait" })).toBeNull();
         }
         if (scenario === "logout" || scenario === "failure") {
           expect(results.every(result => result.outcome !== "completed")).toBe(true);
@@ -151,6 +155,7 @@ test("lifecycle owners are opaque, branded and share only the same store and rou
   expect(await store.get(identity("grok"))).toBe(expired);
   await first.close(); await sibling.logout("grok"); await sibling.close();
   expect(() => createHostCredentialLifecycle({ store: {} as HostCredentialStore })).toThrow();
+  expect(() => createHostCredentialLifecycle([] as never)).toThrow();
 });
 
 test("all caller fences refusing a renewal remove a late write without retaining secrets", async () => {
