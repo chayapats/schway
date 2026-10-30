@@ -597,13 +597,18 @@ keychain writers do not join this process-local renewal owner.
 
 The existing selected-provider refresher owns protocol, single-flight renewal
 and retries. Streams remain concurrent; the shared resource is credential
-renewal. Each stream registers its own cancellation and write guard. A renewal
-may persist while any interested, unfenced stream authorizes it. A refused
-stream cannot proceed to inference on that renewal, and cannot disable a valid
-sibling. Guards run before and after the backend write. If every interested
-stream is cancelled or fenced, a late write is removed by exact-value cleanup;
-uncertain cleanup blocks later reads until successful logout. No raw credential
-is returned in the handle, readiness, outcomes, progress or diagnostics.
+renewal. Each direct stream registers its own cancellation and write guard;
+`submitWithRoute` registers before awaiting local readiness and retains that
+participation through settlement. A renewal may persist while any interested,
+unfenced participant authorizes it, including a sibling that joins while an
+asynchronous guard is pending or is still waiting in readiness. A refused
+participant cannot proceed to inference on that renewal, and cannot disable a
+valid sibling. Guards run before and after the backend write, and can run before
+that participant's stream starts; they must not wait for its readiness or stream
+to finish. If every interested participant is cancelled or fenced, a late write
+is removed by exact-value cleanup; uncertain cleanup blocks later reads until
+successful logout. No raw credential is returned in the handle, readiness,
+outcomes, progress or diagnostics.
 
 The embedding application owns the lifecycle handle. Hosts borrow it; closing a
 host never disposes the owner or logs out. An admitted `submitWithRoute` pins its
@@ -618,10 +623,16 @@ dispose the owner. A provider request already sent cannot be recalled.
 rotates the provider lifecycle identity, then serializes deletion behind earlier
 writes and their cleanup. An old refresher cannot re-store credentials even if
 its transport ignores cancellation. Other routes remain usable. Failure throws
-sanitized `HostError("storage")` and blocks that route's reads until logout is
-retried successfully. Repeated logout is safe. For replacement sign-in, first
-await logout and settle old runs, then use Schway's existing native device or CLI
-sign-in before admitting new runs. Sign-in itself is not a method on this owner.
+sanitized `HostError("storage")` and restores quarantine. Only successful deletion
+for the newest logout epoch clears quarantine; an earlier success cannot clear
+it while a later logout is queued or fails. Reads wait for queued mutations and
+remain blocked after failure, even if native sign-in has written a replacement.
+Repeated logout is safe. For replacement sign-in, first await all pending logout
+calls, retry any failure successfully, and settle old runs, then use Schway's
+existing native device or CLI sign-in before admitting new runs. An already
+admitted run keeps its original epoch even while waiting in readiness and cannot
+adopt a replacement sign-in after revocation. Sign-in itself is not a method on
+this owner.
 
 The OS-store mutation lock is unchanged. [#428](https://github.com/chayapats/schway/issues/428)
 still tracks its cross-process stale-breaker race and lock-location override.
@@ -663,9 +674,15 @@ existing session. There is no caller correlation key or create deduplication.
 Persist app intent before creation, sweep inventory after restart, correlate
 known references, and explicitly reconcile the remaining service-owned orphans.
 
-`limit` is an integer 1–100 (default 100), bounding **scanned identities**.
-`after` is the last scanned UUID, compared lexically. `next` supplies that UUID
-when more identities remain; filtered pages can be empty and still have `next`.
+`limit` is an integer 1–100 (default 100), bounding **returned entries**.
+`after` is a UUID compared lexically. `next`, when present, is the last returned
+UUID from this workspace and means another matching identity was observed.
+Other workspaces' identities never appear in entries or continuations. The
+implementation scans across empty filtered ranges internally, including a
+lookahead for another match; `limit` does not bound directory reads or scanned
+identities. Metadata reads remain bounded per record. An empty page has no
+continuation, and a complete quiescent traversal terminates without skipping
+matching identities. Follow `next` until absent.
 Unknown fields, invalid UUID cursors and invalid limits reject `invalid-input`.
 Pages are advisory observations, not a snapshot. Concurrent creation before a
 cursor can require another sweep from the beginning. Fence app creation and
