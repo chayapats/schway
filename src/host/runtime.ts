@@ -624,7 +624,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
                 : meter.lastSendRefused ? classifyAuthError(dispatchRefusedError(), authSelection)
                 : meter.lastControlRefusal ? classifyAuthError(meter.lastControlRefusal, authSelection)
                 : meter.lastRedirectRefused ? classifyAuthError(redirectRefusedError("route"), authSelection)
-                : meter.lastCredentialLock ? classifyAuthError(meter.lastCredentialLock, authSelection)
+                : meter.lastStoreFailure ? classifyAuthError(meter.lastStoreFailure, authSelection)
                 : observed === undefined ? admitted! : classifyAuthError(observed, authSelection);
               return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter) };
             }
@@ -639,8 +639,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           if (meter.lastControlRefusal) return { outcome: terminal, input: inputReference, auth: classifyAuthError(meter.lastControlRefusal, authSelection), usage: usageSummary(usages, totalMs, false, meter) };
           // The loop keeps only the message; the meter saw Schway's own redirect failure by identity.
           if (meter.lastRedirectRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(redirectRefusedError("route"), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
-          // A credential-lock refusal names its own next step; the meter kept it by identity.
-          if (meter.lastCredentialLock) return { outcome: terminal, input: inputReference, auth: classifyAuthError(meter.lastCredentialLock, authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+          // A lock refusal or an uncertain cleanup carries its own guidance; the meter kept it by identity.
+          if (meter.lastStoreFailure) return { outcome: terminal, input: inputReference, auth: classifyAuthError(meter.lastStoreFailure, authSelection), usage: usageSummary(usages, totalMs, false, meter) };
           const auth = classifyAuthError(lastError ?? new Error("Provider request failed"), authSelection);
           // Preserve retry category when the sanitized message alone is ambiguous.
           if (auth.status === "integration-unavailable" && typeof lastCategory === "string") {

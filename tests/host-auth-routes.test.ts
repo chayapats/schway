@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createHost, hostCapabilities, HostError, checkAuthReadiness, classifyAuthError, describeAuthRoute, type HostOptions } from "schway/host";
+import { createHost, createHostCredentialLifecycle, hostCapabilities, HostError, checkAuthReadiness, classifyAuthError, describeAuthRoute, type HostOptions } from "schway/host";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { credentialLockError, credentialStoreError } from "../src/auth/store.ts";
 import { withTempDir, buildIsolatedCliEnv } from "./helpers.ts";
@@ -858,6 +858,65 @@ for (const route of ["codex", "grok"] as const) test(`${route} a route run whose
       expect(run.auth.status).toBe("store-unavailable");
       expect(run.auth.nextAction).toBe(refusal.message);
       expect(inference).toBe(0);
+    } finally { await session.close(); await host.close(); }
+  });
+});
+
+for (const route of ["codex", "grok"] as const) test(`${route} a lock refusal under a shared lifecycle reports the lock's next action and leaves the route usable`, async () => {
+  const model = route === "codex" ? "gpt-5.4" : "grok-4.7";
+  const identity = route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
+  await withTempDir(async dir => {
+    const base = fakeCredentialStore();
+    await base.set(identity, JSON.stringify({ accessToken: "stale-token", refreshToken: "fixture-refresh", expiresAt: 1, obtainedAt: 1 }));
+    const refusal = credentialLockError("save", "Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry.");
+    let locked = true;
+    // Like the native store, cleanup under the same refused lock fails too.
+    const store = { ...base,
+      set: async (id: Parameters<typeof base.set>[0], value: string) => { if (locked) throw refusal; await base.set(id, value); },
+      compareAndDelete: async (id: Parameters<typeof base.set>[0], value: string) => { if (locked) throw credentialLockError("delete", "Lock held."); return base.compareAndDelete!(id, value); } };
+    const lifecycle = createHostCredentialLifecycle({ store });
+    const fetch = (async (url: string | URL | Request) => {
+      if (String(url).includes("/oauth/token") || String(url).includes("auth.x.ai")) return Response.json({ access_token: "fresh-token", refresh_token: "fixture-refresh", expires_in: 3600 });
+      return route === "codex" ? codexSse() : xaiSse();
+    }) as never;
+    const host = await createHost(await options(dir, { route, model, lifecycle, fetch }));
+    const session = await host.createSession();
+    try {
+      const first = await session.submitWithRoute({ text: "renew under a refused lock" });
+      expect(first.outcome).toBe("error");
+      if (!("auth" in first)) throw new Error("expected an auth result");
+      expect(first.auth.status).toBe("store-unavailable");
+      expect(first.auth.nextAction).toBe(refusal.message);
+      // Nothing was written, so the route is not quarantined: once the lock is fixed, renewal succeeds.
+      locked = false;
+      const second = await session.submitWithRoute({ text: "renew after the fix" });
+      expect(second.outcome).toBe("completed");
+    } finally { await session.close(); await host.close(); await lifecycle.close(); }
+  });
+});
+
+for (const route of ["codex", "grok"] as const) test(`${route} an uncertain cleanup on a route run never reports that nothing changed`, async () => {
+  const model = route === "codex" ? "gpt-5.4" : "grok-4.7";
+  const identity = route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
+  await withTempDir(async dir => {
+    const base = fakeCredentialStore();
+    await base.set(identity, JSON.stringify({ accessToken: "stale-token", refreshToken: "fixture-refresh", expiresAt: 1, obtainedAt: 1 }));
+    // The write lands, the fence then refuses, and cleanup fails under a refused lock.
+    const store = { ...base, compareAndDelete: async () => { throw credentialLockError("delete", "Lock held."); } };
+    let guardCalls = 0;
+    const fetch = (async (url: string | URL | Request) => {
+      if (String(url).includes("/oauth/token") || String(url).includes("auth.x.ai")) return Response.json({ access_token: "fresh-token", refresh_token: "fixture-refresh", expires_in: 3600 });
+      return route === "codex" ? codexSse() : xaiSse();
+    }) as never;
+    const host = await createHost(await options(dir, { route, model, store, fetch, credentialWriteGuard: () => { if (++guardCalls > 1) throw new Error("fence closed"); } }));
+    const session = await host.createSession();
+    try {
+      const run = await session.submitWithRoute({ text: "renew then refuse" });
+      expect(run.outcome).toBe("error");
+      if (!("auth" in run)) throw new Error("expected an auth result");
+      expect(run.auth.status).toBe("store-unavailable");
+      expect(run.auth.nextAction).not.toContain("No credential was changed");
+      expect(run.auth.nextAction).toMatch(/may have landed|verify the OS credential store/);
     } finally { await session.close(); await host.close(); }
   });
 });

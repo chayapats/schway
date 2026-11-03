@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { THINKING_LEVELS, type Model, type ModelCallOptions, type ThinkingLevel } from "../model/model.ts";
 import { dispatchRefusedError, hasRedirectRefusal, requestBodyBytes, routeControlRefusedError, withProviderDispatch, type ProviderDispatch } from "../model/dispatch.ts";
 import type { HostAuthRoute } from "./auth-routes.ts";
-import { findCredentialLockError } from "../auth/store.ts";
+import { findCredentialLockError, isCleanupUncertain } from "../auth/store.ts";
 import type { HostEffortPin } from "./route-capabilities.ts";
 import type { HostProviderRequests } from "./index.ts";
 import { HostError } from "./index.ts";
@@ -115,7 +115,7 @@ const CAP_NOT_SENT = "The required output cap could not be sent exactly, so the 
 
 type Observation = { effort: { requested: ThinkingLevel | null; sent: string | null; reported: string | null }; outputCap: { sent: number | null } };
 
-type RunState = { initialSends: number; authRetrySends: number; renewalRequests: number; unobserved: boolean; lastSendRefused: boolean; lastRedirectRefused: boolean; lastControlRefusal: Error | null; lastCredentialLock: Error | null };
+type RunState = { initialSends: number; authRetrySends: number; renewalRequests: number; unobserved: boolean; lastSendRefused: boolean; lastRedirectRefused: boolean; lastControlRefusal: Error | null; lastStoreFailure: Error | null };
 type CallMeter = { attached: boolean; observation: Observation | null; readonly state: RunState };
 const RUN_METER = Symbol("schway.host.runMeter");
 type MeteredCall = ModelCallOptions & { readonly [RUN_METER]?: CallMeter };
@@ -134,13 +134,13 @@ export interface RunMeter {
   readonly lastRedirectRefused: boolean;
   /** The route-control refusal that ended the most recent model call, or null; each new call clears it. */
   readonly lastControlRefusal: Error | null;
-  /** The credential-lock refusal that ended the most recent model call, or null; each new call clears it. */
-  readonly lastCredentialLock: Error | null;
+  /** The credential-store failure that ended the most recent model call (an uncertain cleanup, else a lock refusal), or null; each new call clears it. */
+  readonly lastStoreFailure: Error | null;
 }
 
 /** Start exact accounting for one run; zero model calls report zero requests. @internal */
 export function createRunMeter(): RunMeter {
-  const state: RunState = { initialSends: 0, authRetrySends: 0, renewalRequests: 0, unobserved: false, lastSendRefused: false, lastRedirectRefused: false, lastControlRefusal: null, lastCredentialLock: null };
+  const state: RunState = { initialSends: 0, authRetrySends: 0, renewalRequests: 0, unobserved: false, lastSendRefused: false, lastRedirectRefused: false, lastControlRefusal: null, lastStoreFailure: null };
   // Each attempt's usage object is the one its own call yielded, so observations never cross attempts.
   const tagged = new WeakMap<object, CallMeter>();
   return {
@@ -149,7 +149,7 @@ export function createRunMeter(): RunMeter {
       state.lastSendRefused = false;
       state.lastRedirectRefused = false;
       state.lastControlRefusal = null;
-      state.lastCredentialLock = null;
+      state.lastStoreFailure = null;
       const meter: CallMeter = { attached: false, observation: null, state };
       return { call: { ...call, [RUN_METER]: meter } as MeteredCall, settle() { if (!meter.attached) state.unobserved = true; },
         tag(usage) { tagged.set(usage, meter); } };
@@ -164,7 +164,7 @@ export function createRunMeter(): RunMeter {
     get lastSendRefused() { return state.lastSendRefused; },
     get lastRedirectRefused() { return state.lastRedirectRefused; },
     get lastControlRefusal() { return state.lastControlRefusal; },
-    get lastCredentialLock() { return state.lastCredentialLock; },
+    get lastStoreFailure() { return state.lastStoreFailure; },
   };
 }
 
@@ -232,12 +232,13 @@ export function dispatchRouteModel(model: Model, route: HostAuthRoute, authorize
       renewal() { if (meter) meter.state.renewalRequests++; },
       reported(applied) { if (meter?.observation) meter.observation.effort.reported = applied.effort; },
     };
-    // The loop keeps only the message, so the run learns of Schway's own redirect and credential-lock failures here, by identity.
+    // The loop keeps only the message, so the run learns of Schway's own redirect and credential-store failures here, by identity.
     try { yield* stream(effective, withProviderDispatch(call, hooks)); }
     catch (error) {
       if (meter) {
         if (hasRedirectRefusal(error)) meter.state.lastRedirectRefused = true;
-        meter.state.lastCredentialLock = findCredentialLockError(error) ?? null;
+        // An uncertain cleanup may carry a lock failure as its cause; its own write may have landed, so it is kept whole.
+        meter.state.lastStoreFailure = isCleanupUncertain(error) ? error as Error : findCredentialLockError(error) ?? null;
       }
       throw error;
     }

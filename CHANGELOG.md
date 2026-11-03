@@ -50,9 +50,10 @@
 - Report credential-lock refusals with the lock's own next action. Route
   results keep `store-unavailable` but no longer show keychain or libsecret
   guidance; the failure is recognized by identity, never by copied text. Device
-  sign-in no longer attempts cleanup after a lock refusal or reports
-  `cleanupUncertain: true`, because a refused lock means nothing was written
-  (#428).
+  sign-in and shared credential lifecycles no longer attempt cleanup after a
+  lock refusal or report `cleanupUncertain: true`, because a refused lock means
+  nothing was written. A lifecycle route therefore stays usable once the lock
+  is fixed instead of staying blocked until logout (#428).
 - Classify Grok subscription spending-limit denials as `quota-exceeded`, with
   a subscription usage link and no API-key billing fallback. Catalog, inference
   and host status agree; plan rejection remains distinct from transient
