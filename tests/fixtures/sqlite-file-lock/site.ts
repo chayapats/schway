@@ -10,7 +10,10 @@
 // FIXTURE_HOME is the isolated home; FIXTURE_WORKSPACE the memory workspace.
 // FIXTURE_WAIT_MS sets the history lock wait (default 1000).
 // FIXTURE_SQLITE=readonly opens every SQLite connection read-only, as a
-// sandbox that denies open(O_RDWR) while access(2) allows it would.
+// sandbox that denies open(O_RDWR) while access(2) allows it would;
+// `cantopen-after:<ms>` fails every SQLite open with SQLITE_CANTOPEN once the
+// operation has run that long, while access(2) still allows the file.
+// `DONE` reports the favorites a preferences read returned.
 // Any successful descriptor open of a lock file or the preferences database
 // outside SQLite is reported as `FD-OPEN <path>`.
 import { mock } from "bun:test";
@@ -65,13 +68,22 @@ mock.module("node:fs/promises", () => ({
     return realPromises.rename(...args);
   },
 }));
-if (process.env.FIXTURE_SQLITE === "readonly") {
+const sqliteFault = process.env.FIXTURE_SQLITE ?? "";
+const cantOpenAfterMs = /^cantopen-after:(\d+)$/.exec(sqliteFault)?.[1];
+/** When the measured operation began; open faults are timed from here. */
+let operationStartedAt = Number.POSITIVE_INFINITY;
+if (sqliteFault) {
   const RealDatabase = sqlite.Database;
-  /** Database that opens every connection read-only. */
-  class ReadOnlyDatabase extends RealDatabase {
-    constructor(path: string) { super(path, { readonly: true }); }
+  /** Database that applies the requested connection fault before opening. */
+  class FaultyDatabase extends RealDatabase {
+    constructor(path: string, options?: ConstructorParameters<typeof RealDatabase>[1]) {
+      if (cantOpenAfterMs !== undefined && Date.now() - operationStartedAt >= Number(cantOpenAfterMs)) {
+        throw Object.assign(new Error("unable to open database file"), { code: "SQLITE_CANTOPEN" });
+      }
+      super(path, sqliteFault === "readonly" ? { readonly: true } : options);
+    }
   }
-  mock.module("bun:sqlite", () => ({ ...sqlite, Database: ReadOnlyDatabase }));
+  mock.module("bun:sqlite", () => ({ ...sqlite, Database: FaultyDatabase }));
 }
 
 const { deleteHistorySession } = await import("../../../src/history/store.ts");
@@ -121,9 +133,10 @@ if (role === "gc") {
   }
 }
 const startedAt = Date.now();
+operationStartedAt = startedAt;
 try {
-  await operation();
-  say(`DONE ${JSON.stringify({ elapsedMs: Date.now() - startedAt })}`);
+  const result = await operation() as { favorites?: unknown } | undefined;
+  say(`DONE ${JSON.stringify({ elapsedMs: Date.now() - startedAt, ...(site === "preferences-read" ? { favorites: result?.favorites } : {}) })}`);
   process.exit(0);
 } catch (error) {
   const { code, message } = error as { code?: unknown; message?: unknown };

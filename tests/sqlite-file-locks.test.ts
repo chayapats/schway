@@ -7,6 +7,7 @@ import { deleteHistorySession, HISTORY_STORE_BUSY } from "../src/history/store.t
 import { openUndoStore, UNDO_STORE_BUSY } from "../src/undo/store.ts";
 import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { ModelPreferences } from "../src/config/model-preferences.ts";
+import { proveWritable } from "../src/storage/sqlite-file-lock.ts";
 
 const SITE = join(import.meta.dir, "fixtures/sqlite-file-lock/site.ts");
 /** Root bypasses permission bits, so permission-denied cases cannot be staged as root. */
@@ -61,14 +62,14 @@ function lockPath(site: Site): string {
 }
 
 /** Run one operation of `site` in this process and report its rejection, or null. */
-async function attempt(site: Site, opts: { lockWaitMs?: number } = {}): Promise<{ failure: { code?: string; message: string } | null; elapsedMs: number }> {
+async function attempt(site: Site, opts: { lockWaitMs?: number } = {}): Promise<{ failure: { code?: string; message: string } | null; elapsedMs: number; favorites?: string[] }> {
   const startedAt = Date.now();
   try {
+    if (site === "preferences-read") return { failure: null, favorites: new ModelPreferences(home).read().favorites, elapsedMs: Date.now() - startedAt };
     if (site === "history") await deleteHistorySession({ home, sessionId: "session", lockWaitMs: opts.lockWaitMs ?? 1000 });
     else if (site === "undo") await openUndoStore({ home }).recordShell({ sessionId: "session", turnId: "turn", turnNumber: 1 }, { detection: "unavailable" });
     else if (site === "memory") await (await InteractiveMemory.load(home, workspace)).write(choice);
-    else if (site === "preferences") new ModelPreferences(home).pin("a".repeat(64), true);
-    else new ModelPreferences(home).read();
+    else new ModelPreferences(home).pin("a".repeat(64), true);
     return { failure: null, elapsedMs: Date.now() - startedAt };
   } catch (error) {
     const { code, message } = error as { code?: unknown; message?: unknown };
@@ -83,6 +84,7 @@ interface SiteRun {
   readonly message: string;
   readonly elapsedMs: number;
   readonly lines: string[];
+  readonly favorites?: string[];
 }
 
 /** Run the site fixture in its own process with this test's home and workspace; a child that outlives CHILD_TIMEOUT_MS is killed. */
@@ -97,8 +99,9 @@ async function runSite(site: Site, role: "once" | "gc", env: Record<string, stri
   const lines = stdout.split("\n").filter(Boolean);
   const outcome = lines.find(line => line.startsWith("DONE ") || line.startsWith("FAILED "));
   if (outcome === undefined) throw new Error(`${site} ${role} reported no outcome: ${JSON.stringify(lines)} ${stderr}`);
-  const detail = JSON.parse(outcome.slice(outcome.indexOf(" ") + 1)) as { code?: string; message?: string; elapsedMs: number };
-  return { ok: outcome.startsWith("DONE "), ...(detail.code === undefined ? {} : { code: detail.code }), message: detail.message ?? "", elapsedMs: detail.elapsedMs, lines };
+  const detail = JSON.parse(outcome.slice(outcome.indexOf(" ") + 1)) as { code?: string; message?: string; elapsedMs: number; favorites?: string[] };
+  return { ok: outcome.startsWith("DONE "), ...(detail.code === undefined ? {} : { code: detail.code }), message: detail.message ?? "", elapsedMs: detail.elapsedMs, lines,
+    ...(detail.favorites === undefined ? {} : { favorites: detail.favorites }) };
 }
 
 /** Hold the site's write lock through a separate read-write connection in this process. */
@@ -120,7 +123,7 @@ function untouched(site: Site, run: { lines?: string[] }): void {
   if (site === "preferences" || site === "preferences-read") expect(new ModelPreferences(home).read().favorites).toEqual([seedIdentity]);
 }
 
-test("a read-only connection is refused at every lock site, beside a holder and alone", async () => {
+test("a read-only connection is refused at every lock site, beside a holder and alone, while a preferences read still reads", async () => {
   for (const site of ["history", "undo", "memory", "preferences", "preferences-read"] as const) {
     await seed(site);
     const path = lockPath(site);
@@ -138,9 +141,14 @@ test("a read-only connection is refused at every lock site, beside a holder and 
     }
     const alone = await runSite(site, "once", { FIXTURE_SQLITE: "readonly", FIXTURE_WAIT_MS: "5000" });
     for (const run of [beside, alone]) {
-      expect({ site, ok: run.ok }).toEqual({ site, ok: false });
       untouched(site, run);
-      if (site === "preferences" || site === "preferences-read") {
+      if (site === "preferences-read") {
+        // A read writes nothing, and its shared lock gives a consistent snapshot.
+        expect({ ok: run.ok, favorites: run.favorites }).toEqual({ ok: true, favorites: [seedIdentity] });
+        continue;
+      }
+      expect({ site, ok: run.ok }).toEqual({ site, ok: false });
+      if (site === "preferences") {
         expect({ site, code: run.code }).toEqual({ site, code: "SQLITE_READONLY" });
       } else {
         expect({ site, code: run.code, message: run.message }).toEqual({ site, code: "LOCK_FILE_UNUSABLE", message: unwritable(path) });
@@ -154,7 +162,7 @@ test("a read-only connection is refused at every lock site, beside a holder and 
   }
 }, TEST_TIMEOUT_MS);
 
-test.skipIf(RUNS_AS_ROOT)("a lock file or database this user cannot write is refused instead of admitting a second holder", async () => {
+test.skipIf(RUNS_AS_ROOT)("a lock file or database this user cannot write is refused instead of admitting a second holder, while a preferences read still reads", async () => {
   for (const site of ["history", "undo", "memory", "preferences", "preferences-read"] as const) {
     await seed(site);
     const path = lockPath(site);
@@ -162,9 +170,9 @@ test.skipIf(RUNS_AS_ROOT)("a lock file or database this user cannot write is ref
     chmodSync(path, 0o400);
     const result = await attempt(site, { lockWaitMs: 5000 });
     chmodSync(path, 0o600);
-    expect({ site, refused: result.failure !== null }).toEqual({ site, refused: true });
     untouched(site, {});
-    if (site === "preferences" || site === "preferences-read") expect({ site, code: result.failure?.code }).toEqual({ site, code: "SQLITE_READONLY" });
+    if (site === "preferences-read") expect({ failure: result.failure, favorites: result.favorites }).toEqual({ failure: null, favorites: [seedIdentity] });
+    else if (site === "preferences") expect({ site, code: result.failure?.code }).toEqual({ site, code: "SQLITE_READONLY" });
     else {
       expect({ site, code: result.failure?.code }).toEqual({ site, code: "LOCK_FILE_UNUSABLE" });
       expect(result.failure?.message).toMatch(/^Schway cannot write its lock file at .+\. Make that location writable for this user, then retry\.$/);
@@ -247,6 +255,43 @@ test("a lock file with content is refused untouched rather than opened", async (
   }
 });
 
+test("a folder at a lock path is refused untouched and named as a folder", async () => {
+  for (const site of LOCK_SITES) {
+    await seed(site);
+    const path = lockPath(site);
+    rmSync(path);
+    mkdirSync(join(path, "kept"), { recursive: true });
+    const result = await attempt(site, { lockWaitMs: 5000 });
+    expect({ site, failure: result.failure }).toEqual({ site, failure: {
+      code: "LOCK_FILE_UNUSABLE", message: `${path} is a folder, not a Schway lock file. With no Schway running, delete that folder, then retry.`,
+    } });
+    expect({ site, fast: result.elapsedMs < 1000 }).toEqual({ site, fast: true });
+    expect(readdirSync(path)).toEqual(["kept"]);
+    rmSync(schway(), { recursive: true, force: true });
+  }
+});
+
+test("history contention that ends on a failed open still reports busy, and a failed open alone reports itself", async () => {
+  await seed("history");
+  const holder = holdLock("history");
+  let ended: SiteRun;
+  try {
+    // Contended for the first 100 ms, then every open fails while access(2) allows the file.
+    ended = await runSite("history", "once", { FIXTURE_WAIT_MS: "300", FIXTURE_SQLITE: "cantopen-after:100" });
+  } finally {
+    holder.exec("ROLLBACK");
+    holder.close();
+  }
+  // The host maps only the busy code to "blocked"; the failed open must not hide the contention.
+  expect({ ok: ended.ok, code: ended.code, message: ended.message }).toEqual({ ok: false, code: HISTORY_STORE_BUSY, message: "History store busy" });
+  expect(ended.elapsedMs).toBeGreaterThanOrEqual(250);
+  expect(ended.lines.includes("ENTERED")).toBe(false);
+  // With no holder, the bound ends with the failure itself, as before.
+  const failed = await runSite("history", "once", { FIXTURE_WAIT_MS: "300", FIXTURE_SQLITE: "cantopen-after:0" });
+  expect({ ok: failed.ok, code: failed.code }).toEqual({ ok: false, code: "SQLITE_CANTOPEN" });
+  expect(failed.lines.includes("ENTERED")).toBe(false);
+}, TEST_TIMEOUT_MS);
+
 test("each site keeps its contention behavior: history waits its bound, the others reject at once", async () => {
   for (const site of ["history", "undo", "memory", "preferences", "preferences-read"] as const) {
     await seed(site);
@@ -274,11 +319,23 @@ test("each site keeps its contention behavior: history waits its bound, the othe
   }
 });
 
-test("the preferences write probe changes nothing and leaves no journal", async () => {
+test("the preferences write probe changes nothing on a writable connection and refuses a read-only one", async () => {
   await seed("preferences");
   const path = lockPath("preferences");
   const before = readFileSync(path);
+  const writable = new Database(path, { readwrite: true, create: false });
+  writable.exec("BEGIN IMMEDIATE");
+  proveWritable(writable, "preferences");
+  expect(readdirSync(schway()).filter(entry => entry.startsWith("model-preferences"))).toEqual(["model-preferences.sqlite"]);
+  writable.exec("COMMIT");
+  writable.close();
+  expect(Buffer.compare(readFileSync(path), before)).toBe(0);
+  const readOnly = new Database(path, { readonly: true });
+  readOnly.exec("BEGIN IMMEDIATE");
+  expect(() => proveWritable(readOnly, "preferences")).toThrow(expect.objectContaining({ code: "SQLITE_READONLY" }));
+  readOnly.exec("ROLLBACK");
+  readOnly.close();
+  // A read neither probes nor writes.
   expect(new ModelPreferences(home).read().favorites).toEqual([seedIdentity]);
   expect(Buffer.compare(readFileSync(path), before)).toBe(0);
-  expect(readdirSync(schway()).filter(entry => entry.startsWith("model-preferences"))).toEqual(["model-preferences.sqlite"]);
 });

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFile, writeFile, chmod, mkdir, stat, symlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { displayPath } from "../src/storage/sqlite-file-lock.ts";
 import { openUndoStore, pruneUndoStore } from "../src/undo/store.ts";
 import { executeToolCall } from "../src/tools/executor.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
@@ -225,6 +226,23 @@ test("capture repairs an incomplete content-addressed blob before changing a fil
     await writeFile(join(directory, hash), "partial", { mode: 0o600 });
     expect((await run("write", { path: "file.txt", content: "changed" })).status).toBe("success");
     expect((await store.blob("session", hash)).toString()).toBe(bytes);
+  });
+});
+
+test("a refused undo lock file names its own next action in the tool output", async () => {
+  await withTempDir(async root => {
+    const { run } = await fixture(root);
+    const path = join(root, "file.txt");
+    await writeFile(path, "before");
+    // Only an empty file is a Schway lock file; this one is refused, not opened.
+    const lock = join(root, ".schway", "undo.lock");
+    await mkdir(dirname(lock), { recursive: true });
+    await writeFile(lock, "not a lock");
+    const blocked = await run("write", { path: "file.txt", content: "after" });
+    expect(blocked.status).toBe("error");
+    expect(blocked.result.content).toBe(`Could not save undo data for file.txt: The file at ${displayPath(lock)} is not a Schway lock file. With no Schway running, delete it, then retry. The file was not changed.`);
+    expect(await readFile(path, "utf8")).toBe("before");
+    expect(await readFile(lock, "utf8")).toBe("not a lock");
   });
 });
 

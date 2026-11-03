@@ -401,13 +401,14 @@ child processes, kills them with SIGKILL, races contenders that start after a
 crashed holder or are already polling when it dies, and refuses read-only
 connections beside a live holder.
 
-Schway's other cross-process locks use the same implementation: the history,
-undo and interactive-memory lock files, and the model-preferences database.
-Each keeps its own wait: history waits up to its bound, while undo and
-interactive memory reject contention at once. The preferences database has
-content, so it skips the rules for an empty lock file. It keeps its rollback
-journal, and it proves the write lock with a deletion that matches no row.
-`tests/sqlite-file-locks.test.ts` covers each one.
+Schway's other SQLite locks use the same implementation: the history, undo
+and interactive-memory lock files, and the model-preferences database. Each
+keeps its own wait: history waits up to its bound, while undo and interactive
+memory reject contention at once. The preferences database has content, so it
+skips the rules for an empty lock file and keeps its rollback journal. Before a
+change, it proves the write lock with a deletion that matches no row. A plain
+read skips that check, because a read-only connection still reads a consistent
+snapshot and writes nothing. `tests/sqlite-file-locks.test.ts` covers each one.
 
 ## ChatGPT catalog protocol compatibility
 

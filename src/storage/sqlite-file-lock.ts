@@ -49,10 +49,10 @@ const sqliteCode = (error: unknown): string => String((error as { code?: unknown
 const DENIED = new Set(["EACCES", "EPERM", "EROFS"]);
 
 /**
- * Connections that hold, or are about to take, a lock: held lock files and
- * open private databases. Each must stay reachable until it is released: a holder waiting on a promise nothing else
- * references would otherwise let the garbage collector finalize the
- * connection and silently drop the lock while the holder still counts as inside.
+ * Connections whose open transaction is a held lock file. A held connection
+ * must stay reachable until `releaseConnection`: a holder waiting on a promise
+ * nothing else references would otherwise let the garbage collector finalize
+ * the connection and silently drop the lock while the holder still counts as inside.
  */
 const HELD = new Set<Database>();
 
@@ -298,7 +298,7 @@ export function tryLockFile(path: string): LockFileAttempt {
   return { kind: "held", lock };
 }
 
-/** Close a held or pinned connection through SQLite, which rolls back its open transaction and drops its lock. */
+/** Unpin a held connection and close it through SQLite, which rolls back its open transaction and drops its lock. */
 export function releaseConnection(connection: Database): void {
   HELD.delete(connection);
   try {
@@ -308,7 +308,7 @@ export function releaseConnection(connection: Database): void {
   }
 }
 
-/** Open the database at `path` read-write and pinned until `releaseConnection`, first creating it empty with mode 0600 when absent; an existing file is not changed. */
+/** Open the database at `path` read-write, first creating it empty with mode 0600 when absent; an existing file is not changed, and the caller closes it. */
 export function openPrivateDatabase(path: string): Database {
   // Creating it here, rather than through an ordinary open, keeps every
   // descriptor on it inside SQLite, and the umask cannot leave it unwritable.
@@ -318,9 +318,7 @@ export function openPrivateDatabase(path: string): Database {
     if (errno(error) !== "ENOENT") throw error;
     createEmptyFile(path);
   }
-  const database = new Database(path, { readwrite: true, create: false });
-  HELD.add(database);
-  return database;
+  return new Database(path, { readwrite: true, create: false });
 }
 
 /** Throw SQLITE_READONLY unless the open `BEGIN IMMEDIATE` transaction holds a write lock, changing nothing; `table` must exist. */
@@ -356,7 +354,9 @@ export function lockFileRefusalText(refusal: LockFileRefusal, path: string): str
     case "parent-file": return `${at} is a file, not a folder. Move that file, then retry.`;
     case "link": return `The symbolic link at ${at} is broken or loops. Fix that link, then retry.`;
     case "too-long": return `The lock path ${lock} is too long. Use a shorter home folder path, then retry.`;
-    case "not-lock": return `The file at ${lock} is not a Schway lock file. With no Schway running, delete it, then retry.`;
+    case "not-lock": return refusal.directory
+      ? `${lock} is a folder, not a Schway lock file. With no Schway running, delete that folder, then retry.`
+      : `The file at ${lock} is not a Schway lock file. With no Schway running, delete it, then retry.`;
   }
 }
 
@@ -376,14 +376,18 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 /** Hold the lock file at `path`, throwing `busy()` when contention outlasts `waitMs` (0 rejects at once) and `lockFileError` at once on a refusal. */
 export async function holdLockFile(path: string, opts: { waitMs: number; busy: () => Error; pollMs?: number }): Promise<Database> {
   // Any other failure is retried within the wait, at least TRANSIENT_ATTEMPTS
-  // times, then throws its cause. Release the result with `releaseConnection`.
+  // times, then throws its cause, unless some attempt met another holder.
+  // Release the result with `releaseConnection`.
   const deadline = Date.now() + opts.waitMs;
+  // Met another holder: the wait then ends busy, whatever its last attempt hit.
+  let contended = false;
   for (let attempts = 1; ; attempts++) {
     const attempt = tryLockFile(path);
     if (attempt.kind === "held") return attempt.lock;
     if (attempt.kind === "refused") throw lockFileError(path, attempt.refusal);
+    if (attempt.contended) contended = true;
     if (Date.now() >= deadline) {
-      if (attempt.contended) throw opts.busy();
+      if (contended) throw opts.busy();
       if (attempts >= TRANSIENT_ATTEMPTS) throw attempt.cause ?? opts.busy();
       // A race such as a replaced or vanished lock file clears at once.
       continue;
