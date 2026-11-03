@@ -1,6 +1,6 @@
 import { formatCount } from "../text/format.ts";
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
-import { codexSubscriptionIdentity, credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
+import { codexSubscriptionIdentity, credentialIdentity, credentialStoreFailure, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { filterXaiModels, reliableListedModel, xaiModelCapabilities, type ListedModel } from "../model/model-list.ts";
 import { validateThinking } from "../model/thinking.ts";
@@ -658,7 +658,7 @@ export abstract class CredentialsLayer extends ControllerCore {
       this.grokModels = undefined; this.grokPending = false; this.clearXaiCapabilities("grok");
       if (this.grokSelected()) { this.model = undefined; this.grokReactivationRequired = true; this.notice("Grok disconnected · Alt+L sign in"); }
       return true;
-    } catch { this.fail(credentialStoreError("delete")); return false; }
+    } catch (error) { this.fail(credentialStoreFailure("delete", error)); return false; }
     finally { this.credentialMutation = false; }
   }
 
@@ -827,8 +827,8 @@ export abstract class CredentialsLayer extends ControllerCore {
       let deleted: boolean;
       try {
         deleted = await this.credentials!.store.delete(codexSubscriptionIdentity());
-      } catch {
-        this.fail(credentialStoreError("delete"));
+      } catch (error) {
+        this.fail(credentialStoreFailure("delete", error));
         return false;
       }
       this.subscriptionPending = false;
