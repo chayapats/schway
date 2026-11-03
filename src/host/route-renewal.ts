@@ -1,13 +1,13 @@
 import { credentialWriteRefusedError, isCleanupUncertain } from "../auth/store.ts";
-import { classifyAuthError, credentialReferenceForRoute, effectiveStore, readinessBounds, routeCredentialState, validateAuthSelection,
+import { classifyRouteFailure, credentialReferenceForRoute, effectiveStore, readinessBounds, routeCredentialState, validateAuthSelection,
   type HostAuthReadiness, type HostAuthSelection } from "./auth-routes.ts";
 import { acquireCredentialLifecycle } from "./credential-lifecycle.ts";
 
 /** Bounds for one explicit renewal; omission keeps only the refresher's own 30-second ceiling. */
 export interface HostRouteRenewalOptions {
-  /** Stop the renewal: it settles `cancelled` at once, and a token response that arrives later is never stored for it. */
+  /** Stop waiting: the renewal settles `cancelled` at once; a token request that already left still completes. */
   readonly signal?: AbortSignal;
-  /** Bound the renewal in whole milliseconds (1–86,400,000): expiry settles `limit_exceeded` the same way. */
+  /** Bound the wait in whole milliseconds (1–86,400,000): expiry settles `limit_exceeded` the same way. */
   readonly deadlineMs?: number;
 }
 
@@ -16,15 +16,11 @@ export type HostRouteRenewalStatus = Omit<HostAuthReadiness, "model">;
 
 /** Credential-free result of one explicit renewal; renewal never sends inference or switches route, model or billing. */
 export interface HostRouteRenewal {
-  /**
-   * `fresh`: the stored access was valid, so nothing was sent. `renewed`: it was expired or inside the refresh skew and
-   * fresh access is now stored. `failed`: `auth` carries the route-run classification. `cancelled` and `limit_exceeded`:
-   * the signal or deadline stopped it, and nothing that arrives later is stored for it.
-   */
+  /** `fresh` sent nothing, `renewed` stored fresh access, `failed` is classified in `auth`; `cancelled` and `limit_exceeded` stopped waiting. */
   readonly outcome: "fresh" | "renewed" | "failed" | "cancelled" | "limit_exceeded";
   /** Token requests this call started: 1 only when it sent the request itself; joining another caller's renewal counts 0. */
   readonly renewalRequests: 0 | 1;
-  /** `configured-unverified` when fresh or renewed; otherwise the latest verdict with its next action. */
+  /** `configured-unverified` when fresh or renewed; otherwise the latest verdict with its next action. Decide on `outcome` first. */
   readonly auth: HostRouteRenewalStatus;
 }
 
@@ -37,62 +33,53 @@ function withoutModel({ model: _model, ...status }: HostAuthReadiness): HostRout
   return status;
 }
 
-/**
- * Renew the selected route's credential at most once, through its existing refresher, without inference.
- * Use the same `lifecycle` as your hosts to share their single-flight renewal and write fencing.
- * Invalid selections reject like `listRouteModels`; malformed bounds reject `invalid-input`.
- */
+/** Renew the selected route's credential at most once without inference; pass your hosts' `lifecycle` to share their renewal. */
 export async function renewAuthRoute(selection: Omit<HostAuthSelection, "model">, options?: HostRouteRenewalOptions): Promise<HostRouteRenewal> {
+  // Invalid selections reject like `listRouteModels`, a model included; malformed bounds reject `invalid-input`.
   if (typeof selection !== "object" || selection === null || Array.isArray(selection) || "model" in selection) throw new Error("invalid");
   const valid = validateAuthSelection({ ...selection, model: RENEWAL_MODEL });
   // The caller's own object keys the effective store, so repeated calls with one selection share renewal.
   return renewSelectedRoute(selection as HostAuthSelection, valid, options);
 }
 
-/**
- * Renew through `memo`'s effective store and `valid`'s lifecycle, guard and fetch. @internal
- * `memo` is the selection object the effective store is memoized on, so a runtime passes the selection its runs use.
- */
+/** Renew through the effective store memoized on `memo`, with `valid`'s lifecycle, guard and fetch. @internal */
 export async function renewSelectedRoute(memo: HostAuthSelection, valid: HostAuthSelection, input: unknown): Promise<HostRouteRenewal> {
   const { signal, deadlineMs } = readinessBounds(input);
-  const credential = credentialReferenceForRoute(valid.route);
-  const interrupted: HostRouteRenewalStatus = { route: valid.route, credential, status: "store-unavailable", nextAction: INTERRUPTED, observedInference: "not-checked" };
+  const interrupted: HostRouteRenewalStatus = { route: valid.route, credential: credentialReferenceForRoute(valid.route),
+    status: "store-unavailable", nextAction: INTERRUPTED, observedInference: "not-checked" };
   // An already-stopped renewal never reads the store.
   if (signal?.aborted) return { outcome: "cancelled", renewalRequests: 0, auth: interrupted };
-  const classify = (error: unknown): HostAuthReadiness => {
-    const auth = classifyAuthError(error, valid);
-    // Renewal names no model, so a model verdict could only come from incidental transport text.
-    return auth.status === "model-unavailable" ? classifyAuthError(new Error("Renewal failed."), valid) : auth;
-  };
-  const stop = new AbortController();
-  // Join the route's participants before the read, as runs do, so a shared renewal may persist for this call.
-  const lease = valid.lifecycle ? acquireCredentialLifecycle(valid.lifecycle, valid.route, valid.credentialWriteGuard, stop.signal) : undefined;
-  const store = lease?.store ?? effectiveStore(memo);
+  const classify = (error: unknown): HostAuthReadiness => classifyRouteFailure(error, valid, "renewal");
   const fenced = (): HostAuthReadiness => classify(credentialWriteRefusedError());
+  // Aborted only by a stop that lands before this call sends its token request, so nothing is sent afterwards.
+  const unsent = new AbortController();
+  // Join the route's participants before the read, as runs do, so a shared renewal may persist for this call.
+  const lease = valid.lifecycle ? acquireCredentialLifecycle(valid.lifecycle, valid.route, valid.credentialWriteGuard, unsent.signal) : undefined;
+  const store = lease?.store ?? effectiveStore(memo);
   let requests: 0 | 1 = 0;
   let observed: HostAuthReadiness | undefined;
 
   const renew = async (): Promise<[HostRouteRenewal["outcome"], HostAuthReadiness]> => {
-    const state = await routeCredentialState(valid, () => stop.signal.aborted, store);
+    const state = await routeCredentialState(valid, () => unsent.signal.aborted, store);
     // A logout during the read fences this participant; its old route store refuses the read, so report the fence.
     if (lease?.interest.refused) return ["failed", fenced()];
     observed = state.readiness;
     if (state.readiness.status !== "configured-unverified") return ["failed", state.readiness];
     if (!state.renewalDue) return ["fresh", state.readiness];
     // Consult the fence before sending: a refused caller never spends the refresh token.
-    try { await valid.credentialWriteGuard?.(credential); }
+    try { await valid.credentialWriteGuard?.(Object.freeze(credentialReferenceForRoute(valid.route))); }
     catch {
       if (lease) lease.interest.refused = true;
       return ["failed", fenced()];
     }
-    stop.signal.throwIfAborted();
+    unsent.signal.throwIfAborted();
     // With a lifecycle, logout aborts this participant too.
-    const waiting = lease?.interest.controller.signal ?? stop.signal;
+    const waiting = lease?.interest.controller.signal ?? unsent.signal;
     const started = () => { requests = 1; };
     try {
       if (valid.route === "codex") {
         const { createSubscriptionTokenRefresher } = await import("../model/providers/codex-subscription.ts");
-        await createSubscriptionTokenRefresher({ store, ...(valid.fetch ? { fetch: valid.fetch } : {}) }).getValidAccessToken(waiting, started, true);
+        await createSubscriptionTokenRefresher({ store, ...(valid.fetch ? { fetch: valid.fetch } : {}) }).getValidAccessToken(waiting, started);
       } else {
         const { createSubscriptionTokenRefresher } = await import("../model/providers/grok-subscription.ts");
         await createSubscriptionTokenRefresher({ store, ...(valid.fetch ? { fetch: valid.fetch } : {}) }).getValidAccessToken(waiting, undefined, started);
@@ -113,16 +100,21 @@ export async function renewSelectedRoute(memo: HostAuthSelection, valid: HostAut
       settled = true;
       if (timer !== undefined) clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      if (outcome === "cancelled" || outcome === "limit_exceeded") stop.abort();
-      // Released at settlement: work still blocked in the store or guard no longer authorizes any write.
-      lease?.release();
       resolve({ outcome, renewalRequests: requests, auth });
     };
-    // Stopped before the store answered, there is no verdict; afterwards, the verdict read is the latest one.
-    const stopped = (outcome: "cancelled" | "limit_exceeded") => finish(outcome, observed ? withoutModel(observed) : interrupted);
+    const stopped = (outcome: "cancelled" | "limit_exceeded"): void => {
+      // Before its token request leaves, a stop abandons this call and its participation. Once it has left, the
+      // provider may already have rotated the refresh token, so the request finishes in the background and this
+      // call stays a participant until it settles: its response is stored unless a logout or a fence refuses it.
+      if (requests === 0) { unsent.abort(); lease?.release(); }
+      // Stopped before the store answered, there is no verdict; afterwards, the verdict read is the latest one.
+      finish(outcome, observed ? withoutModel(observed) : interrupted);
+    };
     const onAbort = (): void => stopped("cancelled");
     signal?.addEventListener("abort", onAbort, { once: true });
     if (deadlineMs !== undefined) timer = setTimeout(() => stopped("limit_exceeded"), deadlineMs);
-    renew().then(([outcome, auth]) => finish(outcome, withoutModel(auth)), (error: unknown) => finish("failed", withoutModel(classify(error))));
+    renew().then(
+      ([outcome, auth]) => { lease?.release(); finish(outcome, withoutModel(auth)); },
+      (error: unknown) => { lease?.release(); finish("failed", withoutModel(classify(error))); });
   });
 }

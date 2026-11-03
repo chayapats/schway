@@ -95,8 +95,9 @@
   expired can now renew, list models and pin an exact effort without first
   sending an unpinned request. Renewal sends at most one token request through
   the route's refresher, shares single-flight renewal, fencing and counts with
-  runs, keeps the run failure classification, and never stores a late token
-  response after an abort or deadline (#455).
+  runs and keeps the run failure categories. An abort or deadline settles
+  promptly; a token request that already left still completes and stores its
+  rotated credential, so a stopped renewal never forces a new sign-in (#455).
 - Export `SearchProvider`, `createWebSearchTool(provider, options?)` and
   `createWebFetchTool(options?)` through `schway/host`, advertised by
   `webToolsContract: "schway.host.web-tools/v1"`. Explicit read-only tools keep

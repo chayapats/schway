@@ -15,10 +15,18 @@ const KINDS = ["store", "lifecycle"] as const;
 const MODEL: Record<Route, string> = { codex: "gpt-6-luna", grok: "grok-4.7" };
 /** An exact pin each listing below supports: Codex lists none/low/high, xAI lists low/high. */
 const PIN = { codex: { level: "high", sent: "high" }, grok: { level: "low", sent: "low" } } as const;
-const SENTINELS = ["expired-access-sentinel", "stored-refresh-sentinel", "renewed-access-sentinel", "renewed-refresh-sentinel", "fresh-access-sentinel", "billing-bait", "guard-secret-sentinel"];
+const SENTINELS = ["expired-access-sentinel", "stored-refresh-sentinel", "renewed-access-sentinel", "renewed-refresh-sentinel", "rotated-refresh-sentinel", "fresh-access-sentinel", "billing-bait", "guard-secret-sentinel"];
 const BAIT = { OPENAI_API_KEY: "billing-bait", XAI_API_KEY: "billing-bait" };
-const FENCE_REFUSED = "The embedding application's credential fence refused a credential write. No credential was changed. Retry the turn after the fence allows writes.";
+const FENCE_REFUSED = "The embedding application's credential fence refused the renewal. No credential was changed. Retry the renewal after the fence allows writes.";
 const LOCK_REASON = "Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry.";
+const UNREACHABLE: Record<Route, string> = {
+  codex: "Could not reach the ChatGPT subscription to renew its credential. Retry the renewal later; Schway never falls back to API-key billing.",
+  grok: "Could not reach the Grok subscription to renew its credential. Retry the renewal later; Schway never falls back to API-key billing.",
+};
+const RATE_LIMITED: Record<Route, string> = {
+  codex: "The ChatGPT subscription is rate-limited (HTTP 429). Wait, then retry the renewal; renewal never retries on its own.",
+  grok: "The Grok subscription is rate-limited. Wait, then retry the renewal; renewal never retries on its own.",
+};
 const INTERRUPTED = "The renewal stopped before the OS secure store returned the credential. Retry the renewal; if the store keeps waiting, unlock or allow access to your OS credential store.";
 
 const identityFor = (route: Route) => route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
@@ -26,6 +34,15 @@ const identityFor = (route: Route) => route === "codex" ? codexSubscriptionIdent
 const EXPIRED = JSON.stringify({ accessToken: "expired-access-sentinel", refreshToken: "stored-refresh-sentinel", obtainedAt: 1, expiresAt: 1 });
 const fresh = () => JSON.stringify({ accessToken: "fresh-access-sentinel", refreshToken: "stored-refresh-sentinel", obtainedAt: Date.now(), expiresAt: Date.now() + 3_600_000 });
 const renewedTokens = () => Response.json({ access_token: "renewed-access-sentinel", refresh_token: "renewed-refresh-sentinel", expires_in: 3600 });
+/** A token endpoint that rotates the refresh token on every use and rejects reuse, as real providers do. */
+function rotatingTokens(): (form: URLSearchParams) => Response {
+  let current = "stored-refresh-sentinel", issued = 0;
+  return form => {
+    if (form.get("refresh_token") !== current) return Response.json({ error: "invalid_grant" }, { status: 400 });
+    current = `rotated-refresh-sentinel-${++issued}`;
+    return Response.json({ access_token: `renewed-access-sentinel-${issued}`, refresh_token: current, expires_in: 3600 });
+  };
+}
 const isToken = (url: string) => url.includes("auth.x.ai") || url.includes("/oauth/token");
 
 async function options(dir: string, auth: HostOptions["auth"]): Promise<HostOptions> {
@@ -64,7 +81,7 @@ function answer(route: Route): Response {
 }
 
 /** Fake transport counting token, catalog and inference requests; `hold()` parks token requests until released, ignoring abort. */
-function transport(route: Route, tokenResponse: () => Response = renewedTokens) {
+function transport(route: Route, tokenResponse: (form: URLSearchParams) => Response = renewedTokens) {
   const counts = { token: 0, catalog: 0, inference: 0, catalogAuth: [] as string[], efforts: [] as Array<string | null> };
   let gate: { started: PromiseWithResolvers<void>; release: PromiseWithResolvers<void> } | undefined;
   const fetch: HostAuthFetch = async (input, init) => {
@@ -73,7 +90,7 @@ function transport(route: Route, tokenResponse: () => Response = renewedTokens) 
       counts.token++;
       // Like a transport that ignores cancellation: the response still arrives after the caller stopped.
       if (gate) { gate.started.resolve(); await gate.release.promise; }
-      return tokenResponse();
+      return tokenResponse(new URLSearchParams(typeof init?.body === "string" ? init.body : ""));
     }
     if (init?.method === "GET") { counts.catalog++; counts.catalogAuth.push(new Headers(init.headers).get("Authorization") ?? ""); return catalog(route); }
     counts.inference++;
@@ -126,6 +143,8 @@ function expectSafe(result: HostRouteRenewal, route: Route): void {
   expect(result.auth.observedInference).toBe("not-checked");
   // Renewal belongs to the route credential, never to a model.
   expect("model" in result.auth).toBe(false);
+  // A renewal has no turn and never retries on its own.
+  expect(result.auth.nextAction).not.toMatch(/\bturn\b|owns retries/);
   expect(containsNoSecrets(result, SENTINELS)).toBe(true);
 }
 
@@ -281,7 +300,11 @@ for (const route of ROUTES) for (const kind of KINDS) {
         expected: { outcome: "failed", renewalRequests: 0, auth: { status: "needs-login" } } },
       { raw: "not-json-sentinel", response: renewedTokens, expected: { outcome: "failed", renewalRequests: 0, auth: { status: "invalid-store" } } },
       { raw: EXPIRED, response: () => Response.json({ error: "invalid_grant" }, { status: 400 }), expected: { outcome: "failed", renewalRequests: 1, auth: { status: "rejected" } } },
-      { raw: EXPIRED, response: () => new Response("upstream-body-sentinel", { status: 503 }), expected: { outcome: "failed", renewalRequests: 1, auth: { status: "integration-unavailable" } } },
+      { raw: EXPIRED, response: () => new Response("upstream-body-sentinel", { status: 503 }),
+        expected: { outcome: "failed", renewalRequests: 1, auth: { status: "integration-unavailable", nextAction: UNREACHABLE[route] } } },
+      // Token endpoints answer errors with JSON; Codex reads an unreadable body as a reach failure, as runs do.
+      { raw: EXPIRED, response: () => Response.json({ error: "upstream-body-sentinel" }, { status: 429 }),
+        expected: { outcome: "failed", renewalRequests: 1, auth: { status: "quota-exceeded", nextAction: RATE_LIMITED[route] } } },
     ] as const;
     for (const entry of cases) {
       const store = await seeded(route, entry.raw);
@@ -323,33 +346,94 @@ for (const route of ROUTES) for (const kind of KINDS) {
     } finally { server.stop(true); }
   });
 
-  for (const stop of ["abort", "deadline"] as const) test(`${route} ${kind}: ${stop} during the token request settles promptly and never stores the late response`, async () => {
+  for (const stop of ["abort", "deadline"] as const) test(`${route} ${kind}: ${stop} after the token request left settles promptly and still stores the rotated credential`, async () => {
     await withTempDir(async dir => {
       const store = await seeded(route, EXPIRED);
-      const wire = transport(route);
+      const wire = transport(route, rotatingTokens());
       const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch });
       const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
       const held = wire.hold();
       const controller = new AbortController();
-      const pending = host.auth!.renew(stop === "abort" ? { signal: controller.signal } : { deadlineMs: 50 });
-      await held.started;
+      const pending = host.auth!.renew(stop === "abort" ? { signal: controller.signal } : { deadlineMs: 1_000 });
+      await Promise.race([held.started, pending.then(early => { throw new Error(`renewal settled before sending: ${early.outcome}`); })]);
       const stopped = performance.now();
       if (stop === "abort") controller.abort();
       const renewal = await pending;
       expect(performance.now() - stopped).toBeLessThan(2_000);
-      // The request left, so it is counted; the credential verdict is the one read before the stop.
+      // The request left, so it is counted; decide on the outcome, since auth is the verdict read before the stop.
       expect(renewal).toMatchObject({ outcome: stop === "abort" ? "cancelled" : "limit_exceeded", renewalRequests: 1, auth: { status: "configured-unverified" } });
       expectSafe(renewal, route);
+      // The provider rotated the refresh token, so the response it sent is stored rather than thrown away.
       held.release();
-      await Bun.sleep(20);
-      expect(store.writes).toBe(0);
-      expect(await store.value()).toBe(EXPIRED);
-      // The abandoned renewal is gone: the next one starts its own request.
+      await until(() => store.writes === 1, "the rotated credential to be stored");
+      await Bun.sleep(5);
+      expect(await store.value()).toContain("rotated-refresh-sentinel-1");
       const next = await host.auth!.renew();
-      expect(next).toMatchObject({ outcome: "renewed", renewalRequests: 1 });
-      expect(wire.counts).toMatchObject({ token: 2, inference: 0 });
+      expect(next).toMatchObject({ outcome: "fresh", renewalRequests: 0 });
+      expect(await listRouteModels(selection)).toMatchObject({ status: "listed" });
+      expect(wire.counts).toMatchObject({ token: 1, inference: 0 });
+      // The participation held for the stored response has been released.
       await host.close(); await lifecycle?.close();
     });
+  });
+
+  test(`${route} ${kind}: a run arriving after a stopped renewal joins its in-flight request`, async () => {
+    await withTempDir(async dir => {
+      const store = await seeded(route, EXPIRED);
+      const wire = transport(route, rotatingTokens());
+      const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch });
+      const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
+      const session = await host.createSession();
+      const held = wire.hold();
+      const controller = new AbortController();
+      const pending = host.auth!.renew({ signal: controller.signal });
+      await held.started;
+      controller.abort();
+      expect(await pending).toMatchObject({ outcome: "cancelled", renewalRequests: 1 });
+      const reads = store.reads;
+      let settled = false;
+      const running = session.submitWithRoute({ text: "after a stopped renewal" }).finally(() => { settled = true; });
+      // Readiness and the refresher each read once, then the run waits on the request already in flight.
+      await until(() => store.reads >= reads + 2, "the run to join");
+      await Bun.sleep(5);
+      expect(settled).toBe(false);
+      expect(wire.counts.token).toBe(1);
+      held.release();
+      const run = await running;
+      expect(run.outcome).toBe("completed");
+      expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 0 });
+      expect(wire.counts).toMatchObject({ token: 1, inference: 1 });
+      expect(await store.value()).toContain("rotated-refresh-sentinel-1");
+      await session.close(); await host.close(); await lifecycle?.close();
+    });
+  });
+
+  test(`${route} ${kind}: a stop while the write guard decides sends nothing afterwards`, async () => {
+    const store = await seeded(route, EXPIRED);
+    const wire = transport(route);
+    const deciding = Promise.withResolvers<void>(), decide = Promise.withResolvers<void>();
+    let guards = 0, frozen = false;
+    const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch,
+      credentialWriteGuard: async identity => {
+        guards++;
+        frozen = Object.isFrozen(identity);
+        deciding.resolve(); await decide.promise;
+      } });
+    const controller = new AbortController();
+    const pending = renewAuthRoute(selection, { signal: controller.signal });
+    await deciding.promise;
+    controller.abort();
+    const renewal = await pending;
+    expect(renewal).toMatchObject({ outcome: "cancelled", renewalRequests: 0, auth: { status: "configured-unverified" } });
+    expectSafe(renewal, route);
+    decide.resolve();
+    await Bun.sleep(20);
+    expect(guards).toBe(1);
+    // The guard receives a frozen reference, never an object a result also returns.
+    expect(frozen).toBe(true);
+    expect(wire.counts.token).toBe(0);
+    expect(store.writes).toBe(0);
+    await lifecycle?.close();
   });
 
   for (const stop of ["abort", "deadline", "pre-aborted"] as const) test(`${route} ${kind}: ${stop} before the store answers reports no verdict and sends nothing`, async () => {
@@ -469,6 +553,26 @@ for (const route of ROUTES) {
     expect(renewal).toMatchObject({ outcome: "failed", renewalRequests: 0, auth: { status: "store-unavailable", nextAction: FENCE_REFUSED } });
     expectSafe(renewal, route);
     expect(wire.counts.token).toBe(0);
+    await lifecycle.close();
+  });
+
+  test(`${route} a logout after a stopped renewal still fences its in-flight write`, async () => {
+    const store = await seeded(route, EXPIRED);
+    const wire = transport(route, rotatingTokens());
+    const lifecycle = createHostCredentialLifecycle({ store });
+    const held = wire.hold();
+    const controller = new AbortController();
+    const pending = renewAuthRoute({ route, lifecycle, fetch: wire.fetch }, { signal: controller.signal });
+    await held.started;
+    controller.abort();
+    expect(await pending).toMatchObject({ outcome: "cancelled", renewalRequests: 1 });
+    // The stopped renewal still takes part in its in-flight request, so the owner stays busy until it settles.
+    await expect(lifecycle.close()).rejects.toMatchObject({ code: "busy" });
+    await lifecycle.logout(route);
+    held.release();
+    await Bun.sleep(20);
+    expect(await store.value()).toBeNull();
+    expect(wire.counts.token).toBe(1);
     await lifecycle.close();
   });
 

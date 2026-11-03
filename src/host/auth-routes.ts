@@ -412,6 +412,12 @@ function errorText(error: unknown): string {
  * recognized only by identity, directly or as a `cause`, so echoed refusal wording never reads as `dispatch-refused`;
  * Schway's own refused-redirect failures are recognized the same way. */
 export function classifyAuthError(error: unknown, selection: HostAuthSelection): HostAuthReadiness {
+  return classifyRouteFailure(error, selection, "turn");
+}
+
+/** Classify like `classifyAuthError`, wording retry guidance for a `turn` or an explicit `renewal`, which has no turn and never retries. @internal */
+export function classifyRouteFailure(error: unknown, selection: HostAuthSelection, retry: "turn" | "renewal"): HostAuthReadiness {
+  const renewal = retry === "renewal";
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
   const base = { route: valid.route, model: valid.model, credential, observedInference: "not-checked" as const };
@@ -429,10 +435,14 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
     // still be visible, so the guidance says verify instead of retrying.
     if (isCleanupUncertain(error)) {
       return { ...base, status: "store-unavailable",
-        nextAction: "A credential write was refused after it may have landed, and its removal could not be verified. A late credential may still be visible: verify the OS credential store before retrying the turn." };
+        nextAction: renewal
+          ? "A renewed credential was refused after it may have landed, and its removal could not be verified. A late credential may still be visible: verify the OS credential store before retrying the renewal."
+          : "A credential write was refused after it may have landed, and its removal could not be verified. A late credential may still be visible: verify the OS credential store before retrying the turn." };
     }
     return { ...base, status: "store-unavailable",
-      nextAction: "The embedding application's credential fence refused a credential write. No credential was changed. Retry the turn after the fence allows writes." };
+      nextAction: renewal
+        ? "The embedding application's credential fence refused the renewal. No credential was changed. Retry the renewal after the fence allows writes."
+        : "The embedding application's credential fence refused a credential write. No credential was changed. Retry the turn after the fence allows writes." };
   }
   // A lock refusal already names its cause and next step; the generic store
   // guidance (unlock the keychain, install libsecret) would point elsewhere.
@@ -465,12 +475,17 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
   }
   if (/rate-limited|rate limit|HTTP 429/i.test(text) || status === 429) {
     return { ...base, status: "quota-exceeded",
-      nextAction: valid.route === "codex"
-        ? "The ChatGPT subscription is rate-limited (HTTP 429). Retry the turn; Schway owns retries."
-        : "The Grok subscription is rate-limited. Retry the turn; Schway owns retries." };
+      nextAction: renewal
+        ? valid.route === "codex"
+          ? "The ChatGPT subscription is rate-limited (HTTP 429). Wait, then retry the renewal; renewal never retries on its own."
+          : "The Grok subscription is rate-limited. Wait, then retry the renewal; renewal never retries on its own."
+        : valid.route === "codex"
+          ? "The ChatGPT subscription is rate-limited (HTTP 429). Retry the turn; Schway owns retries."
+          : "The Grok subscription is rate-limited. Retry the turn; Schway owns retries." };
   }
-  if (/unknown.*model|model.*(not found|unavailable|does not exist|invalid)|not supported|subscription catalog|No selectable models/i.test(text) ||
-      ((status === 400 || status === 404 || status === 422) && /model/i.test(text))) {
+  // Renewal names no model, so model wording in its transport text is incidental and stays a reach failure.
+  if (!renewal && (/unknown.*model|model.*(not found|unavailable|does not exist|invalid)|not supported|subscription catalog|No selectable models/i.test(text) ||
+      ((status === 400 || status === 404 || status === 422) && /model/i.test(text)))) {
     return { ...base, status: "model-unavailable",
       nextAction: `Model ${valid.model} is not available on this subscription. Choose a listed model for this route.` };
   }
@@ -482,9 +497,13 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
         : "The Grok subscription answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing." };
   }
   return { ...base, status: "integration-unavailable",
-    nextAction: valid.route === "codex"
-      ? "Could not reach the ChatGPT subscription. Retry the turn; Schway owns retries and never falls back to API-key billing."
-      : "Could not reach the Grok subscription. Retry the turn; Schway owns retries and never falls back to API-key billing." };
+    nextAction: renewal
+      ? valid.route === "codex"
+        ? "Could not reach the ChatGPT subscription to renew its credential. Retry the renewal later; Schway never falls back to API-key billing."
+        : "Could not reach the Grok subscription to renew its credential. Retry the renewal later; Schway never falls back to API-key billing."
+      : valid.route === "codex"
+        ? "Could not reach the ChatGPT subscription. Retry the turn; Schway owns retries and never falls back to API-key billing."
+        : "Could not reach the Grok subscription. Retry the turn; Schway owns retries and never falls back to API-key billing." };
 }
 
 /** True when a value contains none of the supplied secret sentinels. */

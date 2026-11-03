@@ -256,13 +256,11 @@ export async function loadSubscriptionTokens(
   return parseSubscriptionTokens(raw);
 }
 
-/** One shared refresh; `keep` is set once any caller that never abandons joins, and `waiters` counts callers still waiting. */
-type CodexRefresh = { generation: number; promise: Promise<CodexTokens>; abandon: AbortController; keep: boolean; waiters: number };
 /** Route-scoped renewal lifecycle shared across refresher instances for one store. */
 type CodexLifecycle = {
   generation: number;
   writes: Promise<void>;
-  refresh?: CodexRefresh;
+  refresh?: { generation: number; promise: Promise<CodexTokens> };
 };
 const codexLifecycles = new WeakMap<CredentialStore, CodexLifecycle>();
 function codexLifecycle(store: CredentialStore): CodexLifecycle {
@@ -478,20 +476,18 @@ export function createSubscriptionTokenRefresher(input: {
   fetch?: CodexFetchLike;
 }): {
   /** Return a valid access token, refreshing once before expiry with racing callers sharing the renewal.
-   * `onRenewal` fires once per physical refresh request this caller starts; joiners never see it.
-   * An `abandonable` caller lets the shared refresh stop unwritten once every caller still waiting on it
-   * has aborted and none was a default caller; a default caller keeps it running and persisting. */
-  getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void, abandonable?: boolean): Promise<{ accessToken: string; accountId?: string }>;
+   * `onRenewal` fires once per physical refresh request this caller starts; joiners never see it. */
+  getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }>;
 } {
   return {
-    async getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void, abandonable = false): Promise<{ accessToken: string; accountId?: string }> {
+    async getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> {
       throwIfAborted(signal);
       const state = codexLifecycle(input.store);
       const pendingWrites = state.writes;
       await pendingWrites;
       throwIfAborted(signal);
       if (pendingWrites !== state.writes) {
-        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal, onRenewal, abandonable);
+        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal, onRenewal);
       }
       const generation = state.generation;
       let stored: CodexTokens | null;
@@ -502,7 +498,7 @@ export function createSubscriptionTokenRefresher(input: {
       }
       throwIfAborted(signal);
       if (generation !== state.generation) {
-        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal, onRenewal, abandonable);
+        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal, onRenewal);
       }
       if (!stored) {
         throw new Error(codexMissingLoginError());
@@ -516,14 +512,13 @@ export function createSubscriptionTokenRefresher(input: {
       let refresh = state.refresh;
       if (!refresh || refresh.generation !== generation) {
         const refreshToken = stored.refreshToken;
-        const timeout = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS), abandon = new AbortController();
-        const refreshSignal = AbortSignal.any([timeout, abandon.signal]);
+        const refreshSignal = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS);
         const promise = refreshSubscriptionTokens({ refreshToken, fetch: countingRenewalFetch(input.fetch, onRenewal), signal: refreshSignal })
           .catch((error: unknown) => {
-            if (timeout.aborted) {
+            if (refreshSignal.aborted) {
               throw new Error(
                 codexRefreshFailedError(`timed out after ${Math.round(CODEX_REFRESH_TIMEOUT_MS / 1000)}s`),
-                { cause: timeout.reason ?? error },
+                { cause: refreshSignal.reason ?? error },
               );
             }
             throw error;
@@ -547,21 +542,10 @@ export function createSubscriptionTokenRefresher(input: {
           });
         // Cancellation can happen before a caller begins awaiting this shared promise.
         void promise.catch(() => {});
-        refresh = { generation, promise, abandon, keep: false, waiters: 0 };
+        refresh = { generation, promise };
         state.refresh = refresh;
       }
-      const shared = refresh;
-      if (!abandonable) shared.keep = true;
-      shared.waiters++;
-      let renewed: CodexTokens;
-      try { renewed = await raceWithAbort(shared.promise, signal); }
-      finally {
-        // Only abandonable callers stopped waiting: stop the request and its write, and let the next caller start afresh.
-        if (--shared.waiters === 0 && !shared.keep && signal?.aborted) {
-          if (state.refresh === shared) state.refresh = undefined;
-          shared.abandon.abort();
-        }
-      }
+      const renewed = await raceWithAbort(refresh.promise, signal);
       return { accessToken: renewed.accessToken, accountId: renewed.accountId ?? accountIdFromAccessToken(renewed.accessToken) };
     },
   };

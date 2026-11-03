@@ -419,8 +419,8 @@ The exact signatures are
 and
 `renewAuthRoute(selection: Omit<HostAuthSelection, "model">, options?: HostRouteRenewalOptions): Promise<HostRouteRenewal>`.
 `HostRouteRenewalOptions` is
-`{ readonly signal?: AbortSignal; readonly deadlineMs?: number }`, and
-`HostRouteRenewal` is
+`{ readonly signal?: AbortSignal; readonly deadlineMs?: number }`; both bound how
+long the call waits, not a token request that already left. `HostRouteRenewal` is
 `{ readonly outcome: "fresh" | "renewed" | "failed" | "cancelled" | "limit_exceeded"; readonly renewalRequests: 0 | 1; readonly auth: HostRouteRenewalStatus }`.
 `HostRouteRenewalStatus` is `HostAuthReadiness` without `model`, because renewal
 belongs to the route credential rather than a model. Results carry no token,
@@ -450,28 +450,38 @@ when this call started the token request. A call that joins a run's renewal
 reports 0 because the run counts it, and a run that joins a renewal counts 0
 because the renewal did, so summed counts never double-count.
 
-**Failures.** `failed` keeps the route-run classification and next action of
-`classifyAuthError`. That means `needs-login` without a stored login or refresh
-token, `invalid-store` for an unreadable value, `rejected` for a refused grant, and
-`integration-unavailable` for transport failures and redirects. It also means
-`store-unavailable` for an unreadable store, a fence refusal, a credential-lock
-refusal or an uncertain cleanup. A lock refusal keeps the lock's own next action.
-It writes nothing and leaves the route usable for the next renewal, lifecycle
-included. An uncertain cleanup never claims that nothing changed. When renewal is
-due, the `credentialWriteGuard` is consulted before the token request, so a
-refusing fence fails with `renewalRequests: 0`; it is consulted again around the
-write, as for runs.
+**Failures.** `failed` keeps the route-run status categories of
+`classifyAuthError`. Next actions are the same except where a run's would say to
+retry the turn: a renewal has no turn and never retries on its own, so those say
+to retry the renewal instead. That means `needs-login` without a stored login or
+refresh token, `invalid-store` for an unreadable value, `rejected` for a refused
+grant, and `integration-unavailable` for transport failures and redirects. It
+also means `store-unavailable` for an unreadable store, a fence refusal, a
+credential-lock refusal or an uncertain cleanup. A lock refusal keeps the lock's
+own next action. It writes nothing and leaves the route usable for the next
+renewal, lifecycle included. An uncertain cleanup never claims that nothing
+changed. When renewal is due, the `credentialWriteGuard` is consulted before the
+token request, so a refusing fence fails with `renewalRequests: 0`; it is
+consulted again around the write, as for runs.
 
 **Bounds.** An abort settles `cancelled` and `deadlineMs` expiry (whole
 milliseconds, 1–86,400,000) settles `limit_exceeded`. Both settle promptly, even
-when a store read or token request cannot be cancelled. `renewalRequests` still
-counts a token request that already left. `auth` is the verdict read before the
-stop. If the store had not answered, it is `store-unavailable` with guidance to
-retry the renewal. A late store value is never used, and a stopped renewal never
-stores a late token response. Its shared request is abandoned unless a run shares
-the same renewal, in which case the run's own cancellation rules apply. An already-aborted
-signal never reads the store. Unlike `checkReadiness`, a stopped renewal resolves
-instead of rejecting, so its request count is never lost. Malformed bounds reject
+when a store read, guard or token request cannot be cancelled. A stop before this
+call sends its token request reports `renewalRequests: 0`; nothing is sent
+afterwards, and a late store value is never used. A stop after the request left
+reports `renewalRequests: 1`, and that request still runs to completion in the
+background. The provider may already have rotated the refresh token, so its
+response is stored unless a logout or a write fence refuses it; discarding it
+would force a new sign-in. Later renewals and runs join that request instead of
+sending another. With a lifecycle, the stopped renewal stays a participant until
+the request settles, so the owner's `close()` reports `busy` until then, which is
+bounded by the refresher's 30-second timeout and the store write.
+
+When a renewal stops, decide on `outcome`, not `auth.status`. `auth` is the
+verdict read before the stop. If the store had not answered, it is
+`store-unavailable` with guidance to retry the renewal. An already-aborted signal
+never reads the store. Unlike `checkReadiness`, a stopped renewal resolves instead
+of rejecting, so its request count is never lost. Malformed bounds reject
 `invalid-input`, and an invalid selection rejects as `listRouteModels` does.
 
 See `tests/host-route-renewal.test.ts` and the packed consumer in
@@ -1226,7 +1236,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 
 `bun test tests/host.test.ts` exercises a disposable external consumer that imports only `schway/host`, executes a scripted native tool round and reopens/continues in a fresh process. `bun test tests/host-tool-policy.test.ts` proves empty/narrow registries stay authoritative across retry/overflow/reopen, hook-mutated calls pass approval on effective arguments, and selected-provider bodies carry no hosted search even where an allowlist would admit it. `bun test tests/host-auth-routes.test.ts` proves explicit Grok/Codex route binding with opaque credential references, safe readiness and failure categories, shared single-flight renewal with cancellation/logout fencing, route isolation with API-key bait, lazy selected-adapter loading and disabled SDK retries, all with protocol fixtures and fake stores. `bun test tests/host-run-control.test.ts` proves finite deadline/retry bounds, transient progress, honest usage, terminal `completed`/`error`/`cancelled`/`max_turns`/`limit_exceeded` outcomes, cooperative cancel/settle, late-callback fencing and released ownership, all with scripted models and fake clocks. `bun test tests/host-managed-session-data.test.ts` proves retire blocks reopen, deletion removes only owned conversation, history, draft, undo, metadata and lease artifacts with honest `deleted`, `already-deleted`, `partial` and `blocked` status, busy and unknown writers delete nothing, symlink and traversal sentinels never escape, delayed completions never resurrect history, and CLI deletion, history and undo behavior is preserved. Preload sentinels reject provider/TUI initialization and runtime loading during static discovery, and only the selected adapter loads for route-bound runs. Other fixtures cover unsupported policies/options, durable input before inference, write failures, busy handles, cancellation, detached result reads and native terminal outcomes.
 
-`bun test tests/host-dispatch-authorization.test.ts` proves one synchronous authorization per physical send with fake fetch and fake stores: Grok 401, renewal and resend authorized as `initial` then `auth-retry`; refusing the resend leaves exactly one inference request; revocation during a blocked credential read or renewal refuses the send; Codex renews before its single authorized send; transient retries and compaction are authorized separately; body hashes match the transport's bytes; refusals are never retried and classify as `dispatch-refused`; unauthorized runs send identical bytes; and secret sentinels never appear in dispatch records, results, progress or errors. `bun test tests/host-route-renewal.test.ts` proves explicit renewal on both routes, with and without a lifecycle, using fake stores and protocol fixtures: a host that starts after token expiry renews with one token request and no inference, then lists and completes a pinned run; a fresh token sends nothing; a renewal and a run that overlap share one request counted once; guard, lock and uncertain-cleanup failures keep their run classification; and an abort or deadline settles promptly without storing a late response. `bun test tests/host-route-renewal-packed.test.ts` proves the same recovery through the packed tarball. `bun test tests/host-provider-requests.test.ts` proves exact per-run request counts, shared renewal counted once for the run that started it, `null` for unobservable models, and readiness that rejects promptly on abort or deadline without writing.
+`bun test tests/host-dispatch-authorization.test.ts` proves one synchronous authorization per physical send with fake fetch and fake stores: Grok 401, renewal and resend authorized as `initial` then `auth-retry`; refusing the resend leaves exactly one inference request; revocation during a blocked credential read or renewal refuses the send; Codex renews before its single authorized send; transient retries and compaction are authorized separately; body hashes match the transport's bytes; refusals are never retried and classify as `dispatch-refused`; unauthorized runs send identical bytes; and secret sentinels never appear in dispatch records, results, progress or errors. `bun test tests/host-route-renewal.test.ts` proves explicit renewal on both routes, with and without a lifecycle, using fake stores and protocol fixtures: a host that starts after token expiry renews with one token request and no inference, then lists and completes a pinned run; a fresh token sends nothing; a renewal and a run that overlap share one request counted once; guard, lock and uncertain-cleanup failures keep their run classification with renewal wording; and an abort or deadline settles promptly, sending nothing when it lands before the token request and, against a token endpoint that rotates refresh tokens, still storing the rotated credential when it lands after, with later runs joining that request. `bun test tests/host-route-renewal-packed.test.ts` proves the same recovery through the packed tarball. `bun test tests/host-provider-requests.test.ts` proves exact per-run request counts, shared renewal counted once for the run that started it, `null` for unobservable models, and readiness that rejects promptly on abort or deadline without writing.
 
 Run `bun run typecheck` and full `bun test`. The declaration builder emits both entries; `bun scripts/extension-api-report.ts` checks extension declarations and `bun scripts/extension-api-report.ts --host` checks the host report. Intentional host API changes use `--host --update`, followed by inventory/declaration tests. No live provider call or human credential setup belongs in these deterministic checks.
 
