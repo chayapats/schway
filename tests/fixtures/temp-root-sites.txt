@@ -46,3 +46,14 @@ spawn("sh", ["-c", "rm -rf build"]); // counted in sh -c text
 Bun.spawn(["bash", "-c", "find . -name '*.tmp' -delete"]); // counted once in bash -c text
 Bun.spawn([process.execPath, "-e", `import { rm } from "node:fs/promises"; await rm(dir, { recursive: true });`]); // counted inside an embedded script
 const erase = fs.rm; await erase(dir, { recursive: true }); // escapes: a removal function held in a variable
+runCommand("rm", ["-rf", d]); // counted in any call with "rm" and a recursive flag
+import { spawnSync as launch } from "node:child_process"; launch("rm", ["-R", d]); // counted through an aliased spawnSync
+await promisify(exec)("rm -rf build"); // counted through promisify
+const cleanup = "rm -rf build"; spawn("sh", ["-c", cleanup]); // counted where the shell text is written
+const command = "rm -rf " + d; // counted in a string that builds a command
+sh(`rm -rf ${d}`); // counted in a shell helper's template
+await writeFile(join(d, "cleanup.sh"), "#!/bin/sh\nrm -rf build\n"); // counted in a script written to a file
+rm(dir, { "recursive": true }); // counted with a string-keyed option
+rm(dir, { "recursive": false, force: true }); // not counted: recursion is off
+Bun.spawn([process.execPath, "-e", 'import { execSync } from "node:child_process"; execSync("rm -rf x");']); // counted once for an embedded script's shell text
+git(["rm", "-r", "--cached", path]); // counted: over-counting git rm -r is acceptable

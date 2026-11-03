@@ -7,7 +7,7 @@ import {
   assertRemovableOwnedTree, assertRemovableTempRoot, makeTempRoot, makeTempRootSync, removeOwnedTree, removeOwnedTreeSync,
   removeTempRoot, removeTempRootSync, withIsolatedCliDirs, withTempDir,
 } from "./helpers.ts";
-import { countTempSites, findTempSites, scanTempSites, statementStarts, type TempSiteKind } from "./helpers/temp-root-sites.ts";
+import { checkTypeScript5, countTempSites, findTempSites, scanTempSites, statementStarts, type TempSiteKind } from "./helpers/temp-root-sites.ts";
 
 const repo = resolve(import.meta.dir, "..");
 const exists = (path: string) => stat(path).then(() => true, () => false);
@@ -175,13 +175,23 @@ test("the scanner finds direct recursive removals and mkdtemp calls, including a
   expect(sites.map(site => `${site.line}:${site.kind}`)).toEqual([
     "2:recursiveRemoval", "4:recursiveRemoval", "7:recursiveRemoval", "9:mkdtemp", "10:mkdtemp", "11:recursiveRemoval",
     "12:recursiveRemoval", "16:recursiveRemoval", "18:mkdtemp", "19:mkdtemp", "20:recursiveRemoval", "21:recursiveRemoval",
-    "22:recursiveRemoval", "24:recursiveRemoval", "25:recursiveRemoval", "26:recursiveRemoval", "27:recursiveRemoval",
-    "29:recursiveRemoval", "30:recursiveRemoval", "39:recursiveRemoval", "40:recursiveRemoval", "41:recursiveRemoval",
-    "42:recursiveRemoval", "44:recursiveRemoval", "45:recursiveRemoval", "46:recursiveRemoval", "47:recursiveRemoval",
+    "22:recursiveRemoval", "24:recursiveRemoval", "25:recursiveRemoval", "26:recursiveRemoval", "27:recursiveRemoval", "29:recursiveRemoval",
+    "30:recursiveRemoval", "39:recursiveRemoval", "40:recursiveRemoval", "41:recursiveRemoval", "42:recursiveRemoval", "44:recursiveRemoval",
+    "45:recursiveRemoval", "46:recursiveRemoval", "47:recursiveRemoval", "49:recursiveRemoval", "50:recursiveRemoval", "51:recursiveRemoval",
+    "52:recursiveRemoval", "53:recursiveRemoval", "54:recursiveRemoval", "55:recursiveRemoval", "56:recursiveRemoval", "58:recursiveRemoval",
+    "59:recursiveRemoval",
   ]);
   // Every line the fixture marks as counted holds exactly one site, and no other line holds any.
   const marked = source.split("\n").flatMap((line, index) => / \/\/ counted/.test(line) ? [index + 1] : []);
   expect(sites.map(site => site.line)).toEqual(marked);
+});
+
+test("the scanner refuses any TypeScript but api-extractor's TypeScript 5 with a clear error", () => {
+  const ts5 = { version: "5.9.3", createSourceFile: () => undefined };
+  expect(checkTypeScript5(ts5)).toBe(ts5 as never);
+  for (const wrong of [{ version: "7.0.2" }, { version: "7.0.2", createSourceFile: () => undefined }, { version: "5.9.3" }, undefined]) {
+    expect(() => checkTypeScript5(wrong)).toThrow("TypeScript 5 compiler API from the TypeScript copy that @microsoft/api-extractor installs");
+  }
 });
 
 test("a spawn site is found after regex literals with quotes and URL strings in real test files", async () => {
