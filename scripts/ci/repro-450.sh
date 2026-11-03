@@ -22,8 +22,9 @@ seed_sentinels() {
 }
 
 snapshot() { # $1 = output prefix
-  ls -A /tmp | sort > "$1.tmp"
-  ls -A "$HOME" | sort > "$1.home"
+  # Only entries this user owns: systemd and other services churn their own /tmp entries.
+  find /tmp -mindepth 1 -maxdepth 1 -user "$(id -u)" -printf '%f\n' | sort > "$1.tmp"
+  find "$HOME" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort > "$1.home"
   (cd "$real" && find . -path ./node_modules -prune -o -print | sort) > "$1.copy"
 }
 
@@ -44,7 +45,7 @@ check_after() { # $1 = label; returns 1 when something disappeared
     fi
     local added
     added=$(comm -13 "/tmp/before.$kind" "/tmp/after.$kind" | grep -v '^schway-' | head -20)
-    if [ "$kind" = copy ] && [ -n "$added" ]; then printf 'ADDED (copy) after %s:\n%s\n' "$1" "$added" | tee -a "$report"; fi
+    if [ "$kind" = copy ] && [ -n "$added" ]; then printf 'ADDED (copy, informational) after %s:\n%s\n' "$1" "$added"; fi
   done
   return $lost
 }

@@ -4,7 +4,7 @@ on:
   push:
     branches: [t3/fix-ci-test-safety-shard-artifacts]
 concurrency:
-  group: repro-450-${{ github.ref }}
+  group: repro-450-${{ github.sha }}
   cancel-in-progress: true
 permissions:
   contents: read
