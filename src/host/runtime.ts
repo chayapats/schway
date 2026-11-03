@@ -521,6 +521,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           const meter = createRunMeter();
           let terminal: HostRunResult["outcome"] = "error";
           let lastError: unknown;
+          let lastRetry: Error | undefined;
           let lastCategory: unknown;
           let usages: HostRunAttemptUsage[] = [];
           let totalMs = 0;
@@ -554,6 +555,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               signal, webSearch: "off", exactTools: true, clock })) {
               const seen = observe(event, report, collect);
               if (seen.reason) reason = seen.reason;
+              // A retried provider failure is evidence too, even when the deadline ends its backoff.
+              if (event.type === "model.retry") lastRetry = new Error(event.message);
               if (event.type === "error") {
                 // Provider errors arrive as sanitized plain messages without status,
                 // so route classification stays message- and category-based (see classifyAuthError).
@@ -565,8 +568,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
                 }
               }
             }
-            // Re-read only while the run signal is live: after max_turns, or after a stream abort that left it
-            // live (such as lifecycle logout). A caller-cancelled run keeps its admission verdict without a read.
+            // Re-read only while the run signal is live: after max_turns, or after an adapter or injected fetch
+            // threw an AbortError on its own. A caller-cancelled run keeps its admission verdict without a read.
             if (reason === "max_turns" || (reason === "cancelled" && !signal.aborted)) {
               // The run settles only after this read; an abort first settles it as cancelled (or limit_exceeded).
               try { settledReadiness = await checkAuthReadiness(authSelection, { signal }); }
@@ -598,8 +601,10 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           }
           if (terminal === "cancelled" || terminal === "max_turns" || terminal === "limit_exceeded") {
             if (terminal === "limit_exceeded") {
-              // A deadline during the settling read leaves the admission verdict as the latest one observed, as cancel does.
-              const auth = settlingInterrupted ? admitted! : classifyAuthError(lastError ?? new Error("Run deadline elapsed."), authSelection);
+              // A deadline is not evidence of an unreachable route: without an observed provider failure, or during the
+              // settling read, the admission verdict is the latest one observed, as cancel reports.
+              const observed = lastError ?? lastRetry;
+              const auth = settlingInterrupted || observed === undefined ? admitted! : classifyAuthError(observed, authSelection);
               return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter) };
             }
             // Without a settling read (aborted, or it failed), the admission verdict is the latest one observed.

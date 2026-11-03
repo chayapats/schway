@@ -397,7 +397,7 @@ for (const route of ["codex", "grok"] as const) {
         // Without an authorizer the route model still refuses the redirect, and its message carries no URL.
         const plain = await session.submit({ text: "redirect again" }, await host.auth!.createModel(), { clock: fastClock });
         if (plain.outcome !== "error") throw new Error("expected error");
-        expect(plain.error.message).toBe(`The ${label} answered with an HTTP redirect. Route requests never follow redirects, so the request was not resent.`);
+        expect(plain.error.message).toBe(`The ${label} answered with an HTTP redirect. Route requests never follow redirects, so the request was not resent. Retry later.`);
         expect(posts).toBe(2);
         expect(redirected).toBe(0);
         await session.close(); await host.close();
@@ -476,3 +476,55 @@ for (const [variant, authorizerError] of [
     });
   });
 }
+
+test("a 503 whose body echoes redirect wording keeps its status and is retried", async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore(); await seed(store, "grok");
+    const echo = () => Response.json({ error: { message: "edge proxy: unexpected redirect from origin" } }, { status: 503 });
+    const wire = transport("grok", { inference: [echo, echo] });
+    const host = await createHost(await options(dir, { route: "grok", model: "grok-4.7", store, fetch: wire.fetch }));
+    const session = await host.createSession();
+    const seen: HostDispatch[] = [], progress: HostProgressEvent[] = [];
+    const run = await session.submitWithRoute({ text: "echo" }, { clock: fastClock, authorizeDispatch: dispatch => { seen.push(dispatch); }, onProgress: event => progress.push(event) });
+    expect(run.outcome).toBe("completed");
+    expect(wire.inferences()).toHaveLength(3);
+    expect(seen).toHaveLength(3);
+    expect(progress.filter(event => event.type === "retry")).toHaveLength(2);
+    expect(run.usage.providerRequests).toEqual({ initialSends: 3, authRetrySends: 0, renewalRequests: 0 });
+    await session.close(); await host.close();
+  });
+});
+
+test("grok 401, renewal, then a redirected resend is one authorized resend that is not retried", async () => {
+  await withTempDir(async dir => {
+    let posts = 0, redirected = 0;
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+      if (new URL(request.url).pathname === "/elsewhere") { redirected++; return xaiSse(); }
+      posts++;
+      return posts === 1 ? new Response("expired", { status: 401 }) : new Response(null, { status: 307, headers: { Location: "/elsewhere" } });
+    } });
+    try {
+      const store = fakeCredentialStore(); await seed(store, "grok");
+      let renewals = 0;
+      const fetch = ((input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).includes("auth.x.ai")) { renewals++; return Promise.resolve(fresh()); }
+        return globalThis.fetch(new URL("/responses", server.url), init);
+      }) as never;
+      const host = await createHost(await options(dir, { route: "grok", model: "grok-4.7", store, fetch }));
+      const session = await host.createSession();
+      const seen: HostDispatch[] = [], progress: HostProgressEvent[] = [];
+      const run = await session.submitWithRoute({ text: "resend redirect" }, { clock: fastClock, authorizeDispatch: dispatch => { seen.push(dispatch); }, onProgress: event => progress.push(event) });
+      expect(run.outcome).toBe("error");
+      expect(seen.map(dispatch => `${dispatch.kind}:${dispatch.sequence}`)).toEqual(["initial:1", "auth-retry:2"]);
+      expect(posts).toBe(2);
+      expect(redirected).toBe(0);
+      expect(renewals).toBe(1);
+      expect(progress.filter(event => event.type === "retry")).toHaveLength(0);
+      expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 1, renewalRequests: 1 });
+      if (!("auth" in run)) throw new Error("expected auth detail");
+      expect(run.auth.status).toBe("integration-unavailable");
+      expect(run.auth.nextAction).toBe("The Grok subscription answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing.");
+      await session.close(); await host.close();
+    } finally { server.stop(true); }
+  });
+});

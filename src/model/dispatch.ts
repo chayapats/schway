@@ -51,7 +51,7 @@ export function dispatchRefusedError(cause?: unknown): Error {
   return error;
 }
 
-/** True only for the refusal error object Schway threw; a copied message or a look-alike error never matches. */
+/** True only for the refusal error object Schway threw, not its `cause` wrappers; a copied message or a look-alike error never matches. */
 export function isDispatchRefused(error: unknown): error is Error {
   return error instanceof Error && refusals.has(error);
 }
@@ -72,13 +72,15 @@ export function hasDispatchRefusal(error: unknown): boolean {
   return causeChain(error).some(isDispatchRefused);
 }
 
-/** True when a fetch failed because `redirect: "error"` refused a 3xx answer, as Bun and undici report it. @internal */
+/** True only for a status-less transport failure whose chain carries Bun's `UnexpectedRedirect` code; response text never matches. @internal */
 export function isRefusedRedirect(error: unknown): boolean {
-  return causeChain(error).some(item => typeof item === "object" && item !== null &&
-    ((item as { code?: unknown }).code === "UnexpectedRedirect" || (item instanceof Error && /unexpected redirect/i.test(item.message))));
+  const chain = causeChain(error).filter((item): item is object => typeof item === "object" && item !== null);
+  // An HTTP response error carries body text and a status; it is an answer to keep classifying, not a refused redirect.
+  if (chain.some(item => typeof (item as { status?: unknown }).status === "number")) return false;
+  return chain.some(item => (item as { code?: unknown }).code === "UnexpectedRedirect");
 }
 
 /** Sanitized, non-transient failure for a route send whose endpoint answered with a redirect; no URL or transport text. @internal */
 export function redirectRefusedError(label: string): Error {
-  return new Error(`The ${label} answered with an HTTP redirect. Route requests never follow redirects, so the request was not resent.`);
+  return new Error(`The ${label} answered with an HTTP redirect. Route requests never follow redirects, so the request was not resent. Retry later.`);
 }

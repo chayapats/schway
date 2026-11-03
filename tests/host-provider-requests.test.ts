@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { checkAuthReadiness, createHost, createHostCredentialLifecycle, HostError, type HostOptions, type Model } from "schway/host";
+import { checkAuthReadiness, createHost, createHostCredentialLifecycle, HostError, type HostOptions, type HostProgressEvent, type Model } from "schway/host";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, type CredentialStore } from "../src/auth/store.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
@@ -359,13 +359,82 @@ test("a redirected codex refresh is one counted renewal request and never reache
       }) as never;
       const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch }));
       const session = await host.createSession();
-      const run = await session.submitWithRoute({ text: "renew" }, { clock: fastClock });
+      const progress: HostProgressEvent[] = [];
+      const run = await session.submitWithRoute({ text: "renew" }, { clock: fastClock, onProgress: event => progress.push(event) });
       expect(run.outcome).toBe("error");
       expect(redirected).toBe(0);
       expect(inference).toBe(0);
-      expect(run.usage.providerRequests).toEqual({ initialSends: 0, authRetrySends: 0, renewalRequests: tokenPosts });
-      expect(tokenPosts).toBeGreaterThanOrEqual(1);
+      expect(tokenPosts).toBe(1);
+      expect(progress.filter(event => event.type === "retry")).toHaveLength(0);
+      expect(run.usage.providerRequests).toEqual({ initialSends: 0, authRetrySends: 0, renewalRequests: 1 });
+      if (!("auth" in run)) throw new Error("expected auth detail");
+      expect(run.auth.status).toBe("integration-unavailable");
+      expect(run.auth.nextAction).toBe("The ChatGPT subscription answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing.");
+      // submit (and the CLI) show the fixed refresh message, never the transport text or token URL.
+      const submitted = await session.submit({ text: "renew again" }, await host.auth!.createModel(), { clock: fastClock });
+      if (submitted.outcome !== "error") throw new Error("expected error");
+      expect(submitted.error.message).toBe("The ChatGPT subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later.");
+      expect(tokenPosts).toBe(2);
+      expect(redirected).toBe(0);
       await session.close(); await host.close();
     } finally { server.stop(true); }
+  });
+});
+
+/** A response whose body stays open until the request is aborted, like a healthy stream mid-answer. */
+function openStream(init?: RequestInit): Response {
+  const body = new ReadableStream<Uint8Array>({ start(controller) {
+    init?.signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")), { once: true });
+  } });
+  return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+}
+
+// Codex reports a 5xx without a status, so the loop retries only Grok's; the retried variant uses Grok.
+for (const [route, failFirst] of [["codex", false], ["grok", false], ["grok", true]] as const) {
+  test(`a ${route} deadline mid-stream reports ${failFirst ? "the observed provider failure" : "the admission verdict"}`, async () => {
+    await withTempDir(async dir => {
+      const store = fakeCredentialStore(); await store.set(identityFor(route), valid());
+      const streaming = Promise.withResolvers<void>();
+      let requests = 0;
+      const fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+        requests++;
+        if (failFirst && requests === 1) return new Response("busy", { status: 503 });
+        streaming.resolve();
+        return openStream(init);
+      }) as never;
+      const host = await createHost(await options(dir, { route, model: modelFor(route), store, fetch }));
+      const session = await host.createSession();
+      const deadline = deadlineClock();
+      const pending = session.submitWithRoute({ text: "long answer" }, { clock: deadline.clock });
+      await streaming.promise;
+      deadline.fire();
+      const run = await pending;
+      expect(run.outcome).toBe("limit_exceeded");
+      if (!("auth" in run)) throw new Error("expected auth detail");
+      // A deadline alone is not evidence the route is unreachable; a retried 503 still is.
+      expect(run.auth.status).toBe(failFirst ? "integration-unavailable" : "configured-unverified");
+      expect(run.usage.providerRequests).toEqual({ initialSends: requests, authRetrySends: 0, renewalRequests: 0 });
+      await session.close(); await host.close();
+    });
+  });
+}
+
+test("a stream that aborts on its own leaves the run signal live, so the settling read runs", async () => {
+  await withTempDir(async dir => {
+    const store = gatedStore(Number.MAX_SAFE_INTEGER);
+    const fetch = (async () => {
+      // The injected transport aborts by itself; the caller never cancelled the run.
+      const body = new ReadableStream<Uint8Array>({ start(controller) { controller.error(new DOMException("Aborted", "AbortError")); } });
+      return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+    }) as never;
+    const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch }));
+    const session = await host.createSession();
+    const run = await session.submitWithRoute({ text: "self abort" });
+    expect(run.outcome).toBe("cancelled");
+    if (!("auth" in run)) throw new Error("expected auth detail");
+    expect(run.auth.status).toBe("configured-unverified");
+    // Admission, the adapter's credential, then the settling read.
+    expect(store.reads).toBe(3);
+    await session.close(); await host.close();
   });
 });

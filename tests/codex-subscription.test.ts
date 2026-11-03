@@ -674,10 +674,12 @@ test("direct refresh never follows a redirect with the refresh token", async () 
   } });
   try {
     const inits: Array<RequestInit | undefined> = [];
-    await expect(refreshSubscriptionTokens({
+    const failure = await refreshSubscriptionTokens({
       refreshToken: "redirect-refresh-sentinel",
       fetch: (async (_input, init) => { inits.push(init); return fetch(new URL("/oauth/token", server.url), init); }) satisfies CodexFetchLike,
-    })).rejects.toThrow(/Refreshing.*failed/i);
+    }).then(() => undefined, (error: unknown) => error as Error);
+    // A fixed message: no transport text, token URL or refresh token, and it names the next step.
+    expect(failure?.message).toBe("The ChatGPT subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later.");
     expect(inits.map(init => init?.redirect)).toEqual(["error"]);
     expect(posts).toBe(1);
     expect(redirected).toBe(0);
