@@ -1,6 +1,5 @@
 import { beforeAll, afterAll, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { encodeSse as encodeOpenAISse, TEXT_STREAM_EVENTS as OPENAI_TEXT } from "./fixtures/openai.ts";
 import { runCli, type CliIo } from "../src/cli/main.ts";
@@ -12,7 +11,7 @@ import { credentialIdentity, grokSubscriptionIdentity, type CredentialStore } fr
 import type { Model } from "../src/model/model.ts";
 import type { ToolResult } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
-import { decodeStoredLine, withTempDir } from "./helpers.ts";
+import { decodeStoredLine, makeTempRoot, removeTempRoot, withTempDir } from "./helpers.ts";
 
 /** Capture writes so CLI tests can assert stdout and stderr. */
 function capture() {
@@ -192,7 +191,7 @@ async function run(
   } = {},
 ) {
   const isolatedHome =
-    options.env?.HOME ?? (await mkdtemp(join(tmpdir(), "schway-home-")));
+    options.env?.HOME ?? (await makeTempRoot("schway-home-"));
   const stdout = capture();
   const stderr = capture();
   try {
@@ -213,7 +212,7 @@ async function run(
     return { exitCode, stdout: stdout.text, stderr: stderr.text };
   } finally {
     if (options.env?.HOME === undefined) {
-      await rm(isolatedHome, { recursive: true, force: true });
+      await removeTempRoot(isolatedHome);
     }
   }
 }

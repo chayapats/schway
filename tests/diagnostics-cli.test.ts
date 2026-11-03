@@ -1,14 +1,14 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { runCli } from "../src/cli/main.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 import { diagnosticPath } from "../src/diagnostics/sink.ts";
 
 async function withHome(run: (home: string) => Promise<void>) {
-  const home = await mkdtemp(join(tmpdir(), "schway-diag-cli-"));
-  try { await run(home); } finally { await rm(home, { recursive: true, force: true }); }
+  const home = await makeTempRoot("schway-diag-cli-");
+  try { await run(home); } finally { await removeTempRoot(home); }
 }
 
 for (const command of ["prompt", "doctor-json", "doctor-plain"] as const) for (const name of ["OTHER_AUTH", "OPENAI_API_KEY"])

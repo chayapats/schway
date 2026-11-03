@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, setSystemTime, test } from "bun:test";
 import { RGBA, type CapturedFrame, type ScrollBoxRenderable } from "@opentui/core";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir, userInfo } from "node:os";
+import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { COMPACTION_RESULTS, RECOVERY_SCREENS, SCREENS, STARTUP_RECOVERY_SCREENS, variantsFor } from "./screen-catalog/screens.ts";
 import { recoveryMessage, startupRecoveryMessage } from "../src/tui/controller-support.ts";
@@ -12,6 +12,7 @@ import { TUI_THEMES } from "../src/tui/theme.ts";
 import { buildGallery } from "./screen-catalog/gallery.ts";
 import { catalogFrameStates } from "./screen-catalog/harness.ts";
 import { applyExemptions, formatInvariantFailure, screenInvariantFailures, SCREEN_INVARIANT_EXEMPTIONS, type InvariantFailure } from "./helpers/screen-invariants.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const directory = join(import.meta.dir, "screen-catalog/goldens");
 const update = process.env.SCHWAY_UPDATE_SCREENS === "1";
@@ -392,7 +393,7 @@ test("golden format preserves Thai, wide cells, alpha, color intent and all attr
   expect(() => parseScreen(text.replace("size 5x1", "size 5x2"))).toThrow("row count");
 });
 test("gallery uses fixture goldens only and escapes cells without external assets", async () => {
-  const temp = await mkdtemp(join(tmpdir(), "catalog-gallery-"));
+  const temp = await makeTempRoot("catalog-gallery-");
   try {
     await writeFile(join(temp, "index.txt"), "fixture\nsecond\n");
     for (const id of ["fixture", "second"]) { await mkdir(join(temp, id)); await writeFile(join(temp, id, "dark-5.golden"), serializeScreen(fixture, { ...fixtureMeta, screen: id })); }
@@ -401,7 +402,7 @@ test("gallery uses fixture goldens only and escapes cells without external asset
     for (const needle of ['id="fixture"', 'id="second"', "#0c223880", "#abcdef", "&lt;", "outline:1px"]) expect(html).toContain(needle);
     expect(html).toMatch(/outline:1px[^>]*>&lt;<\/span>/);
     expect(html).not.toMatch(/https?:\/\/|<script\s+src/);
-  } finally { await rm(temp, { recursive: true, force: true }); }
+  } finally { await removeTempRoot(temp); }
 });
 test("gallery and format stay independent of application code and screen recipes", async () => {
   for (const file of ["gallery.ts", "format.ts"]) {
@@ -411,7 +412,7 @@ test("gallery and format stay independent of application code and screen recipes
 });
 
 test("catalog ignores conflicting host Git diff configuration", async () => {
-  const temp = await mkdtemp(join(tmpdir(), "catalog-git-config-"));
+  const temp = await makeTempRoot("catalog-git-config-");
   try {
     const config = join(temp, "gitconfig");
     await writeFile(config, "[diff]\n\tnoPrefix = true\n\tmnemonicPrefix = true\n");
@@ -420,5 +421,5 @@ test("catalog ignores conflicting host Git diff configuration", async () => {
     });
     const [exit, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     if (exit !== 0) throw new Error(`Host Git configuration changed catalog output:\n${stdout}${stderr}`);
-  } finally { await rm(temp, { recursive: true, force: true }); }
+  } finally { await removeTempRoot(temp); }
 }, 15_000);

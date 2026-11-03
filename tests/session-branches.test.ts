@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { parseArgs } from "../src/cli/args.ts";
@@ -14,7 +14,7 @@ import type { ToolDefinition } from "../src/tools/types.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
 import { RESERVED_SKILL_NAMES } from "../src/skills/skills.ts";
-import { decodeStoredLine, withIsolatedCliDirs, withTempDir } from "./helpers.ts";
+import { decodeStoredLine, removeOwnedTree, withIsolatedCliDirs, withTempDir } from "./helpers.ts";
 import { collect, createScriptedModel } from "./helpers/scripted-model.ts";
 
 /** Create a uniquely identified user record with inspectable content. */
@@ -178,7 +178,7 @@ test("failed disk writes fence every subsequent mutation until the session is re
     await mkdir(path);
     expect(() => session.append(user("failed"))).toThrow();
     expect(ids(session)).toEqual(["u", "a"]);
-    await rm(path, { recursive: true });
+    await removeOwnedTree(directory, path);
     await rename(backup, path);
     expect(() => session.append(user("retry"))).toThrow("reload");
     expect(() => session.forkBranch("a")).toThrow("reload");

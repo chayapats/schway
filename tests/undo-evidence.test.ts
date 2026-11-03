@@ -16,7 +16,7 @@ import type { Session } from "../src/session/session.ts";
 import { createContextManager } from "../src/context/manager.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
-import { withTempDir } from "./helpers.ts";
+import { removeOwnedTree, withTempDir } from "./helpers.ts";
 
 /** Read an exact file/type/mode inventory without following links or comparing access times. */
 async function inventory(root: string): Promise<unknown[]> {
@@ -245,7 +245,7 @@ for (const failure of ["corrupt", "not-directory"] as const) test(`a ${failure} 
     await change(f.store, turn, join(f.work, "edited.txt"), "before", "after");
     const turnsDirectory = join(f.home, ".schway/undo", turn.sessionId, "turns");
     if (failure === "corrupt") await writeFile(join(turnsDirectory, "candidate.json"), "{invalid");
-    else { await rm(turnsDirectory, { recursive: true }); await writeFile(turnsDirectory, "not a directory"); }
+    else { await removeOwnedTree(root, turnsDirectory); await writeFile(turnsDirectory, "not a directory"); }
     const before = await inventory(root), c = f.controller();
     try {
       await expect(f.store.list(turn.sessionId)).rejects.toThrow();
@@ -505,7 +505,7 @@ test("a missing manifest reports no saved undo data and never claims expiry", as
     const ui = await rendered(root, [bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }]);
     try {
       await ui.send("Generate");
-      await rm(join(ui.home, ".schway/undo", ui.session.rootId, "turns"), { recursive: true });
+      await removeOwnedTree(root, join(ui.home, ".schway/undo", ui.session.rootId, "turns"));
       const before = await ui.state();
       await ui.undo();
       expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("No saved undo data · F2 details");

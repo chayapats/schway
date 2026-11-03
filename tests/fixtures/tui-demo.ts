@@ -1,12 +1,12 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runInteractiveTui } from "../../src/tui/app.ts";
 import { createScriptedModel } from "../helpers/scripted-model.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
+import { makeTempRoot, removeTempRoot } from "../helpers.ts";
 import type { Model } from "../../src/model/model.ts";
 
-const demoRoot = await mkdtemp(join(tmpdir(), "schway-tui-demo-"));
+const demoRoot = await makeTempRoot("schway-tui-demo-");
 const scrollDemo = process.argv.includes("--scroll");
 try {
   const workspace = join(demoRoot, "workspace");
@@ -33,5 +33,5 @@ try {
     credentialStore: fakeCredentialStore(),
   });
 } finally {
-  await rm(demoRoot, { recursive: true, force: true });
+  await removeTempRoot(demoRoot);
 }

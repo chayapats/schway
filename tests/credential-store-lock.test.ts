@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { homedir, hostname, tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { homedir, hostname } from "node:os";
 import { basename, dirname, join, sep } from "node:path";
 import type { Subprocess } from "bun";
 import { CREDENTIAL_LOCK_FILE_ENV, MAX_LOCK_TIMEOUT_MS, credentialStoreLockPath, validLockTimeoutMs, withCredentialStoreLock } from "../src/auth/store-lock.ts";
 import { credentialLockError, credentialStoreError, credentialStoreFailure, isCredentialLockError, preserveRefusal } from "../src/auth/store.ts";
 import { effectiveStore, isCredentialWriteRefused } from "../src/host/auth-routes.ts";
+import { makeTempRootSync, removeOwnedTreeSync, removeTempRootSync } from "./helpers.ts";
 
 const CONTENDER = join(import.meta.dir, "fixtures/credential-store-lock/contender.ts");
 
@@ -95,7 +96,7 @@ const inheritedOverride = process.env[CREDENTIAL_LOCK_FILE_ENV];
 // the isolated home, which keeps earlier lock implementations (that ignore the
 // override but honor HOME) on the same path for regression comparison.
 beforeEach(() => {
-  const root = mkdtempSync(join(tmpdir(), "schway-credential-lock-"));
+  const root = makeTempRootSync("schway-credential-lock-");
   const home = join(root, "home");
   mkdirSync(home);
   const lock = join(home, ".schway", "credential-store.lock");
@@ -107,7 +108,7 @@ beforeEach(() => {
 afterEach(() => {
   if (inheritedOverride === undefined) delete process.env[CREDENTIAL_LOCK_FILE_ENV];
   else process.env[CREDENTIAL_LOCK_FILE_ENV] = inheritedOverride;
-  rmSync(current.root, { recursive: true, force: true });
+  removeTempRootSync(current.root);
 });
 
 /** Native store whose backend counts calls and flags any overlapping write via the shared occupancy marker. */
@@ -122,7 +123,7 @@ async function occupancyStore(lockTimeoutMs?: number): Promise<{ store: import("
       let marked = false;
       try { mkdirSync(current.occupancy); marked = true; } catch { overlaps++; }
       await Bun.sleep(50);
-      if (marked) rmSync(current.occupancy, { recursive: true });
+      if (marked) removeOwnedTreeSync(current.root, current.occupancy);
     },
     delete: async () => { calls++; return false; },
   };
@@ -334,7 +335,7 @@ test("an earlier build's lock directory is never removed, and fails fast only fo
     if (fast) expect({ name, fast: result.elapsedMs < 1000 }).toEqual({ name, fast: true });
     else expect({ name, waited: result.elapsedMs >= 250 }).toEqual({ name, waited: true });
     expect(statSync(current.lock).isDirectory()).toBe(true);
-    rmSync(current.lock, { recursive: true, force: true });
+    removeOwnedTreeSync(current.root, current.lock);
   }
   // The older holder releases its directory; the next mutation proceeds.
   expect((await attemptInChild("released", 5000)).ok).toBe(true);
@@ -582,7 +583,7 @@ test("an override reaching the default location by another spelling is the defau
   // With ~/.schway a link elsewhere, ~/.schway/../.schway lexically matches the
   // default but physically names a different folder: it is a chosen path.
   rmSync(alias);
-  rmSync(schway, { recursive: true, force: true });
+  removeOwnedTreeSync(current.root, schway);
   const volume = join(current.root, "volume");
   mkdirSync(join(volume, "schway"), { recursive: true });
   mkdirSync(join(volume, ".schway", "credential-store.lock"), { recursive: true });
@@ -700,7 +701,7 @@ test("the lock file defaults to the per-user Schway home and follows an absolute
   const blank = spawnContender("once", "blank", { ...current.env, [CREDENTIAL_LOCK_FILE_ENV]: " " });
   expect(await blank.child.exited).toBe(0);
   expect(statSync(join(current.home, ".schway", "credential-store.lock")).isFile()).toBe(true);
-  rmSync(join(current.home, ".schway"), { recursive: true, force: true });
+  removeOwnedTreeSync(current.root, join(current.home, ".schway"));
   const pinned = join(current.root, "pinned", "nested", "credential.lock");
   const overridden = spawnContender("once", "overridden", { ...current.env, [CREDENTIAL_LOCK_FILE_ENV]: pinned });
   expect(await overridden.child.exited).toBe(0);

@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { appendFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import type { RuntimeEvent } from "../src/agent/events.ts";
@@ -19,12 +18,13 @@ import { openUndoStore, pruneUndoStore } from "../src/undo/store.ts";
 import type { Workspace } from "../src/workspace/workspace.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function temp() {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-history-collector-")));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const dir = await makeTempRoot("schway-history-collector-");
+  cleanups.push(() => removeTempRoot(dir));
   return dir;
 }
 async function setup() {

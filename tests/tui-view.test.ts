@@ -17,7 +17,7 @@ import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { credentialStoreError } from "../src/auth/store.ts";
 import { codexSubscriptionIdentity } from "../src/auth/store.ts";
 import { loadConfigEditor } from "../src/config/editing.ts";
-import { withTempDir } from "./helpers.ts";
+import { removeOwnedTree, withTempDir } from "./helpers.ts";
 import { join } from "node:path";
 import { realpath, mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
 import { InteractiveMemory } from "../src/config/interactive-memory.ts";
@@ -2002,7 +2002,7 @@ test("dynamic skill refresh cannot transfer an active completion selection to it
     await ui.mockInput.pasteBracketedText("/al"); await settle(ui);
     expect(ui.captureCharFrame()).toContain("Unicode 日本語");
     ui.mockInput.pressArrow("down"); await settle(ui);
-    await rm(join(root, ".agents/skills/alpine"), { recursive: true });
+    await removeOwnedTree(root, join(root, ".agents/skills/alpine"));
     await ui.controller.refreshCommands(); await settle(ui);
     ui.mockInput.pressTab(); await settle(ui);
     expect(ui.editor.plainText).toBe("/al");

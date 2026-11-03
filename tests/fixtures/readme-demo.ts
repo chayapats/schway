@@ -1,11 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { runInteractiveTui } from "../../src/tui/app.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
+import { makeTempRoot, removeTempRoot } from "../helpers.ts";
 import { createDemoModel, createDemoWorkspace } from "./readme-demo-scenario.ts";
 
-const root = await mkdtemp(join(tmpdir(), "schway-readme-demo-"));
+const root = await makeTempRoot("schway-readme-demo-");
 const inheritedEnv = process.env;
 try {
   const { home, workspace } = await createDemoWorkspace(root);
@@ -24,5 +22,5 @@ try {
   });
 } finally {
   process.env = inheritedEnv;
-  await rm(root, { recursive: true, force: true });
+  await removeTempRoot(root);
 }

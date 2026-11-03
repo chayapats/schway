@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";
@@ -8,7 +7,7 @@ import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { runCli } from "../src/cli/main.ts";
 import type { Model } from "../src/model/model.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
-import { withTempDir } from "./helpers.ts";
+import { makeTempRoot, removeTempRoot, withTempDir } from "./helpers.ts";
 import { encodeSse as encodeOpenAISse, TEXT_STREAM_EVENTS as OPENAI_TEXT } from "./fixtures/openai.ts";
 import {
   encodeChatCompletionsSse,
@@ -94,7 +93,7 @@ async function run(
   } = {},
 ) {
   const isolatedHome =
-    options.env?.HOME ?? (await mkdtemp(join(tmpdir(), "schway-home-")));
+    options.env?.HOME ?? (await makeTempRoot("schway-home-"));
   const stdout = capture();
   const stderr = capture();
   try {
@@ -114,7 +113,7 @@ async function run(
     return { exitCode, stdout: stdout.text, stderr: stderr.text, home: isolatedHome };
   } finally {
     if (options.env?.HOME === undefined) {
-      await rm(isolatedHome, { recursive: true, force: true });
+      await removeTempRoot(isolatedHome);
     }
   }
 }

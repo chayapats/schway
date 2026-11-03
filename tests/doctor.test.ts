@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile, readdir, stat, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile, readdir, stat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { diagnose, doctorExitCode, formatDoctor } from "../src/doctor/doctor.ts";
 import { runCli } from "../src/cli/main.ts";
@@ -10,11 +9,12 @@ import { loadConfigEditor } from "../src/config/editing.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
 import { readFile } from "node:fs/promises";
 import type { CredentialStore } from "../src/auth/store.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const dirs: string[] = [];
-afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
+afterEach(async () => { for (const dir of dirs.splice(0)) await removeTempRoot(dir); });
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "schway-doctor-")); dirs.push(root);
+  const root = await makeTempRoot("schway-doctor-"); dirs.push(root);
   const workspace = join(root, "work"); const home = join(root, "home");
   await mkdir(join(workspace, ".git"), { recursive: true }); await mkdir(home);
   return { root, workspace, home };

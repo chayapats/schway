@@ -1,10 +1,8 @@
 import { expect, test } from "bun:test";
 import { realpathSync } from "node:fs";
-import { copyFile, lstat, mkdir, readFile, readlink, realpath, stat, writeFile } from "node:fs/promises";
+import { copyFile, lstat, mkdir, readFile, readlink, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { mkdtemp, rm } from "node:fs/promises";
-import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
+import { buildIsolatedCliEnv, makeTempRoot, removeTempRoot, withTempDir } from "./helpers.ts";
 
 const root = resolve(import.meta.dir, "..");
 
@@ -110,7 +108,7 @@ async function packedConsumer(consumer: string, input: Record<string, unknown>, 
 }
 
 test("packed release artifact installs without private source access and advertises release/v2", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const fixture = await Bun.file(join(root, "tests/fixtures/host-release-consumer.ts")).text();
@@ -145,12 +143,12 @@ test("packed release artifact installs without private source access and adverti
       observedInference: "not-checked",
     });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer composes strict review, lifecycle, cancel and snapshot without private imports", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work");
@@ -175,12 +173,12 @@ test("packed release consumer composes strict review, lifecycle, cancel and snap
     });
     expect(["restored", "partial"]).toContain(result["restored"] as string);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer discovers and retires orphans through metadata only", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work"), homeDirectory = join(consumer, "home"), sessionDirectory = join(consumer, "sessions");
@@ -189,11 +187,11 @@ test("packed release consumer discovers and retires orphans through metadata onl
       `await Bun.plugin({name:'inventory-guard',setup(builder){
         builder.onLoad({filter:/(?:[/\\\\](?:providers|tui)[/\\\\]|@opentui|[/\\\\]openai[/\\\\])/},()=>{throw new Error('Metadata loaded provider or TUI');});
       }});`)).toEqual({ retired: "retired", deleted: "deleted", retry: "already-deleted", tombstone: "deleted" });
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally { await removeTempRoot(dir); }
 }, 120_000);
 
 test("packed release consumer runs core tools over a fake backend through the exact policy", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work-core");
@@ -225,12 +223,12 @@ test("packed release consumer runs core tools over a fake backend through the ex
       written: "box result\n",
     });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer proves codex route isolation without fallback", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work-codex");
@@ -250,12 +248,12 @@ test("packed release consumer proves codex route isolation without fallback", as
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({ outcome: "completed", observed: "observed" });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer proves grok route isolation without fallback", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work-grok");
@@ -274,12 +272,12 @@ test("packed release consumer proves grok route isolation without fallback", asy
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({ outcome: "completed", observed: "observed" });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer authorizes each grok dispatch and reads exact provider requests", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work-dispatch"), homeDirectory = join(consumer, "home-dispatch"), sessionDirectory = join(consumer, "sessions-dispatch");
@@ -306,13 +304,13 @@ test("packed release consumer authorizes each grok dispatch and reads exact prov
         dispatch: [{ sent: 2048 }], attempts: [{ sent: 2048 }], body: 2048, invalidCap: "invalid-input" },
     });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 for (const route of ["codex", "grok"] as const) {
   test(`packed release consumer shares one ${route} renewal without cross-route reads`, async () => {
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+    const dir = await makeTempRoot("schway-release-");
     try {
       const { consumer } = await packAndInstall(dir);
       const workspaceRoot = join(consumer, `work-renewal-${route}`);
@@ -341,7 +339,7 @@ for (const route of ["codex", "grok"] as const) {
         guard) as Record<string, unknown>;
       expect(result).toMatchObject({ outcome: "completed", refreshes: 1, inferences: 2 });
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await removeTempRoot(dir);
     }
   }, 120_000);
 }
@@ -396,7 +394,7 @@ test("packed consumer admits vendor-neutral web tools with guarded untrusted res
 }, 120_000);
 
 test("packed catalog consumer uses only the public API and selected subscription provider", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-catalog-")));
+  const dir = await makeTempRoot("schway-catalog-");
   try {
     const { consumer } = await packAndInstall(dir);
     for (const route of ["codex", "grok"] as const) {
@@ -412,7 +410,7 @@ test("packed catalog consumer uses only the public API and selected subscription
       expect(result).toEqual({ result: { route, status: "listed", containsNoSecrets: true,
         models: [{ id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: true, contextWindow: 64000, effort, outputCap }] }, requests: 1, writes: 0 });
     }
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally { await removeTempRoot(dir); }
 }, 120_000);
 
 test("a prebuilt tarball must match this checkout's version and commit", async () => {

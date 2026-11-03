@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { readdir, rm } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
+import { buildIsolatedCliEnv, removeOwnedTree, withTempDir } from "./helpers.ts";
 
 /** Read a repo-relative source file as text. */
 async function source(path: string): Promise<string> {
@@ -400,7 +400,7 @@ export default defineExtension(ctx => ctx.registerTool({
 
     // Missing renderer and unused SDK packages prove the installed headless path stays lazy.
     for (const dependency of ["@opentui", "openai", "@anthropic-ai/sdk"]) {
-      await rm(join(installDir, "node_modules", dependency), { recursive: true, force: true });
+      await removeOwnedTree(dir, join(installDir, "node_modules", dependency));
     }
     const marker = join(installDir, "disabled-ran");
     await Bun.write(join(installDir, "disabled.ts"), `await Bun.write(${JSON.stringify(marker)}, 'bad'); throw new Error('disabled extension ran');`);
