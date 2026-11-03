@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
 import { accessSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { credentialLockError, credentialStoreError } from "./store.ts";
 
 /** Environment variable naming an absolute lock-file path that every cooperating Schway process must share. */
@@ -31,16 +31,49 @@ function defaultLockPath(): string {
   return join(tmpdir(), `schway-credential-store${suffix}.lock`);
 }
 
-/** Resolved lock location; `chosen` marks a path from the override, which earlier builds never used. */
-type LockTarget = { readonly path: string; readonly chosen: boolean };
+/**
+ * Resolved lock location. `chosen` marks a path from the override that is
+ * not the default location, which earlier builds never used; `folder` marks
+ * an override ending in a path separator, which cannot name a lock file.
+ */
+type LockTarget = { readonly path: string; readonly chosen: boolean; readonly folder: boolean };
 
-/** Resolve the lock location from `process.env`, or null for a relative override; an override naming the default path is the default. */
+/** Device and inode the kernel reaches for a path, following links and `..` physically, or null when nothing is there. */
+function identity(path: string): { dev: number; ino: number } | null {
+  try {
+    const { dev, ino } = statSync(path);
+    return { dev, ino };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when two paths reach the same file. Uses device and inode, so a link
+ * alias or a case variant on a case-insensitive filesystem matches, while a
+ * `..` after a linked folder is resolved where it physically leads; realpath
+ * and lexical normalization would both collapse that `..` too early. When
+ * neither file exists yet, their folders and names are compared instead.
+ */
+function sameLocation(left: string, right: string): boolean {
+  const a = identity(left);
+  const b = identity(right);
+  if (a && b) return a.dev === b.dev && a.ino === b.ino;
+  if (a || b) return false;
+  const parentA = identity(dirname(left));
+  const parentB = identity(dirname(right));
+  if (parentA && parentB) return parentA.dev === parentB.dev && parentA.ino === parentB.ino && basename(left) === basename(right);
+  return resolve(left) === resolve(right);
+}
+
+/** Resolve the lock location from `process.env`, or null for a relative override; an override reaching the default location is the default. */
 function resolveLockTarget(): LockTarget | null {
   const override = process.env[CREDENTIAL_LOCK_FILE_ENV];
   const fallback = defaultLockPath();
-  if (override === undefined || override.trim() === "") return { path: fallback, chosen: false };
+  if (override === undefined || override.trim() === "") return { path: fallback, chosen: false, folder: false };
   if (!isAbsolute(override)) return null;
-  return { path: override, chosen: resolve(override) !== resolve(fallback) };
+  if (override.endsWith("/") || override.endsWith(sep)) return { path: override, chosen: true, folder: true };
+  return { path: override, chosen: !sameLocation(override, fallback), folder: false };
 }
 
 /** Lock file for the next mutation from `process.env` and the home directory, or null for a relative override. */
@@ -63,8 +96,11 @@ const LOCK_POLL_MS = 10;
 /** Largest earlier-build owner stamp read; real stamps are about 100 bytes. */
 const OWNER_STAMP_LIMIT = 4096;
 
-/** Why a lock path cannot be used, each with its own next action. */
-type Refusal = "unwritable" | "parent-file" | "link" | "too-long" | "not-lock";
+/** Why a lock path cannot be used; `at` names the offending component when it is not the lock path itself. */
+type Refusal = {
+  readonly reason: "unwritable" | "parent-file" | "link" | "too-long" | "not-lock";
+  readonly at?: string;
+};
 
 type Inode = { readonly dev: number; readonly ino: number };
 
@@ -80,17 +116,60 @@ type Attempt =
   | { readonly kind: "refused"; readonly refusal: Refusal };
 
 const BUSY: Attempt = { kind: "busy" };
-const refuse = (refusal: Refusal): Attempt => ({ kind: "refused", refusal });
+const refuse = (reason: Refusal["reason"], at?: string): Attempt => ({ kind: "refused", refusal: at === undefined ? { reason } : { reason, at } });
+
+/** Errno code of a filesystem error, if any. */
+const errno = (error: unknown): string | undefined => (error as NodeJS.ErrnoException)?.code;
+
+/** Filesystem errors that mean this user may not write the location. */
+const DENIED = new Set(["EACCES", "EPERM", "EROFS"]);
+
+/**
+ * Find the first component of the lock path that cannot lead to a lock
+ * file: an ancestor that is not a folder, or a broken or looping symbolic
+ * link at an ancestor or the lock path itself. Uses only lstat and stat, so
+ * no descriptor is opened. Null when nothing is wrong or the path cannot be
+ * inspected; a missing component is fine because the parent is created.
+ */
+function diagnosePath(path: string): Attempt | null {
+  // Walk the path as written, so the kernel resolves each `..` physically.
+  const components: string[] = [];
+  for (let component = path; ; component = dirname(component)) {
+    components.unshift(component);
+    if (dirname(component) === component) break;
+  }
+  for (const [index, component] of components.entries()) {
+    const last = index === components.length - 1;
+    let entry: ReturnType<typeof lstatSync>;
+    try {
+      entry = lstatSync(component);
+    } catch {
+      return null;
+    }
+    if (entry.isSymbolicLink()) {
+      let target: ReturnType<typeof statSync>;
+      try {
+        target = statSync(component);
+      } catch (error) {
+        return errno(error) === "ENOENT" || errno(error) === "ELOOP" ? refuse("link", component) : null;
+      }
+      if (!last && !target.isDirectory()) return refuse("parent-file", component);
+    } else if (!last && !entry.isDirectory()) {
+      return refuse("parent-file", component);
+    }
+  }
+  return null;
+}
 
 /** Classify a filesystem error from preparing or inspecting the lock path; anything unlisted, such as ENOENT or EMFILE, is retried. */
-function fsFailure(error: unknown): Attempt {
-  switch ((error as NodeJS.ErrnoException)?.code) {
-    case "EACCES": case "EPERM": case "EROFS": return refuse("unwritable");
-    case "ENOTDIR": return refuse("parent-file");
-    case "ELOOP": return refuse("link");
-    case "ENAMETOOLONG": return refuse("too-long");
-    default: return BUSY;
-  }
+function fsFailure(path: string, error: unknown): Attempt {
+  const code = errno(error);
+  if (code !== undefined && DENIED.has(code)) return refuse("unwritable");
+  if (code === "ENAMETOOLONG") return refuse("too-long");
+  if (code === "EISDIR") return refuse("not-lock");
+  // Path-shape errors name the component at fault; a race that cleared it is retried.
+  if (code === "ENOTDIR" || code === "ELOOP" || code === "ENOENT" || code === "EEXIST") return diagnosePath(path) ?? BUSY;
+  return BUSY;
 }
 
 /** Classify a SQLite error from locking or verifying an open connection; anything unlisted is retried. */
@@ -102,18 +181,41 @@ function sqliteFailure(error: unknown): Attempt {
 }
 
 /**
- * Diagnose a failed open. A missing file (deleted since the stat) or a
- * descriptor shortage clears by retrying; only a path this user cannot
- * access is refused. `access` checks the path without opening a descriptor,
- * and only explains a failure here; it never admits a holder.
+ * Connections whose open transaction is a held lock, with the inode each
+ * one locked. A held connection must stay reachable until `release`: a
+ * holder waiting on a promise nothing else references would otherwise let
+ * the garbage collector finalize the connection and silently drop the lock
+ * while the holder still counts as inside.
  */
-function openFailure(path: string): Attempt {
+const HELD = new Map<Database, Inode>();
+
+/** True when this process holds the lock on that inode through any connection. */
+function holdsInode(inode: Inode): boolean {
+  for (const held of HELD.values()) if (held.dev === inode.dev && held.ino === inode.ino) return true;
+  return false;
+}
+
+/**
+ * Diagnose a failed SQLite open of an existing regular file. A missing file
+ * (deleted since the stat) or a descriptor shortage clears by retrying; only
+ * a file this user may not open for writing is refused. `access(2)` answers
+ * without a descriptor, but sandboxes can allow it while denying the open,
+ * so a direct read-write open then asks for the real errno. Closing that
+ * probe would drop this process's POSIX locks on the inode, so it runs only
+ * while no connection here holds one; otherwise the attempt is retried.
+ */
+function openFailure(path: string, inode: Inode): Attempt {
   try {
     accessSync(path, constants.R_OK | constants.W_OK);
+  } catch (error) {
+    return DENIED.has(errno(error) ?? "") ? refuse("unwritable") : BUSY;
+  }
+  if (holdsInode(inode)) return BUSY;
+  try {
+    closeSync(openSync(path, constants.O_RDWR | (constants.O_NONBLOCK ?? 0)));
     return BUSY;
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === "EACCES" || code === "EPERM" || code === "EROFS" ? refuse("unwritable") : BUSY;
+    return DENIED.has(errno(error) ?? "") ? refuse("unwritable") : BUSY;
   }
 }
 
@@ -152,17 +254,9 @@ function legacyOwnerStopped(directory: string): boolean {
     return false;
   } catch (error) {
     // A shared hostname across PID namespaces can make a live owner look gone; see docs/credentials.md.
-    return (error as NodeJS.ErrnoException).code === "ESRCH";
+    return errno(error) === "ESRCH";
   }
 }
-
-/**
- * Connections whose open transaction is a held lock. A held connection must
- * stay reachable until `release`: a holder waiting on a promise nothing else
- * references would otherwise let the garbage collector finalize the
- * connection and silently drop the lock while the holder still counts as inside.
- */
-const HELD = new Set<Database>();
 
 /**
  * One non-blocking attempt to own the lock file. SQLite's `BEGIN IMMEDIATE`
@@ -172,12 +266,13 @@ const HELD = new Set<Database>();
  */
 function tryAcquire(target: LockTarget): Attempt {
   const { path, chosen } = target;
-  // The parent is idempotent shared setup, never the mutex itself.
+  // The parent is idempotent shared setup, never the mutex itself. A
+  // recursive mkdir reports EEXIST when an ancestor is not a folder and
+  // ENOENT under a broken link; the diagnosis names that component.
   try {
     mkdirSync(dirname(path), { mode: 0o700, recursive: true });
   } catch (error) {
-    // A recursive mkdir reports EEXIST only when an ancestor is not a directory.
-    return (error as NodeJS.ErrnoException).code === "EEXIST" ? refuse("parent-file") : fsFailure(error);
+    return fsFailure(path, error);
   }
   // Create the lock inode once, privately, and keep it forever. Only SQLite
   // opens an existing lock file: closing any other descriptor for it can drop
@@ -185,21 +280,14 @@ function tryAcquire(target: LockTarget): Attempt {
   try {
     closeSync(openSync(path, "wx", 0o600));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") return fsFailure(error);
+    if (errno(error) !== "EEXIST") return fsFailure(path, error);
   }
   let before: ReturnType<typeof statSync>;
   try {
     before = statSync(path);
   } catch (error) {
-    // The exclusive create saw something here; a link whose target is gone stays broken.
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      try {
-        if (lstatSync(path).isSymbolicLink()) return refuse("link");
-      } catch {
-        // Removed since the create: retry.
-      }
-    }
-    return fsFailure(error);
+    // The exclusive create saw something here: a broken or looping link stays broken.
+    return fsFailure(path, error);
   }
   if (before.isDirectory()) {
     // Earlier builds only ever used the default path, so a directory at a
@@ -209,12 +297,16 @@ function tryAcquire(target: LockTarget): Attempt {
     // once this file replaces it, earlier builds can no longer create one.
     return chosen ? refuse("not-lock") : { kind: "legacy", stopped: legacyOwnerStopped(path) };
   }
-  if (!before.isFile()) return refuse("not-lock");
+  // A Schway lock file is always empty: it is created empty and never
+  // committed. Anything else, such as an existing database, is not opened,
+  // because even switching its journal mode could rewrite it.
+  if (!before.isFile() || before.size !== 0) return refuse("not-lock");
+  const inode = { dev: before.dev, ino: before.ino };
   let lock: Database;
   try {
     lock = new Database(path, { readwrite: true, create: false });
   } catch (error) {
-    return String((error as { code?: unknown })?.code ?? "").startsWith("SQLITE_CANTOPEN") ? openFailure(path) : sqliteFailure(error);
+    return String((error as { code?: unknown })?.code ?? "").startsWith("SQLITE_CANTOPEN") ? openFailure(path, inode) : sqliteFailure(error);
   }
   try {
     // An in-memory journal keeps the verification write below from creating
@@ -235,8 +327,8 @@ function tryAcquire(target: LockTarget): Attempt {
     release(lock);
     return sqliteFailure(error);
   }
-  HELD.add(lock);
-  return { kind: "held", lock, inode: { dev: before.dev, ino: before.ino } };
+  HELD.set(lock, inode);
+  return { kind: "held", lock, inode };
 }
 
 /**
@@ -264,7 +356,7 @@ function release(lock: Database): void {
   }
 }
 
-/** Lock path for recovery text: home shortened to `~`, terminal control characters removed. */
+/** Path for recovery text: home shortened to `~`, terminal control characters removed. */
 function displayPath(path: string): string {
   let shown = path;
   try {
@@ -276,16 +368,20 @@ function displayPath(path: string): string {
   return shown.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
 }
 
-/** Next-action text for a refusal; a chosen path is never called deletable, because the user owns it. */
-function refusalReason(refusal: Refusal, target: LockTarget, shown: string): string {
-  switch (refusal) {
-    case "unwritable": return `Schway cannot write its lock file at ${shown}. Make that location writable for this user, then retry.`;
-    case "parent-file": return `A parent of ${shown} is a file, not a folder. Move that file, then retry.`;
-    case "link": return `The lock path ${shown} is a broken or looping symbolic link. Fix that link, then retry.`;
-    case "too-long": return `The lock path ${shown} is too long. Set ${CREDENTIAL_LOCK_FILE_ENV} to a shorter absolute path, then retry.`;
+/** Next-action text for a refusal; a chosen path is never called deletable or movable, because the user owns it. */
+function refusalReason(refusal: Refusal, target: LockTarget): string {
+  const lock = displayPath(target.path);
+  const at = displayPath(refusal.at ?? target.path);
+  switch (refusal.reason) {
+    case "unwritable": return `Schway cannot write its lock file at ${lock}. Make that location writable for this user, then retry.`;
+    case "parent-file": return target.chosen
+      ? `${at} is a file, not a folder. Set ${CREDENTIAL_LOCK_FILE_ENV} to a path inside a folder, then retry.`
+      : `${at} is a file, not a folder. Move that file, then retry.`;
+    case "link": return `The symbolic link at ${at} is broken or loops. Fix that link, then retry.`;
+    case "too-long": return `The lock path ${lock} is too long. Set ${CREDENTIAL_LOCK_FILE_ENV} to a shorter absolute path, then retry.`;
     case "not-lock": return target.chosen
       ? `${CREDENTIAL_LOCK_FILE_ENV} does not name a Schway lock file. Set it to a new file path, then retry.`
-      : `The file at ${shown} is not a Schway lock file. With no Schway running, delete it, then retry.`;
+      : `The file at ${lock} is not a Schway lock file. With no Schway running, delete it, then retry.`;
   }
 }
 
@@ -295,10 +391,10 @@ const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 export async function withCredentialStoreLock<T>(work: () => Promise<T>, opts?: { timeoutMs?: number; operation?: "save" | "delete" }): Promise<T> {
   // Every refusal happens before work runs, so nothing mutates without the
   // lock. A live holder that outlasts the bound gets the generic sanitized
-  // store error. Conditions that waiting cannot clear (a relative override,
-  // an unusable path or file, an earlier build's lock directory with a
-  // stopped owner) fail at once with a specific next action; a legacy
-  // directory with a live or unknown owner waits out the bound first.
+  // store error. Conditions that waiting cannot clear (a relative or
+  // folder-shaped override, an unusable path or file, an earlier build's lock
+  // directory with a stopped owner) fail at once with a specific next action;
+  // a legacy directory with a live or unknown owner waits out the bound first.
   // A nested acquisition from the same process opens a second connection,
   // which SQLite reports busy, so it fails closed rather than deadlocking.
   // Reads stay outside the lock; single-key reads have no torn state to fence.
@@ -308,8 +404,8 @@ export async function withCredentialStoreLock<T>(work: () => Promise<T>, opts?: 
   if (target === null) {
     throw credentialLockError(operation, `${CREDENTIAL_LOCK_FILE_ENV} must be an absolute path. Set an absolute path or unset it, then retry.`);
   }
-  const shown = displayPath(target.path);
-  const legacy = () => credentialLockError(operation, `An older Schway's lock folder is at ${shown}. Close every older Schway, delete that folder, then retry.`);
+  if (target.folder) throw credentialLockError(operation, refusalReason({ reason: "not-lock" }, target));
+  const legacy = () => credentialLockError(operation, `An older Schway's lock folder is at ${displayPath(target.path)}. Close every older Schway, delete that folder, then retry.`);
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const attempt = tryAcquire(target);
@@ -323,7 +419,7 @@ export async function withCredentialStoreLock<T>(work: () => Promise<T>, opts?: 
       }
       release(attempt.lock);
     } else if (attempt.kind === "refused") {
-      throw credentialLockError(operation, refusalReason(attempt.refusal, target, shown));
+      throw credentialLockError(operation, refusalReason(attempt.refusal, target));
     } else if (attempt.kind === "legacy" && attempt.stopped) {
       throw legacy();
     }

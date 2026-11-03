@@ -9,8 +9,13 @@
 // bound, so machine load turns into a longer wait rather than a refusal.
 // `DONE` and `FAILED` report the mutation's own elapsed time, excluding startup.
 // CONTENDER_SQLITE injects a connection fault: `readonly` opens every
-// connection read-only (as a sandbox that denies open(O_RDWR) would), and
-// `vanish-once` deletes the lock file just before the first open.
+// connection read-only (as a sandbox that denies open(O_RDWR) would);
+// `vanish-once` deletes the lock file just before the first open;
+// `open-denied` fails every SQLite open with SQLITE_CANTOPEN and every direct
+// read-write open of the lock file with EACCES while access(2) still allows
+// it (as Landlock can); `cantopen-emfile-once` fails the first SQLite open
+// with SQLITE_CANTOPEN and the following direct open with EMFILE.
+// CONTENDER_FS=emfile-once fails the first exclusive create of the lock file with EMFILE.
 import { mock } from "bun:test";
 import * as sqlite from "bun:sqlite";
 import * as filesystem from "node:fs";
@@ -22,6 +27,8 @@ const occupancy = process.env.CONTENDER_OCCUPANCY ?? "";
 const holdMs = Number(process.env.CONTENDER_HOLD_MS ?? "0");
 const breakDelayMs = Number(process.env.CONTENDER_BREAK_DELAY_MS ?? "0");
 const lockTimeoutMs = Number(process.env.CONTENDER_LOCK_TIMEOUT_MS ?? "30000");
+const sqliteFault = process.env.CONTENDER_SQLITE ?? "";
+const fsFault = process.env.CONTENDER_FS ?? "";
 /** Write one synchronous protocol line, so a later SIGKILL cannot lose it. */
 const say = (event: string, detail = "") => real.writeSync(1, `${event} ${name}${detail ? ` ${detail}` : ""}\n`);
 
@@ -49,18 +56,43 @@ function watched<F extends (...args: never[]) => unknown>(remove: F): F {
     return remove(...args);
   }) as F;
 }
+/** An Error carrying a Node-style errno code. */
+const errnoError = (code: string) => Object.assign(new Error(`${code}: injected by the lock fixture`), { code });
+let createEmfileUsed = false;
+let probeEmfileUsed = false;
+/** openSync that injects the requested fault for the lock path only. */
+function faultyOpenSync(...args: Parameters<typeof real.openSync>): number {
+  const [path, flags] = args;
+  if (String(path).endsWith("credential-store.lock")) {
+    if (fsFault === "emfile-once" && !createEmfileUsed && flags === "wx") {
+      createEmfileUsed = true;
+      say("EMFILE");
+      throw errnoError("EMFILE");
+    }
+    if (typeof flags === "number" && (flags & real.constants.O_RDWR) !== 0) {
+      if (sqliteFault === "open-denied") throw errnoError("EACCES");
+      if (sqliteFault === "cantopen-emfile-once" && !probeEmfileUsed) {
+        probeEmfileUsed = true;
+        say("PROBE-EMFILE");
+        throw errnoError("EMFILE");
+      }
+    }
+  }
+  return real.openSync(...args);
+}
 mock.module("node:fs", () => ({
   ...real,
+  openSync: faultyOpenSync,
   rmSync: watched(real.rmSync),
   rmdirSync: watched(real.rmdirSync),
   unlinkSync: watched(real.unlinkSync),
   renameSync: watched(real.renameSync),
 }));
 
-const sqliteFault = process.env.CONTENDER_SQLITE ?? "";
 if (sqliteFault) {
   const RealDatabase = sqlite.Database;
   let vanished = false;
+  let cantOpenUsed = false;
   /** Database that applies the requested connection fault before opening. */
   class FaultyDatabase extends RealDatabase {
     constructor(path: string, options?: ConstructorParameters<typeof RealDatabase>[1]) {
@@ -68,6 +100,10 @@ if (sqliteFault) {
         vanished = true;
         real.unlinkSync(path);
         say("VANISHED");
+      }
+      if (sqliteFault === "open-denied" || (sqliteFault === "cantopen-emfile-once" && !cantOpenUsed)) {
+        cantOpenUsed = true;
+        throw Object.assign(new Error("unable to open database file"), { code: "SQLITE_CANTOPEN" });
       }
       super(path, sqliteFault === "readonly" ? { readonly: true } : options);
     }
