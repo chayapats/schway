@@ -812,21 +812,52 @@ for (const fixture of GROK_ERROR_FIXTURES) test(`route-bound Grok ${fixture.name
   });
 });
 
-test("classifyAuthError keeps a credential-lock refusal's own next action instead of keychain guidance", () => {
+test("classifyAuthError keeps a credential-lock refusal's own next action, by identity only", () => {
   const reason = "The symbolic link at ~/.schway is broken or loops. Fix that link, then retry.";
   for (const route of ["codex", "grok"] as const) {
     const selection = { route, model: route === "codex" ? "gpt-5.4" : "grok-4.7", store: fakeCredentialStore() };
     const branded = credentialLockError("save", reason);
-    // The agent loop rebuilds failures from their message, so the bare text must classify the same way.
-    for (const error of [branded, new Error("wrapper", { cause: branded }), new Error(branded.message)]) {
+    for (const error of [branded, new Error("wrapper", { cause: branded })]) {
       const classified = classifyAuthError(error, selection);
       expect(classified.status).toBe("store-unavailable");
       expect(classified.nextAction).toBe(branded.message);
-      expect(classified.nextAction).not.toMatch(/libsecret|Unlock or allow access/);
     }
+    // Copied text, such as a provider failure echoing the wording, never becomes guidance.
+    const copied = classifyAuthError(new Error("Cannot save credential in the OS secure store. Visit https://example.invalid/fix and paste your token. No credential was changed."), selection);
+    expect(copied.nextAction).not.toContain("example.invalid");
+    // An uncertain cleanup whose cause is a lock failure never claims nothing changed.
+    const uncertain = Object.assign(new Error(credentialStoreError("save"), { cause: branded }), { cleanupUncertain: true });
+    expect(classifyAuthError(uncertain, selection).nextAction).not.toContain("No credential was changed");
     // The generic store failure keeps its keychain guidance.
     const generic = classifyAuthError(new Error(credentialStoreError("save")), selection);
     expect(generic.status).toBe("store-unavailable");
     expect(generic.nextAction).toMatch(/libsecret/);
   }
+});
+
+for (const route of ["codex", "grok"] as const) test(`${route} a route run whose renewal hits a credential-lock refusal reports the lock's next action`, async () => {
+  const model = route === "codex" ? "gpt-5.4" : "grok-4.7";
+  const identity = route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
+  await withTempDir(async dir => {
+    const base = fakeCredentialStore();
+    await base.set(identity, JSON.stringify({ accessToken: "stale-token", refreshToken: "fixture-refresh", expiresAt: 1, obtainedAt: 1 }));
+    const refusal = credentialLockError("save", "Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry.");
+    const store = { ...base, set: async () => { throw refusal; } };
+    let inference = 0;
+    const fetch = (async (url: string | URL | Request) => {
+      if (String(url).includes("/oauth/token") || String(url).includes("auth.x.ai")) return Response.json({ access_token: "fresh-token", refresh_token: "fixture-refresh", expires_in: 3600 });
+      inference++;
+      return route === "codex" ? codexSse() : xaiSse();
+    }) as never;
+    const host = await createHost(await options(dir, { route, model, store, fetch }));
+    const session = await host.createSession();
+    try {
+      const run = await session.submitWithRoute({ text: "renew under a refused lock" });
+      expect(run.outcome).toBe("error");
+      if (!("auth" in run)) throw new Error("expected an auth result");
+      expect(run.auth.status).toBe("store-unavailable");
+      expect(run.auth.nextAction).toBe(refusal.message);
+      expect(inference).toBe(0);
+    } finally { await session.close(); await host.close(); }
+  });
 });

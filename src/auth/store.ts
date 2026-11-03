@@ -133,6 +133,16 @@ export function isCredentialLockError(error: unknown): error is Error {
   return error instanceof Error && (error as { code?: unknown }).code === "credential-lock-unavailable";
 }
 
+/** The credential-lock failure on an error's cause chain (at most six links), by brand only; copied text never matches. */
+export function findCredentialLockError(error: unknown): Error | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 6 && current instanceof Error; depth++) {
+    if (isCredentialLockError(current)) return current;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
 /** User-facing text for a failed save or delete: a lock failure keeps its specific next action, anything else gets generic store guidance. */
 export function credentialStoreFailure(operation: "save" | "delete", error: unknown): string {
   return isCredentialLockError(error) ? error.message : credentialStoreError(operation);

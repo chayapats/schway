@@ -47,11 +47,12 @@
   with a specific next action. `SCHWAY_CREDENTIAL_LOCK_FILE` moves the lock to
   an absolute path. A lock-directory build's lock is honored but never removed;
   see the upgrade note (#428).
-- Route results and device sign-in now report a credential-lock refusal
-  honestly. `classifyAuthError` keeps `store-unavailable` but uses the lock's
-  own next action instead of keychain or libsecret guidance, and device sign-in
-  no longer attempts cleanup or reports a credential that "may have landed",
-  because a refused lock means nothing was written (#428).
+- Report credential-lock refusals with the lock's own next action. Route
+  results keep `store-unavailable` but no longer show keychain or libsecret
+  guidance; the failure is recognized by identity, never by copied text. Device
+  sign-in no longer attempts cleanup after a lock refusal or reports
+  `cleanupUncertain: true`, because a refused lock means nothing was written
+  (#428).
 - Classify Grok subscription spending-limit denials as `quota-exceeded`, with
   a subscription usage link and no API-key billing fallback. Catalog, inference
   and host status agree; plan rejection remains distinct from transient

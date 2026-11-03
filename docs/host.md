@@ -872,9 +872,11 @@ pins its location for isolated roots. See
 [the credentials guide](credentials.md#credential-store-lock) for crash behavior,
 upgrade limits and the rules for embedders. When the lock refuses a change that
 waiting can't fix, route results keep `store-unavailable` and use the lock's own
-next action, and device sign-in reports a store error without attempting
+next action. The lock failure is recognized by identity only; copied text never
+becomes guidance. Device sign-in reports a store error without attempting
 cleanup, because nothing was written. Readiness abort/deadline and
-provider-request accounting ship in the S15 slices below
+provider-request accounting are described in
+[Dispatch authorization and provider requests](#dispatch-authorization-and-provider-requests)
 ([#415](https://github.com/chayapats/schway/issues/415)).
 
 ## Session metadata recovery

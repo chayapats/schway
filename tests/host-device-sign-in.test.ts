@@ -178,7 +178,8 @@ for (const route of ["codex", "grok"] as const) test(`${route} a credential-lock
   const clock = manualClock(), base = fakeCredentialStore(), fixture = protocol(route, clock); let cleanups = 0;
   const store: HostCredentialStore = { ...base,
     set: async () => { throw credentialLockError("save", "Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry."); },
-    compareAndDelete: async () => { cleanups++; return false; }, delete: async () => { cleanups++; return false; } };
+    compareAndDelete: async () => { cleanups++; throw credentialLockError("delete", "Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry."); },
+    delete: async () => { cleanups++; throw credentialLockError("delete", "Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry."); } };
   const flow = await start({ route, clock, fetch: fixture.fetch, store });
   const work = flow.poll(new AbortController().signal); await clock.advance(2000);
   // The lock refused before any write, so nothing may be reported as possibly landed.

@@ -1,6 +1,6 @@
 import type { Model } from "../model/model.ts";
 import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
-import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialLockError, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, findCredentialLockError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 import { dispatchRouteModel, routeModelOptions, type HostRouteModelOptions, type RouteControls } from "./dispatch.ts";
 import { catalogCapability, effortSupport, exactEffort, outputCapSupport, routeOutputCap, type HostEffortSupport, type HostOutputCapSupport } from "./route-capabilities.ts";
 import { hasDispatchRefusal, hasRedirectRefusal, routeControlRefusal } from "../model/dispatch.ts";
@@ -393,19 +393,6 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error ?? "");
 }
 
-/** Exact shape of a sanitized credential-lock refusal; the agent loop rebuilds failures from their message text. */
-const CREDENTIAL_LOCK_MESSAGE = /^Cannot (?:save|delete) credential in the OS secure store\. .+ No credential was changed\.$/s;
-
-/** The sanitized message of a credential-lock refusal, by brand along the cause chain or by its exact message shape. */
-function credentialLockMessage(error: unknown, text: string): string | undefined {
-  let current: unknown = error;
-  for (let depth = 0; depth < 6 && current instanceof Error; depth++) {
-    if (isCredentialLockError(current)) return current.message;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return CREDENTIAL_LOCK_MESSAGE.test(text) ? text : undefined;
-}
-
 /** Map a route-bound failure to a stable safe category without leaking secrets or switching routes.
  * Classification is message- and category-based: provider adapters throw sanitized
  * plain messages (and the loop drops transport status), so status-less bodies must
@@ -437,8 +424,11 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
   }
   // A lock refusal already names its cause and next step; the generic store
   // guidance (unlock the keychain, install libsecret) would point elsewhere.
-  const lockMessage = credentialLockMessage(error, text);
-  if (lockMessage) return { ...base, status: "store-unavailable", nextAction: lockMessage };
+  // Recognized by brand only, so provider text that copies its wording never
+  // becomes guidance. An uncertain cleanup may hide a lock failure in its cause
+  // while its own write may have landed, so it never says nothing changed.
+  const lock = isCleanupUncertain(error) ? undefined : findCredentialLockError(error);
+  if (lock) return { ...base, status: "store-unavailable", nextAction: lock.message };
   if (/Cannot (read|save|delete) credential|secure store|Secret Service|libsecret/i.test(text)) {
     return { ...base, status: "store-unavailable", nextAction: storeUnavailableAction() };
   }
