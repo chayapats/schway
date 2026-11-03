@@ -241,10 +241,24 @@ export function codexRevokedSessionError(): string {
   return "The ChatGPT subscription session was revoked or rejected by the provider. Sign in again in interactive mode with /login chatgpt; stored API keys are never used as a silent fallback.";
 }
 
+const RETRY_TURN = ". Retry the turn; Schway owns retries and never falls back to API-key billing after explicit chatgpt selection.";
+const RETRY_LISTING = ". Retry schway models list; Schway never falls back to API-key billing after explicit chatgpt selection.";
+
 /** Actionable error when renewal fails transiently, keeping retry ownership with Schway. */
 export function codexRefreshFailedError(detail?: string): string {
   const suffix = detail?.trim() ? ` (${detail.trim()})` : "";
-  return `Refreshing the ChatGPT subscription session failed${suffix}. Retry the turn; Schway owns retries and never falls back to API-key billing after explicit chatgpt selection.`;
+  return `Refreshing the ChatGPT subscription session failed${suffix}${RETRY_TURN}`;
+}
+
+/** Actionable error when the provider refuses to renew for this account, as a plan, region or entitlement block does. */
+export function codexRefreshForbiddenError(): string {
+  return "The ChatGPT subscription refused to renew this session (HTTP 403). Check that this ChatGPT plan includes Codex access for this account, then sign in again in interactive mode with /login chatgpt.";
+}
+
+/** Word a shared-refresh failure for `schway models list`, which has no turn to retry. */
+function forListing(error: unknown): unknown {
+  if (!(error instanceof Error) || !error.message.endsWith(RETRY_TURN)) return error;
+  return new Error(`${error.message.slice(0, -RETRY_TURN.length)}${RETRY_LISTING}`, { cause: error });
 }
 
 /** Load the stored subscription tokens, returning null when this identity was never saved. */
@@ -488,10 +502,11 @@ async function readRefreshBody(response: Response, signal: AbortSignal): Promise
   } catch { return undefined; }
 }
 
-/** Failure text for a refused refresh. A JSON 400 or 401 revokes the session and a JSON 403 rejects it; a 400, 401
- * or 403 without a JSON body, such as a gateway or challenge page, says nothing about the credential. */
+/** Failure text for a refused refresh. A JSON 400 or 401 revokes the session and a JSON 403 refuses this account; a
+ * 400, 401 or 403 without a JSON body, such as a gateway or challenge page, says nothing about the credential. */
 function refreshFailure(status: number, payload: Record<string, unknown> | undefined): string {
   if (payload && (status === 400 || status === 401)) return codexRevokedSessionError();
+  if (payload && status === 403) return codexRefreshForbiddenError();
   if (!payload && (status === 400 || status === 401 || status === 403)) return codexRefreshFailedError(`status ${status} with no readable error`);
   return codexRefreshFailedError(`HTTP ${status}`);
 }
@@ -596,7 +611,7 @@ export function createSubscriptionTokenRefresher(input: {
         state.refresh = refresh;
         // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
         // the process from exiting before a rotated token is stored.
-        trackSentRenewal(promise.then(() => true, () => false));
+        trackSentRenewal("codex", promise.then(() => true, () => false));
         onRenewal?.(promise.then(() => {}, () => {}));
       }
       const renewed = await raceWithAbort(refresh.promise, signal);
@@ -626,7 +641,8 @@ export async function fetchDiscoveryCatalog(input: {
     // after discovery's deadline or cancellation, and a later command joins it instead of resending the old token.
     const refresher = createSubscriptionTokenRefresher({ store: input.lifecycleStore ?? input.store, fetch: input.fetch,
       ...(input.onCredential ? { onCredential: input.onCredential } : {}) });
-    credential = await abortableCatalogOperation(refresher.getValidAccessToken(input.signal), input.signal);
+    try { credential = await abortableCatalogOperation(refresher.getValidAccessToken(input.signal), input.signal); }
+    catch (error) { throw forListing(error); }
   }
   input.signal.throwIfAborted();
   return fetchProviderModelListResult({

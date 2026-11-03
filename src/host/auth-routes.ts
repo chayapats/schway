@@ -33,12 +33,8 @@ export interface HostCredentialStore {
    * falls back to a serialized read-then-delete otherwise.
    */
   compareAndDelete?(identity: HostCredentialReference, expectedValue: string): Promise<boolean>;
-  /**
-   * Atomically replace exactly the expected value, reporting whether it wrote;
-   * returns false without writing on a mismatch. Optional: without it, a
-   * renewal reads, compares and then sets, which another writer can overtake
-   * between the read and the write.
-   */
+  // Optional: without it, a renewal reads, compares and then sets, and another writer can overtake it in between.
+  /** Atomically replace exactly the expected value, returning false without writing when the stored value differs. */
   compareAndSet?(identity: HostCredentialReference, expectedValue: string, value: string): Promise<boolean>;
 }
 

@@ -973,16 +973,15 @@ its owner from readiness through terminal settlement, including tools and retry
 waits. Direct `createAuthRouteModel` streams and in-flight credential writes
 also pin it, and so does a renewal request that a stopped run, stream or renewal
 sent, until that request settles: at most the refresher's 30-second timeout plus
-the credential-store read, lock wait and write, even when the transport ignores
-cancellation. Logout releases
-that hold at once. When `close()` reports `busy` only because such a request is
-settling, retry it or wait, within that bound. Exiting the process before the
-request settles loses the rotated refresh token, and the next run must sign in
-again. `close()` refuses `busy` while pinned, is idempotent when idle, and
-fences later auth use through that handle. It does not cancel streams, erase
-credentials or dispose sibling owner handles. Close hosts after their runs
-settle, then dispose the owner. A provider request already sent cannot be
-recalled.
+the participants' write guards and the credential-store read, lock wait and
+write, even when the transport ignores cancellation. Logout releases that hold
+at once. When `close()` reports `busy` only because such a request is settling,
+retry it or wait, within that bound. Exiting the process before the request
+settles loses the rotated refresh token, and the next run must sign in again.
+`close()` refuses `busy` while pinned, is idempotent when idle, and fences later
+auth use through that handle. It does not cancel streams, erase credentials or
+dispose sibling owner handles. Close hosts after their runs settle, then dispose
+the owner. A provider request already sent cannot be recalled.
 
 `logout(route)` synchronously fences all existing participating route streams,
 rotates the provider lifecycle identity, then serializes deletion behind earlier

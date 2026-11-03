@@ -45,23 +45,25 @@
   Later runs join the request instead of resending the old token, and
   `renewalRequests` still counts it once. `HostCredentialStore` gains an
   optional atomic `compareAndSet`. A lifecycle owner's `close()` reports
-  `busy` until the request settles, at most 30 seconds plus the store read,
-  lock wait and write, even when the transport ignores cancellation. In the
-  TUI, a Grok turn stopped with Esc or the Grok model picker no longer loses
-  the token; Codex turns already kept it (#456).
+  `busy` until the request settles, at most 30 seconds plus the write guards
+  and the store read, lock wait and write, even when the transport ignores
+  cancellation. In the TUI, a Grok turn stopped with Esc or the Grok model
+  picker no longer loses the token; Codex turns already kept it (#456).
 - `schway models list` and headless runs no longer lose a rotated refresh
   token when they stop after a renewal request left. Discovery's five-second
   deadline still ends the listing, but its renewal now finishes and stores the
-  new sign-in; Codex discovery uses the shared ChatGPT refresher. Before it
-  exits, the CLI waits at most 35 seconds for any renewal that already left
-  and writes `Saving the renewed sign-in…` to stderr, adding `Ctrl+C quit
-  without saving` when stdin is a terminal. A SIGTERM limits the wait to 5
-  more seconds; another Ctrl+C or SIGTERM quits at once with exit code 130 or
-  143. When it exits without a saved sign-in, stderr shows `Renewed sign-in
-  not saved · /login sign in again if the next command is rejected`. A ChatGPT
-  token-endpoint error page without a JSON body, such as a gateway or
-  challenge page, now reads as an unavailable service instead of a rejected
-  sign-in (#458).
+  new sign-in; Codex discovery uses the shared ChatGPT refresher, and refresh
+  failures there say to retry the listing. Before it exits, the CLI waits at
+  most 35 seconds for any renewal that already left and writes `Saving the
+  renewed sign-in…` to stderr, adding `Ctrl+C quit without saving` when stdin
+  is a terminal. The wait also ends 5 seconds after a SIGTERM arrives; another
+  Ctrl+C or SIGTERM quits at once with exit code 130 or 143. When it exits
+  without a saved sign-in, stderr names the route's sign-in command, such as
+  `Renewed sign-in not saved · /login chatgpt sign in again if rejected`. On
+  both routes, a token-endpoint 400, 401 or 403 without a JSON body, or a
+  challenge page, now reads as an unavailable service instead of a revoked
+  sign-in, and a ChatGPT JSON 403 says to check the plan's Codex access before
+  signing in again (#458).
 - Serialize OS secure-store saves and deletions across processes with a SQLite
   `BEGIN IMMEDIATE` lock that the operating system releases when its holder
   exits, even on SIGKILL. Concurrent contenders after a crashed holder no longer

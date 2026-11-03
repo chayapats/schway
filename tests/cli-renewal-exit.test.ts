@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
-import { RENEWED_SIGN_IN_NOT_SAVED, SAVING_RENEWED_SIGN_IN, SAVING_RENEWED_SIGN_IN_HINT } from "../src/cli/renewal-exit.ts";
+import { RENEWED_SIGN_IN_NOT_SAVED, renewedSignInNotSaved, SAVING_RENEWED_SIGN_IN, SAVING_RENEWED_SIGN_IN_HINT } from "../src/cli/renewal-exit.ts";
 
 const bin = join(import.meta.dir, "../bin/schway");
 
@@ -91,7 +91,7 @@ for (const route of ["codex", "grok"] as const) {
       const { code, stderr } = await run.done();
       expect(performance.now() - second).toBeLessThan(5_000);
       expect(code).toBe(130);
-      expect(stderr).toContain(RENEWED_SIGN_IN_NOT_SAVED);
+      expect(stderr).toContain(`${renewedSignInNotSaved([route])}\n`);
       expect(existsSync(join(run.state, "saved.json"))).toBe(false);
     });
   }, 60_000);
@@ -109,7 +109,7 @@ for (const route of ["codex", "grok"] as const) {
       expect(performance.now() - stopped).toBeLessThan(9_000);
       expect(code).toBe(143);
       expect(stderr).toContain(SAVING_RENEWED_SIGN_IN);
-      expect(stderr).toContain(RENEWED_SIGN_IN_NOT_SAVED);
+      expect(stderr).toContain(`${renewedSignInNotSaved([route])}\n`);
     });
   }, 60_000);
 
@@ -124,7 +124,7 @@ for (const route of ["codex", "grok"] as const) {
       const { code, stderr } = await run.done();
       expect(performance.now() - second).toBeLessThan(3_000);
       expect(code).toBe(143);
-      expect(stderr).toContain(RENEWED_SIGN_IN_NOT_SAVED);
+      expect(stderr).toContain(`${renewedSignInNotSaved([route])}\n`);
       expect(existsSync(join(run.state, "saved.json"))).toBe(false);
     });
   }, 60_000);

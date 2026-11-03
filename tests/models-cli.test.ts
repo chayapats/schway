@@ -353,6 +353,15 @@ for (const route of ["codex", "grok"] as const) {
     expect(tokenRequests).toBe(0);
   });
 
+  test(`${route} a token refresh failure tells the user to retry the listing, not a turn`, async () => {
+    const fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
+    const result = await discoverModels({ provider, ...auth, env: {} }, { store: fixture.credentials, fetch: async () => new Response("<html>busy</html>", { status: 503 }) });
+    expect(result.catalog).toMatchObject({ route, status: "error", models: [] });
+    expect(result.error).toContain("(HTTP 503). Retry schway models list;");
+    expect(result.error).not.toContain("Retry the turn");
+    expect(fixture.writes).toEqual([]);
+  });
+
   for (const cancel of ["deadline", "parent"] as const) test(`${route} ${cancel} abort before the token request leaves never sends it`, async () => {
     const expired = JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 });
     const fixture = store({ [identity.account]: expired });

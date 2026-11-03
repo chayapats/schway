@@ -9,7 +9,7 @@ import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir } from "./helpers.ts";
 import { encodeXaiSse } from "./fixtures/xai.ts";
 import { clearSubscriptionTokens, createSubscriptionTokenRefresher as createCodexRefresher, refreshSubscriptionTokens as refreshCodexTokens } from "../src/model/providers/codex-subscription.ts";
-import { createSubscriptionTokenRefresher as createGrokRefresher, deleteSubscriptionTokens } from "../src/model/providers/grok-subscription.ts";
+import { createSubscriptionTokenRefresher as createGrokRefresher, deleteSubscriptionTokens, refreshSubscriptionTokens as refreshGrokTokens } from "../src/model/providers/grok-subscription.ts";
 import { loadProviderModel } from "../src/model/loader.ts";
 import { acquireCredentialLifecycle, holdRenewal } from "../src/host/credential-lifecycle.ts";
 import { manualClock } from "./helpers/manual-clock.ts";
@@ -1048,7 +1048,7 @@ for (const entry of [
   { status: 400, json: false, text: "(status 400 with no readable error)", auth: "integration-unavailable" },
   { status: 401, json: true, text: "revoked or rejected by the provider", auth: "rejected" },
   { status: 401, json: false, text: "(status 401 with no readable error)", auth: "integration-unavailable" },
-  { status: 403, json: true, text: "(HTTP 403)", auth: "rejected" },
+  { status: 403, json: true, text: "(HTTP 403). Check that this ChatGPT plan includes Codex access for this account, then sign in again in interactive mode with /login chatgpt.", auth: "rejected" },
   { status: 403, json: false, text: "(status 403 with no readable error)", auth: "integration-unavailable" },
   { status: 429, json: true, text: "(HTTP 429)", auth: "quota-exceeded" },
   { status: 429, json: false, text: "(HTTP 429)", auth: "quota-exceeded" },
@@ -1062,6 +1062,33 @@ for (const entry of [
   expect(failure?.message).not.toContain("upstream-body-sentinel");
   const store = await seeded("codex", EXPIRED);
   const renewal = await renewAuthRoute({ route: "codex", store, fetch: async () => reply() });
+  expect(renewal).toMatchObject({ outcome: "failed", renewalRequests: 1, auth: { status: entry.auth } });
+  expect(containsNoSecrets(renewal, ["upstream-body-sentinel", "invalid_grant"])).toBe(true);
+});
+
+// The same rule on Grok: a JSON 400, 401 or 403 revokes; a page without a JSON body, or a challenge, does not.
+for (const entry of [
+  { status: 400, body: "json", text: "revoked or rejected by xAI", auth: "rejected" },
+  { status: 400, body: "html", text: "(status 400 with no readable error)", auth: "integration-unavailable" },
+  { status: 401, body: "json", text: "revoked or rejected by xAI", auth: "rejected" },
+  { status: 401, body: "html", text: "(status 401 with no readable error)", auth: "integration-unavailable" },
+  { status: 403, body: "json", text: "revoked or rejected by xAI", auth: "rejected" },
+  { status: 403, body: "html", text: "(status 403 with no readable error)", auth: "integration-unavailable" },
+  { status: 403, body: "challenge", text: "Grok access temporarily unavailable", auth: "integration-unavailable" },
+  { status: 429, body: "html", text: "(HTTP 429)", auth: "quota-exceeded" },
+  { status: 503, body: "html", text: "(HTTP 503)", auth: "integration-unavailable" },
+] as const) test(`grok token endpoint ${entry.status} ${entry.body} reads as ${entry.auth}`, async () => {
+  let cancelled = false;
+  const reply = () => entry.body === "json" ? Response.json({ error: "invalid_grant" }, { status: entry.status })
+    : new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("<html>upstream-body-sentinel</html>")); controller.close(); }, cancel() { cancelled = true; } }),
+      { status: entry.status, headers: { "Content-Type": "text/html", ...(entry.body === "challenge" ? { "cf-mitigated": "challenge" } : {}) } });
+  const failure = await refreshGrokTokens({ refreshToken: "stored-refresh-sentinel", fetch: async () => reply() }).then(() => undefined, (error: unknown) => error as Error);
+  expect(failure?.message).toContain(entry.text);
+  expect(failure?.message).not.toContain("upstream-body-sentinel");
+  // A challenge page is never read; it is released at once.
+  if (entry.body === "challenge") expect(cancelled).toBe(true);
+  const store = await seeded("grok", EXPIRED);
+  const renewal = await renewAuthRoute({ route: "grok", store, fetch: async () => reply() });
   expect(renewal).toMatchObject({ outcome: "failed", renewalRequests: 1, auth: { status: entry.auth } });
   expect(containsNoSecrets(renewal, ["upstream-body-sentinel", "invalid_grant"])).toBe(true);
 });

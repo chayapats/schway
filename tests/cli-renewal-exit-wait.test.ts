@@ -1,13 +1,16 @@
 import { expect, test } from "bun:test";
-import { createRenewalExit, RENEWAL_EXIT_LIMIT_MS, RENEWAL_TERMINATE_LIMIT_MS, RENEWED_SIGN_IN_NOT_SAVED, SAVING_RENEWED_SIGN_IN,
+import { createRenewalExit, RENEWAL_EXIT_LIMIT_MS, RENEWAL_TERMINATE_LIMIT_MS, renewedSignInNotSaved, SAVING_RENEWED_SIGN_IN,
   SAVING_RENEWED_SIGN_IN_HINT, type RenewalExitOptions } from "../src/cli/renewal-exit.ts";
+import type { RenewalRoute } from "../src/auth/renewals.ts";
+
+const NOT_SAVED = "Renewed sign-in not saved · /login chatgpt sign in again if rejected";
 
 /** An exit wait over a renewal the test settles, recording stderr. */
-function exitWait(options: Partial<RenewalExitOptions> & { pending?: boolean } = {}) {
+function exitWait(options: Partial<RenewalExitOptions> & { pending?: boolean; routes?: RenewalRoute[] } = {}) {
   const lines: string[] = [];
   const outcome = Promise.withResolvers<boolean>();
   const exit = createRenewalExit({ stderr: { write: text => { lines.push(text); } }, interactive: false, limitMs: 60_000, terminateLimitMs: 60_000,
-    renewals: { pending: () => options.pending ?? true, settled: () => outcome.promise }, ...options });
+    renewals: { pending: () => options.pending ?? true, routes: () => options.routes ?? ["codex"], settled: () => outcome.promise }, ...options });
   return { exit, lines, settle: (saved: boolean) => outcome.resolve(saved) };
 }
 
@@ -43,7 +46,7 @@ test("a renewal that ends without a saved sign-in warns and keeps the command's 
   const settling = wait.exit.settle(1);
   wait.settle(false);
   expect(await settling).toBe(1);
-  expect(wait.lines).toEqual([`${SAVING_RENEWED_SIGN_IN}\n`, `${RENEWED_SIGN_IN_NOT_SAVED}\n`]);
+  expect(wait.lines).toEqual([`${SAVING_RENEWED_SIGN_IN}\n`, `${NOT_SAVED}\n`]);
 });
 
 test("a store write that never returns ends at the hard limit with a warning and the command's status", async () => {
@@ -51,7 +54,7 @@ test("a store write that never returns ends at the hard limit with a warning and
   const started = performance.now();
   expect(await wait.exit.settle(2)).toBe(2);
   expect(performance.now() - started).toBeLessThan(1_000);
-  expect(wait.lines.at(-1)).toBe(`${RENEWED_SIGN_IN_NOT_SAVED}\n`);
+  expect(wait.lines.at(-1)).toBe(`${NOT_SAVED}\n`);
 });
 
 test("Ctrl+C during the wait quits at once with a warning", async () => {
@@ -59,14 +62,14 @@ test("Ctrl+C during the wait quits at once with a warning", async () => {
   const settling = wait.exit.settle(1);
   wait.exit.interrupt();
   expect(await settling).toBe(130);
-  expect(wait.lines.at(-1)).toBe(`${RENEWED_SIGN_IN_NOT_SAVED}\n`);
+  expect(wait.lines.at(-1)).toBe(`${NOT_SAVED}\n`);
 });
 
 test("two Ctrl+C presses before the wait skip it", async () => {
   const wait = exitWait();
   wait.exit.interrupt(); wait.exit.interrupt();
   expect(await wait.exit.settle(1)).toBe(130);
-  expect(wait.lines).toEqual([`${RENEWED_SIGN_IN_NOT_SAVED}\n`]);
+  expect(wait.lines).toEqual([`${NOT_SAVED}\n`]);
 });
 
 test("one Ctrl+C before the wait still waits for the renewal", async () => {
@@ -86,7 +89,7 @@ for (const when of ["before", "during"] as const) test(`SIGTERM ${when} the wait
   const started = performance.now();
   expect(await settling).toBe(143);
   expect(performance.now() - started).toBeLessThan(1_000);
-  expect(wait.lines.at(-1)).toBe(`${RENEWED_SIGN_IN_NOT_SAVED}\n`);
+  expect(wait.lines.at(-1)).toBe(`${NOT_SAVED}\n`);
 });
 
 test("a renewal saved inside the termination cap still exits cleanly", async () => {
@@ -104,9 +107,29 @@ test("a second SIGTERM quits at once, before or during the wait", async () => {
   const settling = during.exit.settle(1);
   during.exit.terminate();
   expect(await settling).toBe(143);
-  expect(during.lines.at(-1)).toBe(`${RENEWED_SIGN_IN_NOT_SAVED}\n`);
+  expect(during.lines.at(-1)).toBe(`${NOT_SAVED}\n`);
   const before = exitWait();
   before.exit.terminate(); before.exit.terminate();
   expect(await before.exit.settle(1)).toBe(143);
-  expect(before.lines).toEqual([`${RENEWED_SIGN_IN_NOT_SAVED}\n`]);
+  expect(before.lines).toEqual([`${NOT_SAVED}\n`]);
+});
+
+test("the not-saved notice names the sign-in command for each route still renewing", async () => {
+  expect(renewedSignInNotSaved(["codex"])).toBe("Renewed sign-in not saved · /login chatgpt sign in again if rejected");
+  expect(renewedSignInNotSaved(["grok"])).toBe("Renewed sign-in not saved · /login grok sign in again if rejected");
+  const wait = exitWait({ routes: ["codex", "grok"] });
+  const settling = wait.exit.settle(1);
+  wait.settle(false);
+  await settling;
+  expect(wait.lines.at(-1)).toBe("Renewed sign-in not saved · /login chatgpt sign in again if rejected · /login grok sign in again if rejected\n");
+});
+
+test("the SIGTERM cap counts from the signal, not from the start of the wait", async () => {
+  const wait = exitWait({ terminateLimitMs: 300 });
+  wait.exit.terminate();
+  // Slow unwinding before the wait begins uses up most of the cap.
+  await Bun.sleep(250);
+  const started = performance.now();
+  expect(await wait.exit.settle(1)).toBe(143);
+  expect(performance.now() - started).toBeLessThan(200);
 });
