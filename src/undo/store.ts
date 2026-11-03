@@ -1,8 +1,7 @@
-import { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
-import { openSync, closeSync } from "node:fs";
 import { mkdir, readFile, readdir, rename, unlink, writeFile, rm, rmdir, stat } from "node:fs/promises";
 import { basename, join, isAbsolute, relative, sep } from "node:path";
+import { withLockFile } from "../storage/sqlite-file-lock.ts";
 import { isErrno, observeFile } from "../tools/fs.ts";
 
 /** Content identity, with null representing an absent file. */
@@ -226,24 +225,16 @@ async function storeExists(root: string): Promise<boolean> {
 /** Error code for lock contention that rejects immediately instead of waiting. */
 export const UNDO_STORE_BUSY = "UNDO_STORE_BUSY";
 
-/** Exclude mutations with an OS-released lock, rejecting contention immediately with UNDO_STORE_BUSY. */
+/**
+ * Exclude mutations with an OS-released lock, rejecting contention immediately with UNDO_STORE_BUSY. A lock file this
+ * process cannot write or that is not empty is refused (see src/storage/sqlite-file-lock.ts), never shared.
+ */
 async function withStoreLock<T>(home: string, operation: () => Promise<T>): Promise<T> {
-  const directory = join(home, ".schway");
-  await mkdir(directory, { recursive: true, mode: 0o700 });
   // This inode stays outside the collectible store and is never removed or counted by retention/doctor.
-  // Only SQLite opens an existing lock inode: unrelated POSIX closes can release process locks.
-  const path = join(directory, "undo.lock");
-  try { closeSync(openSync(path, "wx", 0o600)); }
-  catch (error) { if (!isErrno(error, "EEXIST")) throw error; }
-  const lock = new Database(path);
-  try {
-    try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
-    catch (error) {
-      if (isErrno(error, "SQLITE_BUSY") || isErrno(error, "SQLITE_LOCKED")) throw Object.assign(new Error("Undo store busy"), { code: UNDO_STORE_BUSY });
-      throw error;
-    }
-    return await operation();
-  } finally { lock.close(); }
+  // Only SQLite ever opens it: unrelated POSIX closes can release process locks.
+  return withLockFile(join(home, ".schway", "undo.lock"), {
+    waitMs: 0, busy: () => Object.assign(new Error("Undo store busy"), { code: UNDO_STORE_BUSY }),
+  }, operation);
 }
 
 /** Enumerate regular files and sizes while ignoring absent directories and symbolic links. */

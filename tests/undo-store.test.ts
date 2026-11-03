@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFile, writeFile, chmod, mkdir, stat, symlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { displayPath, lockFileError } from "../src/storage/sqlite-file-lock.ts";
 import { openUndoStore, pruneUndoStore } from "../src/undo/store.ts";
 import { executeToolCall } from "../src/tools/executor.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
@@ -228,6 +229,31 @@ test("capture repairs an incomplete content-addressed blob before changing a fil
   });
 });
 
+test("a refused undo lock file names its own next action in the tool output", async () => {
+  await withTempDir(async root => {
+    const { run } = await fixture(root);
+    const path = join(root, "file.txt");
+    await writeFile(path, "before");
+    // Only an empty file is a Schway lock file; this one is refused, not opened.
+    const lock = join(root, ".schway", "undo.lock");
+    await mkdir(dirname(lock), { recursive: true });
+    await writeFile(lock, "not a lock");
+    const blocked = await run("write", { path: "file.txt", content: "after" });
+    expect(blocked.status).toBe("error");
+    expect(blocked.result.content).toBe(`Could not save undo data for file.txt: The file at ${displayPath(lock)} is not a Schway lock file. With no Schway running, delete it, then retry. The file was not changed.`);
+    expect(await readFile(path, "utf8")).toBe("before");
+    expect(await readFile(lock, "utf8")).toBe("not a lock");
+    // A refusal while settling, after the change, ends the same sentence with a period.
+    const { run: settleRun, store } = await fixture(join(root, "settle"));
+    await mkdir(join(root, "settle"), { recursive: true });
+    await writeFile(join(root, "settle", "file.txt"), "before");
+    const refusal = lockFileError(lock, { reason: "not-lock" });
+    const settled = await settleRun("write", { path: "file.txt", content: "after" }, { undo: { ...store, async settle() { throw refusal; } } });
+    expect(settled.result.content).toBe(`Could not save undo data after changing file.txt: The file at ${displayPath(lock)} is not a Schway lock file. With no Schway running, delete it, then retry.`);
+    expect(await readFile(join(root, "settle", "file.txt"), "utf8")).toBe("after");
+  });
+});
+
 for (const [code, reason] of [["ENOSPC", "No space left on device"], ["UNKNOWN_STORAGE", "File operation failed"]]) {
   test(`undo capture and settlement ${code} failures keep storage internals out of primary tool output`, async () => {
     await withTempDir(async root => {
@@ -242,7 +268,7 @@ for (const [code, reason] of [["ENOSPC", "No space left on device"], ["UNKNOWN_S
       expect(blocked.details).toMatchObject({ undoError: error.message });
       const settled = await run("write", { path: "file.txt", content: "after" }, { undo: { ...store, async settle() { throw error; } } });
       expect(settled.status).toBe("error");
-      expect(settled.result.content).toBe(`Could not save undo data after changing file.txt: ${reason}`);
+      expect(settled.result.content).toBe(`Could not save undo data after changing file.txt: ${reason}.`);
       expect(await readFile(path, "utf8")).toBe("after");
       expect(settled.details).toMatchObject({ undoError: error.message });
     });

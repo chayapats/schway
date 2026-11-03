@@ -1,8 +1,8 @@
-import { Database } from "bun:sqlite";
-import { closeSync, constants, openSync } from "node:fs";
+import { constants } from "node:fs";
 import { chmod, link, lstat, mkdir, open, rm, stat, unlink } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { join } from "node:path";
+import { withLockFile } from "../storage/sqlite-file-lock.ts";
 import { HISTORY_FORMAT_VERSION, MAX_HISTORY_RECORD_BYTES, isHistorySessionId, parseHistoryLine, serializeHistoryFinalize, serializeHistoryRecord,
   type HistoryHeader, type HistoryTurnFinalize, type HistoryTurnStart } from "./records.ts";
 
@@ -170,27 +170,16 @@ export async function deleteHistorySession({ home, sessionId, lockWaitMs = 1000 
   });
 }
 
-/** Exclude sidecar publication and deletion across processes with an OS-released SQLite lock and a bounded asynchronous wait. */
+/**
+ * Exclude sidecar publication and deletion across processes with an OS-released SQLite lock and a bounded asynchronous wait.
+ * Contention past the wait rejects with HISTORY_STORE_BUSY; a lock file this process cannot write or that is not empty is
+ * refused at once (see src/storage/sqlite-file-lock.ts), so a second holder is never admitted.
+ */
 async function withHistoryLock<T>(home: string, waitMs: number, operation: () => Promise<T>): Promise<T> {
-  const directory = join(home, ".schway");
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  // Like the undo lock, this inode is never removed, and only SQLite opens it once created.
-  const path = join(directory, "history.lock");
-  try { closeSync(openSync(path, "wx", 0o600)); }
-  catch (error) { if (!isErrno(error, "EEXIST")) throw error; }
-  const lock = new Database(path);
-  try {
-    const deadline = Date.now() + waitMs;
-    for (;;) {
-      try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); break; }
-      catch (error) {
-        if (!isErrno(error, "SQLITE_BUSY") && !isErrno(error, "SQLITE_LOCKED")) throw error;
-        if (Date.now() >= deadline) throw Object.assign(new Error("History store busy"), { code: HISTORY_STORE_BUSY });
-        await Bun.sleep(20);
-      }
-    }
-    return await operation();
-  } finally { lock.close(); }
+  // Like the undo lock, this inode is never removed, and only SQLite ever opens it.
+  return withLockFile(join(home, ".schway", "history.lock"), {
+    waitMs, pollMs: 20, busy: () => Object.assign(new Error("History store busy"), { code: HISTORY_STORE_BUSY }),
+  }, operation);
 }
 
 function isErrno(error: unknown, code: string): boolean {
