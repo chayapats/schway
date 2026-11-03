@@ -606,7 +606,11 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               // A deadline is not evidence of an unreachable route: without an observed provider failure, or during the
               // settling read, the admission verdict is the latest one observed, as cancel reports.
               const observed = lastError ?? lastRetry;
-              const auth = settlingInterrupted || observed === undefined ? admitted! : classifyAuthError(observed, authSelection);
+              // The loop keeps only the message, so Schway's own refusals and redirects come from the per-call meter.
+              const auth = settlingInterrupted ? admitted!
+                : meter.lastSendRefused ? classifyAuthError(dispatchRefusedError(), authSelection)
+                : meter.lastRedirectRefused ? classifyAuthError(redirectRefusedError("route"), authSelection)
+                : observed === undefined ? admitted! : classifyAuthError(observed, authSelection);
               return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter) };
             }
             // Without a settling read (aborted, or it failed), the admission verdict is the latest one observed.
