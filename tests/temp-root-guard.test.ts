@@ -217,15 +217,20 @@ test("a spawn site is found after regex literals with quotes and URL strings in 
 }, 60_000);
 
 test("direct recursive removal and mkdtemp sites under tests/ match the allowlist exactly", async () => {
-  // Existing sites are allowlisted until they move to makeTempRoot, removeTempRoot and removeOwnedTree.
-  // A new site fails: use the guarded helpers instead. A migrated site fails until its entry is lowered,
-  // so the ratchet never keeps slack.
+  // Only sites that can't go through makeTempRoot, removeTempRoot and removeOwnedTree are allowlisted, each
+  // with a one-line reason. A new site fails: use the guarded helpers instead. A migrated site fails until
+  // its entry is lowered, so the ratchet never keeps slack.
   const allowlistPath = "tests/fixtures/temp-root-allowlist.json";
-  const allowlist = await Bun.file(join(repo, allowlistPath)).json() as Record<string, Partial<Record<TempSiteKind, number>>>;
+  const allowlist = await Bun.file(join(repo, allowlistPath)).json() as Record<string, Partial<Record<TempSiteKind, number>> & { reason?: unknown }>;
   expect(Object.keys(allowlist)).toEqual(Object.keys(allowlist).sort());
   const sites = await scanTempSites(repo);
   const counts = countTempSites(sites);
   const problems: string[] = [];
+  for (const [file, entry] of Object.entries(allowlist)) {
+    const unknown = Object.keys(entry).filter(key => !["mkdtemp", "recursiveRemoval", "reason"].includes(key));
+    if (unknown.length) problems.push(`${allowlistPath}: ${file} has unknown keys ${unknown.join(", ")}`);
+    if (typeof entry.reason !== "string" || !entry.reason.trim() || entry.reason.includes("\n")) problems.push(`${allowlistPath}: ${file} needs a one-line reason`);
+  }
   for (const file of [...new Set([...Object.keys(counts), ...Object.keys(allowlist)])].sort()) {
     for (const kind of ["mkdtemp", "recursiveRemoval"] as const) {
       const actual = counts[file]?.[kind] ?? 0, allowed = allowlist[file]?.[kind];

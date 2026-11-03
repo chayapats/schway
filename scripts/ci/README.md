@@ -58,10 +58,13 @@ Tests must remove only what they created, under their own `mkdtemp` roots. Use
 `withTempDir`, `makeTempRoot`, `removeTempRoot` and `removeOwnedTree` from
 `tests/helpers.ts`. `tests/temp-root-guard.test.ts` fails on any new direct
 recursive removal (`rm`/`rmSync` and their aliases, `rm -r` in shell text or argv
-lists, `find … -delete`) or `mkdtemp` under `tests/`. Existing sites are listed with
-their exact counts in `tests/fixtures/temp-root-allowlist.json` until they move to
-the helpers. The counts must match: lower or remove an entry when you migrate a site,
-and never raise one. The scanner parses each file with the TypeScript 5 compiler that
+lists, `find … -delete`) or `mkdtemp` under `tests/`. Separate-process fixtures and
+the test preload use the same helpers, which import only Node built-ins. The only
+direct sites left are exceptions no temp root can own, such as pruning stale
+screen-catalog goldens in the checkout. `tests/fixtures/temp-root-allowlist.json`
+lists each one with its exact count and a one-line `reason`. The counts must match:
+lower or remove an entry when you migrate a site, and never raise one without a
+reason. The scanner parses each file with the TypeScript 5 compiler that
 `@microsoft/api-extractor` installs; `tests/helpers/temp-root-sites.ts` lists what it
 counts and what it can't see, such as destructuring renames.
 
