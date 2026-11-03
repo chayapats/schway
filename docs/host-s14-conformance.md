@@ -137,9 +137,11 @@ that drops `call`); treat it as unknown, never zero. Bound local readiness with
 `TimeoutError` and never writes. `submitWithRoute` reads readiness inside its run
 bound, so the run's signal, `cancel()` and `deadlineMs` interrupt a blocked store
 read. A wrapping model keeps counts only by passing `call` as-is or spread, and
-must rethrow a refusal or chain it as `cause`: `isDispatchRefused` matches the
-thrown refusal by identity per installed Schway copy, never by message. Route
-sends refuse redirects and report `integration-unavailable` without retrying.
+must rethrow a refusal or chain it as `cause`. `isDispatchRefused` checks only
+the object it is given, by identity per installed Schway copy and never by
+message; the loop and `classifyAuthError` also follow `cause`. Route sends refuse
+redirects and report `integration-unavailable` without retrying. A deadline with
+no observed provider failure reports the admission verdict.
 
 | Seam | Coverage |
 | --- | --- |

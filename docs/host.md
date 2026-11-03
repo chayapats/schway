@@ -435,9 +435,13 @@ in headers the authorizer never sees. Host route models refuse HTTP redirects,
 with or without an authorizer, so every physical send stays authorized and
 counted: a 3xx fails that request, is not retried, and reports
 `integration-unavailable` with guidance that the endpoint answered with a
-redirect. Request bytes are unchanged, and the CLI/TUI path is unchanged. Token
-refresh requests never follow redirects on any path, so a refresh token is never
-resent and each renewal call is exactly one request. Schway keeps credentials,
+redirect. Only a status-less transport refusal counts; an HTTP answer whose body
+mentions a redirect keeps its status and normal handling. Request bytes are
+unchanged, and the CLI/TUI inference path is unchanged. Codex and Grok token
+refresh requests never follow redirects on any path, CLI included, so a refresh
+token is never resent and each renewal call is exactly one request; a redirected
+Codex refresh reports a fixed message that the endpoint answered with a redirect,
+and the same `integration-unavailable` guidance on route runs. Schway keeps credentials,
 protocol, renewal and retries. Renewal requests carry no conversation content, so
 they are counted but not authorized.
 
@@ -445,13 +449,15 @@ Throwing refuses that send, and so does returning a promise, which is never
 awaited. A refused send never leaves the process; earlier sends in the same run
 may already have, and the refusal text speaks only of the refused request. The
 stream ends with a credential-free refusal error. `isDispatchRefused(error)`
-recognizes that error object by identity only: a copied message, or a provider
-error that echoes the wording, is never treated as a refusal. Identity is per
-installed copy of Schway (a module-private set), so a wrapper must rethrow the
-original error or chain it as `cause`, never copy its message. Direct stream
-callers find the authorizer's own error as its `cause`. The loop never retries a
-refusal, even when a wrapper chains it as `cause` above an authorizer error that
-looks transient, and never falls back to another route, model or API-key billing. When a
+checks only the object it is given, by identity: a copied message, a provider
+error that echoes the wording, or a wrapper error whose `cause` is the refusal
+all return `false`. The loop and `classifyAuthError` also follow `cause` links,
+so a wrapper must rethrow the original error or chain it as `cause`, never copy
+its message. Identity is per installed copy of Schway (a module-private set).
+Direct stream callers find the authorizer's own error as its `cause`. The loop
+never retries a refusal, even when a wrapper chains it as `cause` above an
+authorizer error that looks transient, and never falls back to another route,
+model or API-key billing. When a
 run's last model call ended on a refusal, `submitWithRoute` reports
 `auth.status: "dispatch-refused"` and `submit` reports the stable refusal message
 in `error.message`, even if the loop then failed on a consequence such as
@@ -492,11 +498,15 @@ interrupt a blocked store read, and the lease is released when the run settles.
 An interrupted admission read settles as `cancelled` (or `limit_exceeded` at the
 deadline) with `auth.status: "store-unavailable"`, guidance that the store had
 not answered, and zero provider requests. A settling read runs only while the run
-signal is still live: after `max_turns`, or after a `cancelled` loop whose stream
-was aborted without the run signal, such as a lifecycle logout. A caller-cancelled
+signal is still live: after `max_turns`, or after a `cancelled` loop whose
+adapter or injected fetch threw an `AbortError` on its own. A caller-cancelled
 run never reads again and reports its admission verdict. An interrupted settling
 read settles as `cancelled` (or `limit_exceeded`) and also reports the admission
-verdict, because the run had not settled yet.
+verdict, because the run had not settled yet. A deadline is not evidence that the
+route is unreachable: a `limit_exceeded` run with no observed provider failure,
+such as a healthy stream still answering, reports the admission verdict as
+cancel does, while an observed failure (including a retried one) keeps its
+classification.
 
 See `tests/host-dispatch-authorization.test.ts`,
 `tests/host-provider-requests.test.ts` and the packed consumer in
