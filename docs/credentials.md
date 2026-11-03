@@ -236,12 +236,18 @@ small regular file, so a planted FIFO or device cannot block it.
 **Location.** The lock file is `~/.schway/credential-store.lock`, created once
 with mode `0600` and never removed; missing parent directories are created with
 mode `0700`. Schway creates it under a private temporary name in the same
-folder, closes that, then links it into place, so it never holds a descriptor
-on the lock file outside SQLite, even while creating it; a crash in between can
-leave an empty `.schway-lock-<pid>-<id>` file, which is safe to delete. On a
-filesystem without hard links, SQLite creates the file instead. The full lock
-path, after links, must fit SQLite's limit: 1016 bytes on macOS and 504 bytes
-elsewhere, which is SQLite's path limit minus room for a `-journal` name.
+folder, sets mode `0600` whatever the umask, closes it, then links it into
+place, so it never holds a descriptor on the lock file outside SQLite, even
+while creating it. The temporary name is `.cl` plus five letters or digits, short
+enough to fit wherever the lock path fits; a crash in between can leave such an
+empty file, which is safe to delete. On a filesystem without hard links, SQLite
+creates the file instead. The full lock path, after links, must fit SQLite's
+limit: 1016 bytes on macOS and 504 bytes elsewhere, which is SQLite's path limit
+minus room for a `-journal` name. Schway checks this before creating anything,
+including parent folders. Both limits are measured for Bun's embedded SQLite:
+1016 on macOS (SQLite 3.54.0) and 504 on Linux (measured on ARM64 with 3.53.2;
+504 is SQLite's default). Other builds, such as Windows or a custom SQLite, are
+unverified.
 Without a home directory, Schway uses
 `schway-credential-store-<uid>.lock` in the system temporary directory. The lock
 file must be on a local filesystem with POSIX advisory locks; network homes (NFS
