@@ -283,6 +283,8 @@ export async function deleteSubscriptionTokens(store: CredentialStore): Promise<
 /** Inputs retain the original lifecycle identity when discovery memoizes its first credential read. */
 interface SubscriptionTokenInput {
   store: CredentialStore; fetch?: GrokFetch; now?: () => number;
+  /** Ceiling for one shared refresh, its request and body included; defaults to 30 seconds. */
+  timeoutMs?: number;
   lifecycleStore?: CredentialStore; onCredential?: (raw: string) => void;
 }
 
@@ -328,7 +330,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       if (!tokens.refreshToken) throw new Error("The Grok subscription session expired and has no refresh token. Sign in again in interactive mode with /login grok.");
       const refreshToken = tokens.refreshToken, controller = new AbortController();
       // Every renewal keeps this safety ceiling; a caller's earlier cancellation or deadline detaches only its wait.
-      const timer = setTimeout(() => controller.abort(new DOMException("Refresh timed out", "TimeoutError")), 30_000);
+      const timer = setTimeout(() => controller.abort(new DOMException("Refresh timed out", "TimeoutError")), input.timeoutMs ?? 30_000);
       const promise = (async () => {
         let renewed: GrokTokens;
         try {
@@ -343,6 +345,8 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
         await serializeCredentialWrite(state, async () => {
           controller.signal.throwIfAborted();
           if (state.generation !== generation) throw new Error(grokRevokedSessionError());
+          // A credential replaced since this renewal read it wins, whichever store object or process wrote it.
+          if (!await grokCredentialUnchanged(owner, tokens)) throw new Error(grokRevokedSessionError());
           // A discovery wrapper belongs to one deadline; only the original store can serve all callers.
           await writeTokens(owner, merged);
           if (state.generation !== generation) throw new Error(grokRevokedSessionError());
@@ -369,8 +373,18 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
   finally { signal?.removeEventListener("abort", detach); detach(); }
 }
 
+/** True when the stored login is still the one `read` holds; an unreadable value counts as replaced. */
+async function grokCredentialUnchanged(store: CredentialStore, read: GrokTokens): Promise<boolean> {
+  let raw: string | null;
+  try { raw = await store.get(grokSubscriptionIdentity()); }
+  catch (error) { throw preserveRefusal("save", error); }
+  let current: GrokTokens | undefined;
+  try { current = raw?.trim() ? parseSubscriptionTokens(raw) : undefined; } catch { return false; }
+  return current?.accessToken === read.accessToken && current.refreshToken === read.refreshToken;
+}
+
 /** Share renewal per store while fencing refresh writes against logout and replacement sign-ins. */
-export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number }) {
+export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number; timeoutMs?: number }) {
   return { getValidAccessToken: (signal?: AbortSignal, rejectedToken?: string, onRenewal?: (settled: Promise<void>) => void) => resolveSubscriptionToken(input, signal, rejectedToken, onRenewal) };
 }
 /** Bounded refresh transport that sends in the same step that creates the shared renewal, so a renewal that exists has

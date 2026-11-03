@@ -40,6 +40,14 @@ function ownerFor(handle: HostCredentialLifecycle): Owner {
   return owner;
 }
 
+/** Fence a participant. A release it deferred for an in-flight renewal takes effect now: a refused participant authorizes nothing. */
+function refuse(interest: Interest): void {
+  interest.refused = true;
+  const drop = interest.drop;
+  interest.drop = undefined;
+  drop?.();
+}
+
 function serialized<T>(route: Route, operation: () => Promise<T>): Promise<T> {
   const pending = route.writes.then(operation);
   route.writes = pending.then(() => {}, () => {});
@@ -76,7 +84,7 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
         checked.add(interest);
         if (!active(interest)) return;
         try { await interest.guard?.(identity); }
-        catch { interest.refused = true; return; }
+        catch { refuse(interest); return; }
         if (active(interest)) allowed.add(interest);
       }));
     }
@@ -144,7 +152,7 @@ export function createHostCredentialLifecycle(options: HostCredentialLifecycleOp
       const epoch = ++route.epoch;
       route.uncertain = true;
       route.store = routeStore(owner.state, route, name);
-      for (const interest of route.interests) { interest.refused = true; interest.controller.abort(); }
+      for (const interest of route.interests) { refuse(interest); interest.controller.abort(); }
       owner.active++;
       try { await serialized(route, async () => {
         try { await owner.state.base.delete(credentialReferenceForRoute(name)); }
@@ -183,8 +191,8 @@ export function acquireCredentialLifecycle(handle: HostCredentialLifecycle, name
     released = true;
     signal?.removeEventListener("abort", abort);
     const drop = () => { route.interests.delete(interest); owner.active--; };
-    // A renewal still in flight keeps this participant, and the owner busy, until it settles.
-    if (interest.renewals > 0) interest.drop = drop;
+    // A renewal still in flight keeps this participant, and the owner busy, until it settles, unless it is refused.
+    if (interest.renewals > 0 && !interest.refused) interest.drop = drop;
     else drop();
   } };
 }

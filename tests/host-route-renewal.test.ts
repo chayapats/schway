@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { containsNoSecrets, createHost, createHostCredentialLifecycle, hostCapabilities, HostError, listRouteModels, renewAuthRoute,
+import { beginDeviceSignIn, containsNoSecrets, createHost, createHostCredentialLifecycle, hostCapabilities, HostError, listRouteModels, renewAuthRoute,
   type HostAuthFetch, type HostAuthSelection, type HostCredentialLifecycle, type HostOptions, type HostRouteRenewal } from "schway/host";
 import { codexSubscriptionIdentity, credentialLockError, grokSubscriptionIdentity, type CredentialStore } from "../src/auth/store.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
@@ -10,6 +10,8 @@ import { encodeXaiSse } from "./fixtures/xai.ts";
 import { clearSubscriptionTokens, createSubscriptionTokenRefresher as createCodexRefresher } from "../src/model/providers/codex-subscription.ts";
 import { createSubscriptionTokenRefresher as createGrokRefresher, deleteSubscriptionTokens } from "../src/model/providers/grok-subscription.ts";
 import { loadProviderModel } from "../src/model/loader.ts";
+import { acquireCredentialLifecycle, holdRenewal } from "../src/host/credential-lifecycle.ts";
+import { manualClock } from "./helpers/manual-clock.ts";
 import { sampleRequest } from "./fixtures/openai.ts";
 import { collect } from "./helpers/scripted-model.ts";
 
@@ -699,7 +701,7 @@ for (const route of ROUTES) for (const kind of KINDS) {
     });
   });
 
-  test(`${route} ${kind}: a run arriving after a cancelled run's renewal joins its in-flight request`, async () => {
+  for (const stop of ["cancel", "deadline"] as const) test(`${route} ${kind}: a run arriving after a ${stop === "cancel" ? "cancelled" : "timed-out"} run's renewal joins its in-flight request`, async () => {
     await withTempDir(async dir => {
       const store = await seeded(route, EXPIRED);
       const wire = transport(route, rotatingTokens());
@@ -707,11 +709,11 @@ for (const route of ROUTES) for (const kind of KINDS) {
       const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
       const first = await host.createSession(), second = await host.createSession();
       const held = wire.hold();
-      const controller = new AbortController();
-      const pending = first.submitWithRoute({ text: "renew, then cancel" }, { signal: controller.signal });
+      const controller = new AbortController(), deadline = deadlineClock();
+      const pending = first.submitWithRoute({ text: "renew, then stop" }, stop === "cancel" ? { signal: controller.signal } : { clock: deadline.clock });
       await held.started;
-      controller.abort();
-      expect(await pending).toMatchObject({ outcome: "cancelled", usage: { providerRequests: { renewalRequests: 1 } } });
+      if (stop === "cancel") controller.abort(); else deadline.fire();
+      expect(await pending).toMatchObject({ outcome: stop === "cancel" ? "cancelled" : "limit_exceeded", usage: { providerRequests: { renewalRequests: 1 } } });
       const reads = store.reads;
       let settled = false;
       const running = second.submitWithRoute({ text: "join it" }).finally(() => { settled = true; });
@@ -752,7 +754,7 @@ for (const route of ROUTES) for (const kind of KINDS) {
     });
   });
 
-  test(`${route} ${kind}: a logout during a cancelled run's in-flight renewal still fences its write`, async () => {
+  for (const stop of ["cancel", "deadline"] as const) test(`${route} ${kind}: a logout during a ${stop === "cancel" ? "cancelled" : "timed-out"} run's in-flight renewal still fences its write`, async () => {
     await withTempDir(async dir => {
       const store = await seeded(route, EXPIRED);
       const wire = transport(route, rotatingTokens());
@@ -760,16 +762,18 @@ for (const route of ROUTES) for (const kind of KINDS) {
       const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
       const session = await host.createSession();
       const held = wire.hold();
-      const controller = new AbortController();
-      const pending = session.submitWithRoute({ text: "renew, then cancel" }, { signal: controller.signal });
+      const controller = new AbortController(), deadline = deadlineClock();
+      const pending = session.submitWithRoute({ text: "renew, then stop" }, stop === "cancel" ? { signal: controller.signal } : { clock: deadline.clock });
       await held.started;
-      controller.abort();
-      expect((await pending).outcome).toBe("cancelled");
+      if (stop === "cancel") controller.abort(); else deadline.fire();
+      expect((await pending).outcome).toBe(stop === "cancel" ? "cancelled" : "limit_exceeded");
       await session.close(); await host.close();
       if (lifecycle) {
-        // The cancelled run still takes part in its in-flight renewal, so the owner stays busy until it settles.
+        // The stopped run still takes part in its in-flight renewal, so the owner stays busy until it settles.
         await expect(lifecycle.close()).rejects.toMatchObject({ code: "busy" });
         await lifecycle.logout(route);
+        // Logout refused that participant, so nothing is left to keep the owner busy.
+        await lifecycle.close();
       } else if (route === "codex") await clearSubscriptionTokens(store);
       else await deleteSubscriptionTokens(store);
       held.release();
@@ -801,3 +805,128 @@ for (const route of ROUTES) test(`${route} CLI turn cancelled after its renewal 
   await collect(model.stream(sampleRequest()));
   expect(wire.counts).toMatchObject({ token: 1, inference: 1 });
 });
+
+for (const route of ROUTES) for (const kind of KINDS) {
+  for (const stop of ["cancel", "deadline"] as const) test(`${route} ${kind}: a run ${stop === "cancel" ? "cancelled" : "timed out"} inside the refresher before it sends never sends`, async () => {
+    await withTempDir(async dir => {
+      const base = await seeded(route, EXPIRED);
+      // The run's readiness read answers; the refresher's own read waits until after the stop.
+      const reading = Promise.withResolvers<void>(), answer = Promise.withResolvers<void>();
+      let reads = 0;
+      const store: CredentialStore = { ...base, get: async identity => { if (++reads === 2) { reading.resolve(); await answer.promise; } return base.get(identity); },
+        set: (identity, value) => base.set(identity, value) };
+      const wire = transport(route, rotatingTokens());
+      const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch });
+      const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
+      const session = await host.createSession();
+      const controller = new AbortController(), deadline = deadlineClock();
+      const pending = session.submitWithRoute({ text: "stop before sending" }, stop === "cancel" ? { signal: controller.signal } : { clock: deadline.clock });
+      await reading.promise;
+      if (stop === "cancel") controller.abort(); else deadline.fire();
+      // The read answers only after the stop; Codex settles after that read, Grok as soon as it stops.
+      answer.resolve();
+      expect(await pending).toMatchObject({ outcome: stop === "cancel" ? "cancelled" : "limit_exceeded", usage: { providerRequests: { initialSends: 0, renewalRequests: 0 } } });
+      await Bun.sleep(20);
+      expect(wire.counts.token).toBe(0);
+      expect(base.writes).toBe(0);
+      await session.close(); await host.close(); await lifecycle?.close();
+    });
+  });
+
+  test(`${route} ${kind}: a replacement device sign-in wins over a stopped run's late renewal`, async () => {
+    await withTempDir(async dir => {
+      const store = await seeded(route, EXPIRED);
+      const wire = transport(route, rotatingTokens());
+      const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch });
+      const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
+      const first = await host.createSession(), second = await host.createSession();
+      const held = wire.hold();
+      const controller = new AbortController();
+      const pending = first.submitWithRoute({ text: "renew, then cancel" }, { signal: controller.signal });
+      await held.started;
+      controller.abort();
+      expect((await pending).outcome).toBe("cancelled");
+      // The user signs in again through the host's device flow, into the same store, while the old renewal is in flight.
+      const clock = manualClock();
+      const flow = await beginDeviceSignIn({ route, store, fetch: deviceSignInFetch(route), clock });
+      if (flow.kind !== "pending") throw new Error(`expected a pending sign-in, got ${flow.kind}`);
+      const signingIn = flow.poll(new AbortController().signal);
+      await clock.advance(5_000);
+      expect(await signingIn).toMatchObject({ kind: "ready" });
+      expect(await store.value()).toContain("NEW-SIGNIN-access");
+      held.release();
+      await Bun.sleep(20);
+      // The old account's late response never overwrites the new sign-in.
+      expect(await store.value()).toContain("NEW-SIGNIN-access");
+      expect(await store.value()).not.toContain("renewed-access-sentinel");
+      const next = await second.submitWithRoute({ text: "after signing in again" });
+      expect(next.outcome).toBe("completed");
+      expect(next.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 0 });
+      expect(wire.counts.token).toBe(1);
+      await first.close(); await second.close(); await host.close(); await lifecycle?.close();
+    });
+  });
+}
+
+/** Device-flow fixture whose approval yields a different account's login. */
+function deviceSignInFetch(route: Route): HostAuthFetch {
+  return async input => {
+    const url = String(input);
+    if (url.endsWith("usercode") || url.endsWith("device/code")) return Response.json({ device_auth_id: "device-id", device_code: "device-id", user_code: "ABCD-EFGH",
+      verification_uri: route === "codex" ? "https://auth.openai.com/codex/device" : "https://accounts.x.ai/device", interval: 2, expires_in: 60 });
+    const login = Response.json({ access_token: "NEW-SIGNIN-access", refresh_token: "NEW-SIGNIN-refresh", expires_in: 3600 });
+    if (route === "codex" && url === "https://auth.openai.com/oauth/token") return login;
+    return route === "codex" ? Response.json({ authorization_code: "device-auth-code", code_verifier: "device-verifier" }) : login;
+  };
+}
+
+for (const route of ROUTES) {
+  const refresherFor = (store: CredentialStore, fetch: HostAuthFetch, timeoutMs: number) => {
+    const refresher = route === "codex" ? createCodexRefresher({ store, fetch, timeoutMs }) : createGrokRefresher({ store, fetch, timeoutMs });
+    return (signal: AbortSignal, onRenewal: (settled: Promise<void>) => void) => route === "codex"
+      ? (refresher as ReturnType<typeof createCodexRefresher>).getValidAccessToken(signal, onRenewal)
+      : (refresher as ReturnType<typeof createGrokRefresher>).getValidAccessToken(signal, undefined, onRenewal);
+  };
+
+  test(`${route} a renewal whose transport never answers releases its stopped participant at the refresh ceiling`, async () => {
+    const store = await seeded(route, EXPIRED);
+    const lifecycle = createHostCredentialLifecycle({ store });
+    const stop = new AbortController();
+    const lease = acquireCredentialLifecycle(lifecycle, route, undefined, stop.signal);
+    let sent = 0;
+    // Ignores its signal and never answers, like a hung connection.
+    const fetch: HostAuthFetch = () => { sent++; return new Promise<Response>(() => {}); };
+    const waiting = refresherFor(lease.store, fetch, 50)(stop.signal, settled => holdRenewal(lease, settled)).then(() => "renewed", () => "stopped");
+    await until(() => sent === 1, "the token request");
+    stop.abort();
+    lease.release();
+    expect(await waiting).toBe("stopped");
+    await expect(lifecycle.close()).rejects.toMatchObject({ code: "busy" });
+    // The ceiling settles the renewal even though the transport never does, so the owner becomes idle.
+    const started = performance.now();
+    for (;;) {
+      const closed = await lifecycle.close().then(() => true, () => false);
+      if (closed) break;
+      if (performance.now() - started > 2_000) throw new Error("The owner stayed busy past the refresh ceiling");
+      await Bun.sleep(10);
+    }
+    expect(store.writes).toBe(0);
+  });
+
+  test(`${route} logout releases a stopped participant whose renewal is still in flight`, async () => {
+    const store = await seeded(route, EXPIRED);
+    const lifecycle = createHostCredentialLifecycle({ store });
+    const stop = new AbortController();
+    const lease = acquireCredentialLifecycle(lifecycle, route, undefined, stop.signal);
+    let sent = 0;
+    const fetch: HostAuthFetch = () => { sent++; return new Promise<Response>(() => {}); };
+    void refresherFor(lease.store, fetch, 60_000)(stop.signal, settled => holdRenewal(lease, settled)).catch(() => {});
+    await until(() => sent === 1, "the token request");
+    stop.abort();
+    lease.release();
+    await expect(lifecycle.close()).rejects.toMatchObject({ code: "busy" });
+    await lifecycle.logout(route);
+    // A refused participant authorizes nothing, so it no longer holds the owner.
+    await lifecycle.close();
+  });
+}

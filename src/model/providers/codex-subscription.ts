@@ -445,14 +445,15 @@ export async function refreshSubscriptionTokens(input: {
   });
   let response: Response;
   try {
-    response = await (input.fetch ?? fetch)(CODEX_TOKEN_URL, {
+    // Raced against the signal, so a transport that ignores cancellation cannot outlast the refresh ceiling.
+    response = await raceWithAbort(Promise.resolve((input.fetch ?? fetch)(CODEX_TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
       // Never resend the refresh token to a redirect target; one call is exactly one renewal request.
       redirect: "error",
       signal: input.signal,
-    });
+    })), input.signal);
   } catch (error) {
     throwIfAborted(input.signal);
     // The endpoint answered; report that without the transport's raw text or the token URL.
@@ -470,10 +471,22 @@ export async function refreshSubscriptionTokens(input: {
   return toCodexTokens(payload);
 }
 
+/** True when the stored login is still the one `read` holds; an unreadable value counts as replaced. */
+async function codexCredentialUnchanged(store: CredentialStore, read: CodexTokens): Promise<boolean> {
+  let raw: string | null;
+  try { raw = await store.get(codexSubscriptionIdentity()); }
+  catch (error) { throw preserveRefusal("save", error); }
+  let current: CodexTokens | undefined;
+  try { current = raw?.trim() ? parseSubscriptionTokens(raw) : undefined; } catch { return false; }
+  return current?.accessToken === read.accessToken && current.refreshToken === read.refreshToken;
+}
+
 /** Create a serialized single-flight refresher so racing turns share one renewal. */
 export function createSubscriptionTokenRefresher(input: {
   store: CredentialStore;
   fetch?: CodexFetchLike;
+  /** Ceiling for one shared refresh, its request and body included; defaults to `CODEX_REFRESH_TIMEOUT_MS`. */
+  timeoutMs?: number;
 }): {
   /** Return a valid access token, refreshing once before expiry with racing callers sharing the renewal.
    * `onRenewal` fires once per physical refresh request this caller starts, in the step that sends it, with a promise
@@ -512,13 +525,14 @@ export function createSubscriptionTokenRefresher(input: {
       }
       let refresh = state.refresh;
       if (!refresh || refresh.generation !== generation) {
-        const refreshToken = stored.refreshToken;
-        const refreshSignal = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS);
+        const refreshToken = stored.refreshToken, startedFrom = stored;
+        const timeoutMs = input.timeoutMs ?? CODEX_REFRESH_TIMEOUT_MS;
+        const refreshSignal = AbortSignal.timeout(timeoutMs);
         const promise = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal: refreshSignal })
           .catch((error: unknown) => {
             if (refreshSignal.aborted) {
               throw new Error(
-                codexRefreshFailedError(`timed out after ${Math.round(CODEX_REFRESH_TIMEOUT_MS / 1000)}s`),
+                codexRefreshFailedError(`timed out after ${Math.round(timeoutMs / 1000)}s`),
                 { cause: refreshSignal.reason ?? error },
               );
             }
@@ -532,6 +546,8 @@ export function createSubscriptionTokenRefresher(input: {
             await serializeCodexWrite(state, async () => {
               refreshSignal.throwIfAborted();
               if (state.generation !== generation) throw new Error(codexRevokedSessionError());
+              // A credential replaced since this renewal read it wins, whichever store object or process wrote it.
+              if (!await codexCredentialUnchanged(input.store, startedFrom)) throw new Error(codexRevokedSessionError());
               await writeCodexTokens(input.store, merged);
               if (state.generation !== generation) throw new Error(codexRevokedSessionError());
               state.generation++;
@@ -1155,7 +1171,7 @@ export function createCodexSubscriptionModel(options: {
         { tokens: options.tokens, refresher },
         request.signal,
         secrets,
-        dispatch?.renewal,
+        dispatch ? settled => dispatch.renewal(settled) : undefined,
       );
       const body = toCodexResponsesBody(
         { ...request, thinking: request.thinking ?? options.thinking },
@@ -1693,7 +1709,7 @@ function toCodexTokens(payload: Record<string, unknown>, now = Date.now()): Code
 async function readTokenPayload(response: Response, signal?: AbortSignal): Promise<Record<string, unknown>> {
   throwIfAborted(signal);
   try {
-    const payload = (await response.json()) as unknown;
+    const payload = (await raceWithAbort(response.json(), signal)) as unknown;
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       throw new Error("unreadable");
     }

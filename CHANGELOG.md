@@ -37,13 +37,16 @@
 - A Codex or Grok run, stream or CLI turn cancelled or timed out after its
   credential renewal request left no longer loses the refresh token the
   provider already rotated, which forced a new sign-in. The request completes
-  and its response is stored unless a logout, replacement sign-in or write
-  fence refuses it. Later runs join it instead of resending the old token, and
-  `renewalRequests` still counts it once. A lifecycle owner's `close()`
-  reports `busy` until that request settles. In the CLI this fixes Grok turns
-  and the Grok model picker; Codex turns already kept the rotated token.
-  Catalog discovery (`schway models list`) keeps its rule of never writing
-  credentials after its deadline or cancellation (#456).
+  and its response is stored unless a logout or write fence refuses it, or a
+  sign-in through any path has replaced the login since the renewal read it.
+  Later runs join it instead of resending the old token, and `renewalRequests`
+  still counts it once. A lifecycle owner's `close()` reports `busy` until that
+  request settles, at most 30 seconds plus the store write, even when the
+  transport ignores cancellation. In the TUI, a Grok turn stopped with Esc or
+  the Grok model picker no longer loses the token; Codex turns already kept
+  it. A headless run interrupted with Ctrl-C, and catalog discovery (`schway
+  models list`), can still exit before the request settles; #458 tracks them
+  (#456).
 - Serialize OS secure-store saves and deletions across processes with a SQLite
   `BEGIN IMMEDIATE` lock that the operating system releases when its holder
   exits, even on SIGKILL. Concurrent contenders after a crashed holder no longer
