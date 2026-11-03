@@ -306,7 +306,8 @@ for (const stop of stops) {
       const run = await pending;
       expect(run.outcome).toBe(stop === "deadline" ? "limit_exceeded" : "cancelled");
       if (!("auth" in run)) throw new Error("expected auth detail");
-      expect(run.auth.route).toBe("grok");
+      // The run had not settled, so it reports the admission verdict, never "could not reach".
+      expect(run.auth).toMatchObject({ route: "grok", status: "configured-unverified" });
       expect(run.usage.providerRequests).toEqual({ initialSends: requests, authRetrySends: 0, renewalRequests: 0 });
       expect(requests).toBe(1);
       await session.close();
@@ -315,3 +316,56 @@ for (const stop of stops) {
     });
   });
 }
+
+test("a caller-cancelled route run reports its admission verdict without another store read", async () => {
+  await withTempDir(async dir => {
+    const store = gatedStore(Number.MAX_SAFE_INTEGER);
+    const started = Promise.withResolvers<void>();
+    const fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      started.resolve();
+      return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true }));
+    }) as never;
+    const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch }));
+    const session = await host.createSession();
+    const controller = new AbortController();
+    const pending = session.submitWithRoute({ text: "cancel mid-send" }, { signal: controller.signal });
+    await started.promise;
+    const readsBefore = store.reads;
+    controller.abort();
+    const run = await pending;
+    expect(run.outcome).toBe("cancelled");
+    if (!("auth" in run)) throw new Error("expected auth detail");
+    expect(run.auth.status).toBe("configured-unverified");
+    expect(store.reads).toBe(readsBefore);
+    await session.close(); await host.close();
+  });
+});
+
+test("a redirected codex refresh is one counted renewal request and never reaches the target", async () => {
+  await withTempDir(async dir => {
+    let tokenPosts = 0, redirected = 0, inference = 0;
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+      if (new URL(request.url).pathname === "/elsewhere") { redirected++; return Response.json({ access_token: "fresh", expires_in: 3600 }); }
+      tokenPosts++;
+      return new Response(null, { status: 307, headers: { Location: "/elsewhere" } });
+    } });
+    try {
+      const store = fakeCredentialStore();
+      await store.set(codexSubscriptionIdentity(), JSON.stringify({ accessToken: "stale", refreshToken: "redirect-refresh", obtainedAt: 1, expiresAt: 1 }));
+      const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        if (isToken(input)) return globalThis.fetch(new URL("/oauth/token", server.url), init);
+        inference++;
+        return codexSse();
+      }) as never;
+      const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch }));
+      const session = await host.createSession();
+      const run = await session.submitWithRoute({ text: "renew" }, { clock: fastClock });
+      expect(run.outcome).toBe("error");
+      expect(redirected).toBe(0);
+      expect(inference).toBe(0);
+      expect(run.usage.providerRequests).toEqual({ initialSends: 0, authRetrySends: 0, renewalRequests: tokenPosts });
+      expect(tokenPosts).toBeGreaterThanOrEqual(1);
+      await session.close(); await host.close();
+    } finally { server.stop(true); }
+  });
+});

@@ -529,6 +529,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           let admitted: HostAuthReadiness | undefined;
           let admissionFailure: HostAuthReadiness | undefined;
           let settledReadiness: HostAuthReadiness | undefined;
+          let settlingInterrupted = false;
           const bounded = await runBounded(async (signal, report, collect, clock) => {
             let readiness: HostAuthReadiness;
             try { readiness = await checkAuthReadiness(authSelection, { signal }); }
@@ -564,10 +565,12 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
                 }
               }
             }
-            if (reason === "cancelled" || reason === "max_turns") {
+            // Re-read only while the run signal is live: after max_turns, or after a stream abort that left it
+            // live (such as lifecycle logout). A caller-cancelled run keeps its admission verdict without a read.
+            if (reason === "max_turns" || (reason === "cancelled" && !signal.aborted)) {
               // The run settles only after this read; an abort first settles it as cancelled (or limit_exceeded).
               try { settledReadiness = await checkAuthReadiness(authSelection, { signal }); }
-              catch { if (signal.aborted) return { reason: "cancelled" as const }; }
+              catch { if (signal.aborted) { settlingInterrupted = true; return { reason: "cancelled" as const }; } }
             }
             return { reason };
           }, runArgs, admittedAbort);
@@ -595,7 +598,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           }
           if (terminal === "cancelled" || terminal === "max_turns" || terminal === "limit_exceeded") {
             if (terminal === "limit_exceeded") {
-              const auth = classifyAuthError(lastError ?? new Error("Run deadline elapsed."), authSelection);
+              // A deadline during the settling read leaves the admission verdict as the latest one observed, as cancel does.
+              const auth = settlingInterrupted ? admitted! : classifyAuthError(lastError ?? new Error("Run deadline elapsed."), authSelection);
               return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter) };
             }
             // Without a settling read (aborted, or it failed), the admission verdict is the latest one observed.

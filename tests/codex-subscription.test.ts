@@ -665,6 +665,25 @@ test("direct refresh maps revocation distinctly from transient failure", async (
   ).rejects.toThrow(/Refreshing.*failed/i);
 });
 
+test("direct refresh never follows a redirect with the refresh token", async () => {
+  let posts = 0, redirected = 0;
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+    if (new URL(request.url).pathname === "/elsewhere") { redirected++; return Response.json({ access_token: "leaked", expires_in: 3600 }); }
+    posts++;
+    return new Response(null, { status: 307, headers: { Location: "/elsewhere" } });
+  } });
+  try {
+    const inits: Array<RequestInit | undefined> = [];
+    await expect(refreshSubscriptionTokens({
+      refreshToken: "redirect-refresh-sentinel",
+      fetch: (async (_input, init) => { inits.push(init); return fetch(new URL("/oauth/token", server.url), init); }) satisfies CodexFetchLike,
+    })).rejects.toThrow(/Refreshing.*failed/i);
+    expect(inits.map(init => init?.redirect)).toEqual(["error"]);
+    expect(posts).toBe(1);
+    expect(redirected).toBe(0);
+  } finally { server.stop(true); }
+});
+
 test("racing turns share one serialized refresh before expiry", async () => {
   const store = fakeCredentialStore();
   await saveSubscriptionTokens(store, {

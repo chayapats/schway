@@ -19,7 +19,7 @@ import type {
   ModelTool,
   ThinkingLevel,
 } from "../model.ts";
-import { countingRenewalFetch, providerDispatch } from "../dispatch.ts";
+import { countingRenewalFetch, isRefusedRedirect, providerDispatch, redirectRefusedError } from "../dispatch.ts";
 import {
   CODEX_SUBSCRIPTION_LABEL,
   codexSubscriptionIdentity,
@@ -446,6 +446,8 @@ export async function refreshSubscriptionTokens(input: {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
+      // Never resend the refresh token to a redirect target; one call is exactly one renewal request.
+      redirect: "error",
       signal: input.signal,
     });
   } catch (error) {
@@ -1165,11 +1167,14 @@ export function createCodexSubscriptionModel(options: {
           headers: codexRequestHeaders(credential.accessToken, credential.accountId),
           body: serialized,
           signal: request.signal,
-          // An authorized host send refuses redirects, so a 3xx cannot resend the body unauthorized.
+          // Host route sends refuse redirects, authorizer or not, so a 3xx cannot resend the body uncounted.
+          // The CLI path keeps its existing fetch options.
           ...(dispatch ? { redirect: "error" as const } : {}),
         });
       } catch (error) {
         throwIfAborted(request.signal, secrets);
+        // The server answered with a redirect; that is not an unreachable endpoint, and it is not retried.
+        if (dispatch && isRefusedRedirect(error)) throw redirectRefusedError("ChatGPT subscription");
         throw new Error(redact(`ChatGPT subscription request failed (${messageOf(error)}). Retry the turn; Schway owns retries.`, secrets));
       }
       if (!response.ok) {

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { containsNoSecrets, createAuthRouteModel, createHost, hostCapabilities, HostError, isDispatchRefused,
+import { classifyAuthError, containsNoSecrets, createAuthRouteModel, createHost, hostCapabilities, HostError, isDispatchRefused,
   type HostDispatch, type HostOptions, type HostProgressEvent, type Model } from "schway/host";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, type CredentialStore } from "../src/auth/store.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
@@ -368,6 +368,7 @@ test("provider text echoing the refusal wording stays a retryable provider failu
 
 for (const route of ["codex", "grok"] as const) {
   test(`${route} route sends refuse redirects, so every physical POST is authorized`, async () => {
+    const label = route === "codex" ? "ChatGPT subscription" : "Grok subscription";
     await withTempDir(async dir => {
       let posts = 0, redirected = 0;
       const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
@@ -381,12 +382,24 @@ for (const route of ["codex", "grok"] as const) {
         const fetch = ((_input: string | URL | Request, init?: RequestInit) => globalThis.fetch(new URL("/responses", server.url), init)) as never;
         const host = await createHost(await options(dir, { route, model: modelFor(route), store, fetch }));
         const session = await host.createSession();
-        const seen: HostDispatch[] = [];
-        const run = await session.submitWithRoute({ text: "redirect" }, { clock: fastClock, authorizeDispatch: dispatch => { seen.push(dispatch); } });
+        const seen: HostDispatch[] = [], progress: HostProgressEvent[] = [];
+        const run = await session.submitWithRoute({ text: "redirect" }, { clock: fastClock, authorizeDispatch: dispatch => { seen.push(dispatch); }, onProgress: event => progress.push(event) });
         expect(run.outcome).toBe("error");
+        // The server answered, so the refused redirect is neither followed nor retried as an offline failure.
         expect(redirected).toBe(0);
-        expect(posts).toBe(seen.length);
-        expect(run.usage.providerRequests?.initialSends).toBe(posts);
+        expect(posts).toBe(1);
+        expect(seen).toHaveLength(1);
+        expect(progress.filter(event => event.type === "retry")).toHaveLength(0);
+        expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 0 });
+        if (!("auth" in run)) throw new Error("expected auth detail");
+        expect(run.auth.status).toBe("integration-unavailable");
+        expect(run.auth.nextAction).toBe(`The ${label} answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing.`);
+        // Without an authorizer the route model still refuses the redirect, and its message carries no URL.
+        const plain = await session.submit({ text: "redirect again" }, await host.auth!.createModel(), { clock: fastClock });
+        if (plain.outcome !== "error") throw new Error("expected error");
+        expect(plain.error.message).toBe(`The ${label} answered with an HTTP redirect. Route requests never follow redirects, so the request was not resent.`);
+        expect(posts).toBe(2);
+        expect(redirected).toBe(0);
         await session.close(); await host.close();
       } finally { server.stop(true); }
     });
@@ -430,3 +443,36 @@ test("submit reports the refusal when overflow recovery's compaction send is ref
     await session.close(); await host.close();
   });
 });
+
+for (const [variant, authorizerError] of [
+  ["transient-looking status", () => Object.assign(new Error("budget service busy"), { status: 503 })],
+  ["network-looking failure", () => new TypeError("fetch failed")],
+] as const) {
+  test(`a refusal a wrapper chains as cause is never retried (${variant})`, async () => {
+    await withTempDir(async dir => {
+      const store = fakeCredentialStore(); await seed(store, "codex");
+      const wire = transport("codex");
+      const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch: wire.fetch }));
+      const session = await host.createSession();
+      let calls = 0;
+      const inner = await host.auth!.createModel({ authorizeDispatch: () => { calls++; throw authorizerError(); } });
+      const wrapped: Error[] = [];
+      const wrapper: Model = { provider: inner.provider, id: inner.id, async *stream(request, call) {
+        try { yield* inner.stream(request, call); }
+        catch (error) { const failure = new Error("wrapped model failure", { cause: error }); wrapped.push(failure); throw failure; }
+      } };
+      const run = await session.submit({ text: "wrapped" }, wrapper, { clock: fastClock });
+      expect(run.outcome).toBe("error");
+      expect(calls).toBe(1);
+      expect(wire.log).toHaveLength(0);
+      if (run.outcome !== "error") throw new Error("expected error");
+      expect(run.error.message).toBe(REFUSED_MESSAGE);
+      expect(run.usage.providerRequests).toEqual({ initialSends: 0, authRetrySends: 0, renewalRequests: 0 });
+      // Classification follows the cause chain by identity; echoed text alone never matches.
+      const selection = { route: "codex" as const, model: "gpt-5.4" };
+      expect(classifyAuthError(wrapped[0], selection).status).toBe("dispatch-refused");
+      expect(classifyAuthError(new Error("wrapped", { cause: new Error(REFUSED_MESSAGE) }), selection).status).not.toBe("dispatch-refused");
+      await session.close(); await host.close();
+    });
+  });
+}

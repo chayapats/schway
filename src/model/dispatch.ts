@@ -55,3 +55,30 @@ export function dispatchRefusedError(cause?: unknown): Error {
 export function isDispatchRefused(error: unknown): error is Error {
   return error instanceof Error && refusals.has(error);
 }
+
+/** Up to six errors from `error` along its `cause` links, outermost first. */
+function causeChain(error: unknown): unknown[] {
+  const chain: unknown[] = [];
+  for (let current = error, depth = 0; depth < 6 && current !== null && current !== undefined; depth++) {
+    chain.push(current);
+    if (typeof current !== "object" || !("cause" in current)) break;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return chain;
+}
+
+/** True when the error or an error it wraps as `cause` is a refusal Schway threw; text never matches. @internal */
+export function hasDispatchRefusal(error: unknown): boolean {
+  return causeChain(error).some(isDispatchRefused);
+}
+
+/** True when a fetch failed because `redirect: "error"` refused a 3xx answer, as Bun and undici report it. @internal */
+export function isRefusedRedirect(error: unknown): boolean {
+  return causeChain(error).some(item => typeof item === "object" && item !== null &&
+    ((item as { code?: unknown }).code === "UnexpectedRedirect" || (item instanceof Error && /unexpected redirect/i.test(item.message))));
+}
+
+/** Sanitized, non-transient failure for a route send whose endpoint answered with a redirect; no URL or transport text. @internal */
+export function redirectRefusedError(label: string): Error {
+  return new Error(`The ${label} answered with an HTTP redirect. Route requests never follow redirects, so the request was not resent.`);
+}
