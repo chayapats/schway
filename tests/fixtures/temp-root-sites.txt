@@ -28,3 +28,11 @@ Bun.spawn(["find", dir, "-type", "f", "-delete"]); // counted
 Bun.spawn(["find", dir, "-type", "f"]); // not counted
 rm(dir, options); // escapes: options held in a variable
 fs["rm"](dir, { recursive: true }); // escapes: computed access
+const tool = "rm"; // not counted: no flag in this statement
+spawnSync("grep", ["-r", pattern, dir]); // not counted: grep, and the "rm" above is another statement
+// await rm(dir, { recursive: true }); a commented-out call doesn't count
+// import { rm as root } from "node:fs";
+const mocked = (rm as unknown as Mock);
+await root(dir, { recursive: true }); // not counted: that alias is only in a comment
+unknown(dir, { recursive: true }); // not counted: a cast is not an import alias
+run("rm", options); search(["-r"]); // not counted: the flag is in another call

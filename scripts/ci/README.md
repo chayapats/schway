@@ -49,10 +49,10 @@ The `tests (no-git container)` job repeats the #450 report's run: the whole suit
 one `bun test -t ""` process in `oven/bun:1.4.2` as uid 1000, without git or network,
 from a copy without `.git` mounted at `/tmp/rv428`. `no-git-container.sh` records
 inside the container, after the host's `chown`. Test failures from the missing git
-and network are expected and ignored. The job fails on removals, and when the run
-doesn't print a final `Ran N tests across M files` summary with at least one test and
-every tracked test file outside dot-directories, so a crash or an early exit can't
-pass. It runs on pushes to `main`, manual runs and weekly, so branch checks stay short.
+and network are expected and ignored. The job fails on removals, on a signal or an
+exit status other than 0 or 1, and when the last line bun prints isn't a
+`Ran N tests across M files` summary with at least one test and every tracked test
+file outside dot-directories, so a crash or an early exit can't pass. It runs on pushes to `main`, manual runs and weekly, so branch checks stay short.
 
 Tests must remove only what they created, under their own `mkdtemp` roots. Use
 `withTempDir`, `makeTempRoot`, `removeTempRoot` and `removeOwnedTree` from

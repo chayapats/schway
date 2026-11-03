@@ -142,21 +142,29 @@ test("the CI matrix lists exactly SHARD_COUNT shards and every step fails on a b
 
 test("the container job fails a run that crashed, exited early or skipped test files", async () => {
   await withTempDir(async dir => {
-    const check = async (log: string, expected = "229") => {
+    const check = async (log: string, status = "1", expected = "229") => {
       await writeFile(join(dir, "bun-test.log"), log);
-      const result = Bun.spawnSync(["bash", join(import.meta.dir, "../scripts/ci/no-git-container.sh"), "--check-summary", join(dir, "bun-test.log"), expected],
+      const result = Bun.spawnSync(["bash", join(import.meta.dir, "../scripts/ci/no-git-container.sh"), "--check-summary", join(dir, "bun-test.log"), expected, status],
         { stdout: "pipe", stderr: "pipe" });
       return { code: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
     };
-    // A nested run's summary comes first; the last summary is the suite's.
-    const finished = await check("Ran 1 test across 1 file. [1ms]\n 5385 pass\n 642 fail\nRan 6027 tests across 229 files. [721.21s]\n");
+    // A nested run's summary comes first; the suite's summary is the last non-empty line, colored or not.
+    const finished = await check("Ran 1 test across 1 file. [1ms]\n 5385 pass\n 642 fail\nRan 6027 tests across 229 files. [721.21s]\n\n");
     expect(finished).toEqual({ code: 0, output: "bun test ran 6027 tests across 229 files (expected at least 229).\n" });
+    expect((await check("\u001b[1mRan 6027 tests across 229 files.\u001b[0m [1s]\n", "0")).code).toBe(0);
     expect((await check(" 0 pass\nRan 0 tests across 0 files. [1ms]\n")).output).toContain("ran 0 tests across 0 files; expected at least 229 files");
     expect((await check("Ran 5000 tests across 200 files. [1ms]\n")).code).toBe(1);
-    expect((await check("Ran 6027 tests across 229 files. [1s]\nRan 1 test across 1 file. [1ms]\n")).code).toBe(1);
-    const crashed = await check("tests/a.test.ts:\nSegmentation fault\n");
+    // Output after the summary means the run didn't end there.
+    const crashed = await check("Ran 99999 tests across 999 files. [1s]\nSegmentation fault\n");
     expect(crashed.code).toBe(1);
-    expect(crashed.output).toContain("printed no final summary");
-    expect((await check("Ran 1 test across 1 file.\n", "0")).code).toBe(2);
+    expect(crashed.output).toContain("last output line isn't its final summary");
+    expect(crashed.output).toContain("see the no-git-container-log artifact");
+    expect((await check("tests/a.test.ts:\n")).code).toBe(1);
+    // A signal or an unexpected status fails even after a complete-looking summary.
+    const killed = await check("Ran 6027 tests across 229 files. [1s]\n", "139");
+    expect(killed.code).toBe(1);
+    expect(killed.output).toContain("killed by signal 11");
+    expect((await check("Ran 6027 tests across 229 files. [1s]\n", "2")).output).toContain("exited with status 2 rather than 0 or 1");
+    expect((await check("Ran 1 test across 1 file.\n", "1", "0")).code).toBe(2);
   });
 });
