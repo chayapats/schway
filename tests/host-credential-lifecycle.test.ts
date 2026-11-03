@@ -97,7 +97,7 @@ for (const route of ["codex", "grok"] as const) {
           sa.cancel(); sb.cancel();
           await expect(lifecycle.close()).rejects.toMatchObject({ code: "busy" });
           finishWrite.resolve();
-          // Readiness waits behind the credential write and its post-cancellation cleanup.
+          // Readiness waits behind the credential write; the run that sent the renewal still authorizes it (#456).
           await b.auth!.checkReadiness();
         }
         const results = await Promise.all([ra, rb]);
@@ -116,7 +116,9 @@ for (const route of ["codex", "grok"] as const) {
           expect(sends).toBe(0); expect(writes).toBe(0);
         }
         if (scenario === "logout-write") { expect(sends).toBe(0); expect(results.every(result => result.outcome !== "completed")).toBe(true); }
-        if (scenario === "logout" || scenario === "logout-write" || scenario === "dispose") expect(await base.get(identity(route))).toBeNull();
+        if (scenario === "logout" || scenario === "logout-write") expect(await base.get(identity(route))).toBeNull();
+        // Cancelling every run during the write keeps the rotated login: the provider already rotated the old one (#456).
+        if (scenario === "dispose") expect(JSON.parse((await base.get(identity(route)))!).refreshToken).toBe("rotated-secret");
         expect(containsNoSecrets({ lifecycle, results }, ["old-secret", "refresh-secret", "fresh-secret", "rotated-secret", "guard-secret", "provider-secret"])).toBe(true);
         await sa.close(); await a.close();
         if (scenario === "overlap" || scenario === "cancel" || scenario === "guard") {

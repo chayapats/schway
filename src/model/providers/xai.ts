@@ -43,10 +43,10 @@ function requiredModelId(model: string | undefined): string {
 
 /** Create an xAI Responses adapter with per-request credentials, namespaced reasoning and no SDK retries. */
 export function createXaiModel(options: {
-  /** Static key, or a resolver that reports each renewal request it starts through `onRenewal`. */
-  apiKey: string | ((signal?: AbortSignal, onRenewal?: () => void) => Promise<string>);
-  /** Renew a rejected subscription token once without entering the agent retry loop. */
-  refreshCredential?: (rejectedToken: string, signal?: AbortSignal, onRenewal?: () => void) => Promise<string>;
+  /** Static key, or a resolver that reports each renewal request it starts through `onRenewal`, with the renewal's settlement. */
+  apiKey: string | ((signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void) => Promise<string>);
+  /** Renew a rejected subscription token once without entering the agent retry loop, reporting its renewal like `apiKey`. */
+  refreshCredential?: (rejectedToken: string, signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void) => Promise<string>;
   /** Map subscription authorization failures without changing API-key transport errors. */
   authError?: (status: number) => Error;
   model?: string;
@@ -87,7 +87,9 @@ export function createXaiModel(options: {
         ...(isPromptCacheKey(cacheKey) ? { prompt_cache_key: cacheKey } : {}),
       };
       const dispatch = providerDispatch(call);
-      let token = typeof options.apiKey === "function" ? await options.apiKey(request.signal, dispatch?.renewal) : options.apiKey;
+      // The settlement must reach the dispatch hook: it keeps a stopped caller's sent renewal authorized until it settles.
+      const onRenewal = dispatch ? (settled: Promise<void>) => dispatch.renewal(settled) : undefined;
+      let token = typeof options.apiKey === "function" ? await options.apiKey(request.signal, onRenewal) : options.apiKey;
       const tokens = [token];
       const safeError = (error: unknown): unknown => {
         if (!options.refreshCredential) return error;
@@ -115,7 +117,7 @@ export function createXaiModel(options: {
         if (refusal !== undefined) throw refusal;
         if (redirected(error)) throw redirectRefusedError(label);
         if (error instanceof OpenAI.APIError && error.status === 401 && options.refreshCredential) {
-          token = await options.refreshCredential(token, request.signal, dispatch?.renewal); tokens.push(token);
+          token = await options.refreshCredential(token, request.signal, onRenewal); tokens.push(token);
           try { stream = await send("auth-retry"); }
           catch (retryError) {
             if (refusal !== undefined) throw refusal;

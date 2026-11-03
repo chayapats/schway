@@ -24,6 +24,23 @@ export interface CredentialStore {
    * compare and delete with no await in between.
    */
   compareAndDelete?(identity: CredentialIdentity, expectedValue: string): Promise<boolean>;
+  /**
+   * Atomically replace exactly the expected value with `value`, reporting
+   * whether it wrote. Returns false without writing on a value mismatch, so a
+   * login that another writer stored meanwhile is never overwritten. Optional:
+   * `replaceCredential` falls back to a read-then-set that another writer can
+   * still overtake between the read and the write.
+   */
+  compareAndSet?(identity: CredentialIdentity, expectedValue: string, value: string): Promise<boolean>;
+}
+
+/** Replace exactly `expectedValue` with `value`, atomically when the store can; reports whether it wrote. */
+export async function replaceCredential(store: CredentialStore, identity: CredentialIdentity, expectedValue: string, value: string): Promise<boolean> {
+  if (store.compareAndSet) return store.compareAndSet(identity, expectedValue, value);
+  // Without the primitive, a writer outside this process can still land between this read and the write.
+  if (await store.get(identity) !== expectedValue) return false;
+  await store.set(identity, value);
+  return true;
 }
 
 /** Provider and endpoint used to select a credential without including its secret. */
@@ -187,6 +204,19 @@ export function createNativeCredentialStore(native?: typeof Bun.secrets, options
         try { return await backend.delete(address(identity)); }
         catch { throw new Error(credentialStoreError("delete")); }
       }, lock("delete"));
+    },
+    // The read and the write share one critical section of the cross-process
+    // lock, so no Schway-mediated writer can land between them.
+    async compareAndSet(identity, expectedValue, value) {
+      return withCredentialStoreLock(async () => {
+        let current: string | null;
+        try { current = await backend.get(address(identity)); }
+        catch { throw new Error(credentialStoreError("read")); }
+        if (current !== expectedValue) return false;
+        try { await backend.set({ ...address(identity), value }); }
+        catch { throw new Error(credentialStoreError("save")); }
+        return true;
+      }, lock("save"));
     },
     // Serialized by the cross-process credential-store lock, so every
     // Schway-mediated writer in any local process takes its turn. Writers

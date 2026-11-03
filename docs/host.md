@@ -478,9 +478,9 @@ discarding it would force a new sign-in. Later renewals and runs join that
 request instead of sending another. With a lifecycle, the stopped renewal stays
 a participant until the request settles, so the owner's `close()` reports `busy`
 until then, which is bounded by the refresher's 30-second timeout and the store
-write. A renewal that only joined another caller's request stops waiting and
-leaves that request to its starter; a run's cancellation is tracked in
-[#456](https://github.com/chayapats/schway/issues/456).
+write. A renewal that only joined another caller's request stops waiting; that
+request completes under the same rule for its starter, a cancelled run included
+([#456](https://github.com/chayapats/schway/issues/456)).
 
 When a renewal stops, decide on `outcome`, not `auth.status`. `auth` is the
 verdict read before the stop. If the store had not answered, it is
@@ -496,7 +496,7 @@ See `tests/host-route-renewal.test.ts` and the packed consumer in
 
 `schway.host.run-control/v1` bounds every admitted run by finite `maxTurns`, `maxConcurrentTools`, `deadlineMs` and `maxAttempts`, with no unlimited or malformed values admitted. The deadline covers model rounds, transport retry backoff, overflow recovery and compaction waits, plus `submitWithRoute`'s secure-store readiness reads. `submit`, `submitWithRoute` and `compact` accept `AbortSignal | HostRunOptions`; `HostRunOptions` carries an optional cooperative `signal`, an injectable `HostClock` for deterministic backoff/deadline waits and an optional transient `onProgress` observer. `submitWithRoute` also accepts `HostRouteRunOptions`, which adds a per-run `authorizeDispatch`.
 
-Accepted input is appended and flushed before the first model request; a failed append rejects `storage` without inference or an accepted reference. Cancellation precedence is explicit: a pre-acceptance abort rejects `invalid-input` without durable input, while a post-acceptance abort, session `cancel()` or deadline expiry settles as `cancelled` or `limit_exceeded` with the accepted input reference and no late result. `cancel()` aborts model/retry waits and settles admitted cooperative tools before the run settles; it is safe to repeat and safe when idle. `close()` stays idle-only, never aborts or settles an admitted run, and rejects `busy` while a run is admitted; call `cancel()` first, await settlement, then close releases the exclusive lease. Repeated close is safe.
+Accepted input is appended and flushed before the first model request; a failed append rejects `storage` without inference or an accepted reference. Cancellation precedence is explicit: a pre-acceptance abort rejects `invalid-input` without durable input, while a post-acceptance abort, session `cancel()` or deadline expiry settles as `cancelled` or `limit_exceeded` with the accepted input reference and no late result. `cancel()` aborts model/retry waits and settles admitted cooperative tools before the run settles; it is safe to repeat and safe when idle. `close()` stays idle-only, never aborts or settles an admitted run, and rejects `busy` while a run is admitted; call `cancel()` first, await settlement, then close releases the exclusive lease. Repeated close is safe. A run cancelled or stopped by its deadline after its own credential renewal request left still settles promptly and reports that request; the request completes in the background, and its response is stored unless a logout or write fence refuses it, or a sign-in through any path has replaced the login since the renewal read it, because the provider may already have rotated the refresh token. Later runs and renewals join that request instead of sending another ([#456](https://github.com/chayapats/schway/issues/456)).
 
 Terminal outcomes distinguish `completed`, `error`, `cancelled`, `max_turns` and `limit_exceeded`, carry the selected route/session/run references, the selected model identity and durable output references only when committed, plus honest `HostRunUsage` and sanitized `HostRunError` diagnostics preserving the effective context/tool policy. Route-bound runs add safe `auth` readiness and `observedInference: "observed"` only on committed completion. A late provider callback after cancellation or the deadline cannot flip the outcome to `completed` or append a late accepted answer; the loop checks cancellation before durable publication and the host trusts a loop-reported `completed` over a raced abort or deadline. Schway adds no competing durable job scheduler; Jit owns queue priority, attempt generations and task acceptance. See ADR0014 and `tests/host-run-control.test.ts`.
 
@@ -939,19 +939,49 @@ asynchronous guard is pending or is still waiting in readiness. A refused
 participant cannot proceed to inference on that renewal, and cannot disable a
 valid sibling. Guards run before and after the backend write, and can run before
 that participant's stream starts; they must not wait for its readiness or stream
-to finish. If every interested participant is cancelled or fenced, a late write
-is removed by exact-value cleanup; uncertain cleanup blocks later reads until
-successful logout. No raw credential is returned in the handle, readiness,
-outcomes, progress or diagnostics.
+to finish. A participant whose own renewal request has left keeps authorizing
+that renewal until it settles, even after it is cancelled or reaches its
+deadline, because the provider may already have rotated the refresh token
+([#456](https://github.com/chayapats/schway/issues/456)). Its guard is still
+consulted around the write, and logout still fences it. If every participant
+that could authorize the write is fenced or logged out, or stopped before
+sending its own request, a late write is removed by exact-value cleanup;
+uncertain cleanup blocks later reads until successful logout. No raw credential
+is returned in the handle, readiness, outcomes, progress or diagnostics.
+
+Use `credentialWriteGuard` to decide credential ownership, such as "this process
+may still write this login", never to cancel work or shut down. A guard that
+refuses around the write of a renewed credential whose token request already
+left discards the rotated token: the provider has already spent the stored
+refresh token, so the next renewal is `rejected` and needs a new sign-in. Fence
+work with `authorizeDispatch`, abort signals and run cancellation instead.
+During shutdown, keep the guard permissive until in-flight renewals settle; the
+lifecycle's `close()` reports `busy` until they have.
+
+A renewal writes only over the login it started from. With the OS store,
+directly or through a lifecycle, that comparison and the write share one
+critical section of the cross-process credential lock, after the write guards
+run, so a sign-in or another process's write that lands meanwhile is never
+overwritten. A caller waiting on that renewal then uses the newer login, or the
+same rotated pair, instead of failing. A `HostCredentialStore` without
+`compareAndSet` gets a read and then a set, and a writer can still land between
+the two.
 
 The embedding application owns the lifecycle handle. Hosts borrow it; closing a
-host never disposes the owner or logs out. An admitted `submitWithRoute` pins its
-owner from readiness through terminal settlement, including tools and retry
-waits. Direct `createAuthRouteModel` streams and in-flight credential writes also
-pin it. `close()` refuses `busy` while pinned, is idempotent when idle, and fences
-later auth use through that handle. It does not cancel streams, erase credentials
-or dispose sibling owner handles. Close hosts after their runs settle, then
-dispose the owner. A provider request already sent cannot be recalled.
+host never disposes the owner or logs out. An admitted `submitWithRoute` pins
+its owner from readiness through terminal settlement, including tools and retry
+waits. Direct `createAuthRouteModel` streams and in-flight credential writes
+also pin it, and so does a renewal request that a stopped run, stream or renewal
+sent, until that request settles: at most the refresher's 30-second timeout plus
+the participants' write guards and the credential-store read, lock wait and
+write, even when the transport ignores cancellation. Logout releases that hold
+at once. When `close()` reports `busy` only because such a request is settling,
+retry it or wait, within that bound. Exiting the process before the request
+settles loses the rotated refresh token, and the next run must sign in again.
+`close()` refuses `busy` while pinned, is idempotent when idle, and fences later
+auth use through that handle. It does not cancel streams, erase credentials or
+dispose sibling owner handles. Close hosts after their runs settle, then dispose
+the owner. A provider request already sent cannot be recalled.
 
 `logout(route)` synchronously fences all existing participating route streams,
 rotates the provider lifecycle identity, then serializes deletion behind earlier

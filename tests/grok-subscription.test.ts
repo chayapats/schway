@@ -220,7 +220,9 @@ test("aborting a Grok turn stops waiting for shared refresh while another turn c
     expect(refreshes).toBe(1); expect(sends).toBe(0);
   } finally { release.resolve(); await cancelled; await continuing; }
   expect(refreshes).toBe(1); expect(sends).toBe(1);
-  expect(reads).toBe(2); // Each turn resolves credentials once; the SDK never asks again.
+  // Each turn resolves credentials once and the SDK never asks again; the renewal re-reads once to confirm, before it
+  // writes, that no sign-in replaced the login it started from.
+  expect(reads).toBe(3);
 });
 
 test("late Grok refresh cannot recreate a logged-out login or overwrite a replacement account", async () => {

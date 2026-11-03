@@ -1,5 +1,6 @@
-import { createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialLockError, markCleanupUncertain, type CredentialStore } from "../auth/store.ts";
+import { createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialLockError, markCleanupUncertain, replaceCredential, type CredentialStore } from "../auth/store.ts";
 import type { Model } from "../model/model.ts";
+import { providerDispatch, withProviderDispatch } from "../model/dispatch.ts";
 import type { HostAuthRoute, HostCredentialStore, HostCredentialWriteGuard } from "./auth-routes.ts";
 import { credentialReferenceForRoute } from "./auth-routes.ts";
 import { HostError } from "./index.ts";
@@ -15,7 +16,8 @@ export interface HostCredentialLifecycle {
 /** Optional secure-store seam for isolated deterministic embeddings; omission selects Schway's OS store. */
 export interface HostCredentialLifecycleOptions { readonly store?: HostCredentialStore }
 
-type Interest = { owner: Owner; controller: AbortController; guard?: HostCredentialWriteGuard; refused: boolean };
+/** `renewals` counts renewals this participant sent that have not settled; `drop` is a release deferred until they have. */
+type Interest = { owner: Owner; controller: AbortController; guard?: HostCredentialWriteGuard; refused: boolean; renewals: number; drop?: () => void };
 type Route = { epoch: number; store: CredentialStore; interests: Set<Interest>; writes: Promise<void>; uncertain?: boolean };
 type State = { base: CredentialStore; routes: Map<HostAuthRoute, Route> };
 type Owner = { state: State; closed: boolean; active: number };
@@ -36,6 +38,14 @@ function ownerFor(handle: HostCredentialLifecycle): Owner {
   if (!owner) throw new HostError("invalid-options");
   if (owner.closed) throw new HostError("closed");
   return owner;
+}
+
+/** Fence a participant. A release it deferred for an in-flight renewal takes effect now: a refused participant authorizes nothing. */
+function refuse(interest: Interest): void {
+  interest.refused = true;
+  const drop = interest.drop;
+  interest.drop = undefined;
+  drop?.();
 }
 
 function serialized<T>(route: Route, operation: () => Promise<T>): Promise<T> {
@@ -60,8 +70,10 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
   const authorize = async () => {
     current();
     const checked = new Set<Interest>(), allowed = new Set<Interest>();
+    // A stopped participant still authorizes a renewal it sent until that renewal settles: the provider may already
+    // have rotated the refresh token. Logout and its own guard still fence it.
     const active = (interest: Interest) => route.interests.has(interest) && !interest.refused &&
-      !interest.owner.closed && !interest.controller.signal.aborted;
+      !interest.owner.closed && (!interest.controller.signal.aborted || interest.renewals > 0);
     // Guards can yield while a sibling joins, including during that sibling's readiness.
     // Check every new participant before deciding that no authority remains.
     for (;;) {
@@ -72,7 +84,7 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
         checked.add(interest);
         if (!active(interest)) return;
         try { await interest.guard?.(identity); }
-        catch { interest.refused = true; return; }
+        catch { refuse(interest); return; }
         if (active(interest)) allowed.add(interest);
       }));
     }
@@ -82,6 +94,34 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
     // When all peers refuse, let the write/cleanup error reach every waiter first.
     for (const interest of route.interests) if (interest.refused) interest.controller.abort();
   };
+  /** Authorize, write and re-authorize under the route chain; a refusal after a write removes exactly that value. */
+  function commit(value: string, write: () => Promise<boolean>): Promise<boolean> {
+    const writers = new Set([...route.interests].map(interest => interest.owner));
+    for (const owner of writers) owner.active++;
+    return serialized(route, async () => {
+      await authorize();
+      current();
+      try {
+        if (!await write()) return false;
+        await authorize();
+        return true;
+      } catch (error) {
+        // A credential-lock refusal means the backend write never ran: nothing to remove, and the route stays usable.
+        if (isCredentialLockError(error)) throw error;
+        // A backend can commit then reject. Remove only this write, under the route chain.
+        try {
+          if (state.base.compareAndDelete) await state.base.compareAndDelete(identity, value);
+          else if (await state.base.get(identity) === value) await state.base.delete(identity);
+        } catch {
+          route.uncertain = true;
+          const refused = credentialWriteRefusedError();
+          refused.message = "Credential store write refused by the embedding-application fence. Credential cleanup could not be verified.";
+          throw markCleanupUncertain(refused, new HostError("storage"));
+        }
+        throw error;
+      }
+    }).finally(() => { for (const owner of writers) owner.active--; });
+  }
   return {
     async get(requested) {
       current();
@@ -93,30 +133,12 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
     },
     set(requested, value) {
       if (requested.account !== identity.account) return Promise.reject(new HostError("invalid-options"));
-      const writers = new Set([...route.interests].map(interest => interest.owner));
-      for (const owner of writers) owner.active++;
-      return serialized(route, async () => {
-        await authorize();
-        current();
-        try {
-          await state.base.set(identity, value);
-          await authorize();
-        } catch (error) {
-          // A credential-lock refusal means the backend write never ran: nothing to remove, and the route stays usable.
-          if (isCredentialLockError(error)) throw error;
-          // A backend can commit then reject. Remove only this write, under the route chain.
-          try {
-            if (state.base.compareAndDelete) await state.base.compareAndDelete(identity, value);
-            else if (await state.base.get(identity) === value) await state.base.delete(identity);
-          } catch {
-            route.uncertain = true;
-            const refused = credentialWriteRefusedError();
-            refused.message = "Credential store write refused by the embedding-application fence. Credential cleanup could not be verified.";
-            throw markCleanupUncertain(refused, new HostError("storage"));
-          }
-          throw error;
-        }
-      }).finally(() => { for (const owner of writers) owner.active--; });
+      return commit(value, async () => { await state.base.set(identity, value); return true; }).then(() => {});
+    },
+    // Participants' guards run first; the compare and the write then share the base store's critical section.
+    compareAndSet(requested, expectedValue, value) {
+      if (requested.account !== identity.account) return Promise.reject(new HostError("invalid-options"));
+      return commit(value, () => replaceCredential(state.base, identity, expectedValue, value));
     },
     async delete() { throw new HostError("invalid-options"); },
   };
@@ -140,7 +162,7 @@ export function createHostCredentialLifecycle(options: HostCredentialLifecycleOp
       const epoch = ++route.epoch;
       route.uncertain = true;
       route.store = routeStore(owner.state, route, name);
-      for (const interest of route.interests) { interest.refused = true; interest.controller.abort(); }
+      for (const interest of route.interests) { refuse(interest); interest.controller.abort(); }
       owner.active++;
       try { await serialized(route, async () => {
         try { await owner.state.base.delete(credentialReferenceForRoute(name)); }
@@ -168,7 +190,7 @@ export function validateCredentialLifecycle(handle: HostCredentialLifecycle): vo
 export function acquireCredentialLifecycle(handle: HostCredentialLifecycle, name: HostAuthRoute, guard?: HostCredentialWriteGuard, signal?: AbortSignal): CredentialLifecycleLease {
   const owner = ownerFor(handle), route = routeFor(owner.state, name);
   const controller = new AbortController();
-  const interest: Interest = { owner, controller, guard, refused: false };
+  const interest: Interest = { owner, controller, guard, refused: false, renewals: 0 };
   const abort = () => controller.abort();
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
@@ -178,13 +200,29 @@ export function acquireCredentialLifecycle(handle: HostCredentialLifecycle, name
     if (released) return;
     released = true;
     signal?.removeEventListener("abort", abort);
-    route.interests.delete(interest); owner.active--;
+    const drop = () => { route.interests.delete(interest); owner.active--; };
+    // A renewal still in flight keeps this participant, and the owner busy, until it settles, unless it is refused.
+    if (interest.renewals > 0 && !interest.refused) interest.drop = drop;
+    else drop();
   } };
 }
 
 /** Resolve the current shared route store without publishing it on the lifecycle handle. @internal */
 export function credentialLifecycleStore(handle: HostCredentialLifecycle, name: HostAuthRoute): CredentialStore {
   return routeFor(ownerFor(handle).state, name).store;
+}
+
+/** Keep this participant authorizing, and registered, until a renewal it sent settles, even after it stops. @internal */
+export function holdRenewal(lease: CredentialLifecycleLease, settled: Promise<void>): void {
+  const { interest } = lease;
+  interest.renewals++;
+  const settle = () => {
+    if (--interest.renewals > 0 || !interest.drop) return;
+    const drop = interest.drop;
+    interest.drop = undefined;
+    drop();
+  };
+  void settled.then(settle, settle);
 }
 
 /** Attach one stream's cancellation and write fence without changing its siblings' authority. @internal */
@@ -202,7 +240,13 @@ export function lifecycleModel(handle: HostCredentialLifecycle, name: HostAuthRo
       catch { interest.refused = true; throw credentialWriteRefusedError(); }
       if (interest.refused) throw credentialWriteRefusedError();
       controller.signal.throwIfAborted();
-      for await (const event of model.stream({ ...request, signal: controller.signal }, call)) yield event;
+      // A renewal this stream sends outlives the stream's own stop until it settles.
+      const hooks = providerDispatch(call);
+      const held = hooks ? withProviderDispatch(call, { ...hooks, renewal(settled) {
+        if (settled) holdRenewal(lease, settled);
+        hooks.renewal(settled);
+      } }) : call;
+      for await (const event of model.stream({ ...request, signal: controller.signal }, held)) yield event;
     } catch (error) {
       if (isCleanupUncertain(error)) throw error;
       if (interest.refused) throw credentialWriteRefusedError();

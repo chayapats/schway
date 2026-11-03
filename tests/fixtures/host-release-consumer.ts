@@ -132,7 +132,9 @@ if (input.action === "capabilities") {
     limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 },
     auth: {
       route, model: modelId, store,
-      fetch: (async () => new Response("denied", { status: 401 })) as never,
+      // Inference rejects the token; a renewal is refused with the token endpoint's JSON OAuth error.
+      fetch: (async (url: string | URL | Request) => String(url).includes("auth.x.ai") || String(url).includes("/oauth/token")
+        ? Response.json({ error: "invalid_grant" }, { status: 401 }) : new Response("denied", { status: 401 })) as never,
     },
   } as unknown as HostOptions);
   const failingSession = await failing.createSession();

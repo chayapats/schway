@@ -1,9 +1,10 @@
 import { DeviceFlowError, deviceFlowExpiresAt, sleepDeviceFlow, validateDeviceVerificationUri, withinDeviceFlow, type DeviceFlowAuthorization } from "../../auth/device-flow.ts";
-import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, type CredentialStore } from "../../auth/store.ts";
+import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, replaceCredential, type CredentialStore } from "../../auth/store.ts";
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
-import { boundedCatalogFetch, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
+import { abortableCatalogOperation, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { GROK_CHALLENGE_ERROR, GROK_QUOTA_ERROR } from "../grok-errors.ts";
-import { countingRenewalFetch, isRefusedRedirect, redirectRefusal } from "../dispatch.ts";
+import { isRefusedRedirect, redirectRefusal } from "../dispatch.ts";
+import { trackSentRenewal } from "../../auth/renewals.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -32,9 +33,16 @@ export interface GrokDeviceAuthorization { deviceCode: string; userCode: string;
 export function grokRevokedSessionError(): string {
   return "The Grok subscription session was revoked or rejected by xAI. Sign in again in interactive mode with /login grok; stored API keys are never used as a silent fallback.";
 }
+const RETRY_TURN = ". Retry the turn; Schway owns retries and never falls back to xAI API-key billing.";
+const RETRY_LISTING = ". Retry schway models list; Schway never falls back to xAI API-key billing.";
 /** Safe transient renewal guidance without provider response bodies or credential data. */
 export function grokRefreshFailedError(detail: string): string {
-  return `Refreshing the Grok subscription session failed (${detail}). Retry the turn; Schway owns retries and never falls back to xAI API-key billing.`;
+  return `Refreshing the Grok subscription session failed (${detail})${RETRY_TURN}`;
+}
+/** Word a shared-refresh failure for `schway models list`, which has no turn to retry. */
+function forListing(error: unknown): unknown {
+  if (!(error instanceof Error) || !error.message.endsWith(RETRY_TURN)) return error;
+  return new Error(`${error.message.slice(0, -RETRY_TURN.length)}${RETRY_LISTING}`, { cause: error });
 }
 /** Plan rejection text shared with headless output; the TUI adds its own shortcut hint. */
 export const GROK_PLAN_ERROR = "Your Grok plan doesn't include API access. Use an xAI API key instead.";
@@ -111,10 +119,47 @@ export async function refreshSubscriptionTokens(input: { refreshToken: string; f
     if (isRefusedRedirect(error)) throw redirectRefusal(GROK_REFRESH_REDIRECT_ERROR);
     throw new Error(grokRefreshFailedError("connection failed"));
   }
-  if ([400, 401, 403].includes(response.status)) throw new Error(grokRevokedSessionError());
-  if (!response.ok) throw new Error(grokRefreshFailedError(`HTTP ${response.status}`));
+  if (!response.ok) throw new Error(await refreshFailure(response, input.signal));
   try { return tokensFromPayload(await payload(response, input.signal), (input.now ?? Date.now)()); }
   catch { aborted(input.signal); throw new Error(grokRefreshFailedError("invalid token response")); }
+}
+/** Failure text for a refused refresh. A JSON 400, 401 or 403 revokes the session; a challenge, or one of those
+ * statuses without a JSON body, such as a gateway page, says nothing about the credential. */
+async function refreshFailure(response: Response, signal?: AbortSignal): Promise<string> {
+  // Only a 400, 401 or 403 needs its body, and only enough of it to hold an OAuth JSON error.
+  if (response.headers.get("cf-mitigated") === "challenge" || ![400, 401, 403].includes(response.status)) {
+    void response.body?.cancel().catch(() => {});
+    return response.headers.get("cf-mitigated") === "challenge" ? GROK_CHALLENGE_ERROR : grokRefreshFailedError(`HTTP ${response.status}`);
+  }
+  let json = false;
+  try {
+    const value: unknown = JSON.parse(new TextDecoder().decode(await readErrorPrefix(response, signal)));
+    json = !!value && typeof value === "object" && !Array.isArray(value);
+  } catch { aborted(signal); }
+  return json ? grokRevokedSessionError() : grokRefreshFailedError(`status ${response.status} with no readable error`);
+}
+/** Longest error-body prefix read to find an OAuth JSON error, and how long to wait for it. */
+const ERROR_PREFIX_BYTES = 65_536, ERROR_PREFIX_MS = 5_000;
+/** Up to 64 KiB of an error body within 5 seconds, then release the rest; only the caller's signal aborts. */
+async function readErrorPrefix(response: Response, signal?: AbortSignal): Promise<Uint8Array> {
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const deadline = signal ? AbortSignal.any([signal, AbortSignal.timeout(ERROR_PREFIX_MS)]) : AbortSignal.timeout(ERROR_PREFIX_MS);
+  const chunks: Uint8Array[] = [];
+  let size = 0, done = false;
+  try {
+    while (size < ERROR_PREFIX_BYTES) {
+      const read = await abortableCatalogOperation(reader.read(), deadline);
+      if (read.done) { done = true; break; }
+      chunks.push(read.value); size += read.value.byteLength;
+    }
+  } catch { aborted(signal); }
+  // A page larger than the prefix, or one that stalls, is never read further.
+  if (!done) void reader.cancel().catch(() => {});
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
 }
 /** Generate a fresh PKCE verifier and unpredictable browser state and nonce. */
 export function createBrowserAttempt(): { verifier: string; challenge: string; state: string; nonce: string } {
@@ -241,15 +286,19 @@ export async function loginWithDeviceFlow(input: { signal: AbortSignal; deps: Gr
 
 /** Read only Schway's dedicated Grok subscription identity, preserving secure-store failures. */
 export async function loadSubscriptionTokens(store: CredentialStore, onCredential?: (raw: string) => void): Promise<GrokTokens | null> {
+  return (await readSubscriptionLogin(store, onCredential)).tokens;
+}
+/** Read the stored login with its exact stored value, which a renewal later replaces only if it is unchanged. */
+async function readSubscriptionLogin(store: CredentialStore, onCredential?: (raw: string) => void): Promise<{ raw: string; tokens: GrokTokens } | { raw: null; tokens: null }> {
   let raw: string | null;
   try { raw = await store.get(grokSubscriptionIdentity()); } catch { throw new Error(credentialStoreError("read")); }
   if (raw) onCredential?.(raw);
-  return raw?.trim() ? parseSubscriptionTokens(raw) : null;
+  return raw?.trim() ? { raw, tokens: parseSubscriptionTokens(raw) } : { raw: null, tokens: null };
 }
 type RefreshCaller = { onCredential?: (raw: string) => void };
 type CredentialLifecycle = {
   generation: number; writes: Promise<void>; callers: Set<RefreshCaller>;
-  refresh?: { generation: number; promise: Promise<GrokTokens>; controller: AbortController };
+  refresh?: { generation: number; promise: Promise<GrokTokens> };
 };
 const credentialLifecycles = new WeakMap<CredentialStore, CredentialLifecycle>();
 function credentialLifecycle(store: CredentialStore): CredentialLifecycle {
@@ -282,25 +331,25 @@ export async function deleteSubscriptionTokens(store: CredentialStore): Promise<
 /** Inputs retain the original lifecycle identity when discovery memoizes its first credential read. */
 interface SubscriptionTokenInput {
   store: CredentialStore; fetch?: GrokFetch; now?: () => number;
+  /** Ceiling for one shared refresh, its request and body included; defaults to 30 seconds. */
+  timeoutMs?: number;
   lifecycleStore?: CredentialStore; onCredential?: (raw: string) => void;
 }
 
-/** Share renewal per original store and generation; cancellation detaches only this caller.
- * `onRenewal` fires once per physical refresh request this caller starts; joiners of a shared renewal never see it. */
-async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: AbortSignal, rejectedToken?: string, onRenewal?: () => void): Promise<string> {
+/** Share renewal per original store and generation; cancellation detaches only this caller, never a renewal already sent.
+ * `onRenewal` fires once per physical refresh request this caller starts, in the step that sends it, with a promise that
+ * settles once that renewal and its credential write have settled; joiners of a shared renewal never see it. */
+async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: AbortSignal, rejectedToken?: string, onRenewal?: (settled: Promise<void>) => void): Promise<string> {
   aborted(signal);
   const owner = input.lifecycleStore ?? input.store, state = credentialLifecycle(owner);
   const caller: RefreshCaller = { onCredential: input.onCredential };
-  // Register before any asynchronous read so an arriving caller can keep a shared renewal alive.
+  // Register before any asynchronous read so this caller hears of a renewal that lands while it waits.
   state.callers.add(caller);
-  const detach = () => {
-    state.callers.delete(caller);
-    if (!state.callers.size && state.refresh) {
-      const refresh = state.refresh;
-      state.refresh = undefined;
-      refresh.controller.abort();
-    }
-  };
+  // A renewal exists only once its request has left, and the provider may already have rotated the refresh
+  // token, so a caller that stops, catalog discovery included, detaches itself only: the renewal completes and
+  // stores its response unless a logout, a write fence or a sign-in that replaced the login refuses it, and later
+  // callers join it instead of resending.
+  const detach = () => { state.callers.delete(caller); };
   signal?.addEventListener("abort", detach, { once: true });
   const getToken = async (): Promise<string> => {
     aborted(signal);
@@ -311,7 +360,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
     const generation = state.generation;
     // Memoized route selection is reusable only before an in-process mutation or renewal.
     const currentStore = input.lifecycleStore && (generation !== 0 || state.refresh) ? owner : input.store;
-    const tokens = await raceAbort(loadSubscriptionTokens(currentStore, input.onCredential), signal);
+    const { tokens, raw: startedFrom } = await raceAbort(readSubscriptionLogin(currentStore, input.onCredential), signal);
     aborted(signal);
     if (generation !== state.generation) return getToken();
     if (!tokens) throw new Error(MISSING_GROK_SUBSCRIPTION);
@@ -320,36 +369,47 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       if (rejectedToken !== undefined ? tokens.accessToken !== rejectedToken : !subscriptionAccessExpired(tokens, (input.now ?? Date.now)())) return tokens.accessToken;
       if (!tokens.refreshToken) throw new Error("The Grok subscription session expired and has no refresh token. Sign in again in interactive mode with /login grok.");
       const refreshToken = tokens.refreshToken, controller = new AbortController();
-      // Ordinary execution retains its safety ceiling; discovery's earlier deadline detaches its interest.
-      const timer = setTimeout(() => controller.abort(new DOMException("Refresh timed out", "TimeoutError")), 30_000);
+      // Every renewal keeps this safety ceiling; a caller's earlier cancellation or deadline detaches only its wait.
+      const timer = setTimeout(() => controller.abort(new DOMException("Refresh timed out", "TimeoutError")), input.timeoutMs ?? 30_000);
       const promise = (async () => {
         let renewed: GrokTokens;
         try {
           renewed = await refreshSubscriptionTokens({ refreshToken, now: input.now, signal: controller.signal,
-            fetch: sendWithRefresh(countingRenewalFetch(input.fetch, onRenewal), controller.signal) });
+            fetch: sendWithRefresh(input.fetch, controller.signal) });
         } catch (error) {
           if (controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") throw new Error(grokRefreshFailedError("timed out"));
           throw error;
         }
         const merged = { ...renewed, refreshToken: renewed.refreshToken ?? refreshToken };
         for (const interested of state.callers) interested.onCredential?.(JSON.stringify(merged));
-        await serializeCredentialWrite(state, async () => {
+        const stored = await serializeCredentialWrite(state, async () => {
           controller.signal.throwIfAborted();
           if (state.generation !== generation) throw new Error(grokRevokedSessionError());
-          // A discovery wrapper belongs to one deadline; only the original store can serve all callers.
-          await writeTokens(owner, merged);
+          // Written only over the login this renewal started from, in the store's critical section where it has one,
+          // so a sign-in or another process's write that landed meanwhile wins. A discovery wrapper belongs to one
+          // deadline; only the original store can serve all callers.
+          let wrote: boolean;
+          try { wrote = await replaceCredential(owner, grokSubscriptionIdentity(), startedFrom!, JSON.stringify(merged)); }
+          catch (error) { throw preserveRefusal("save", error); }
+          if (!wrote) return loginStoredMeanwhile(owner, merged, input.now);
           if (state.generation !== generation) throw new Error(grokRevokedSessionError());
           state.generation++;
+          return merged;
         });
-        return merged;
+        if (stored !== merged) for (const interested of state.callers) interested.onCredential?.(JSON.stringify(stored));
+        return stored;
       })().finally(() => {
         clearTimeout(timer);
         if (state.refresh?.promise === promise) state.refresh = undefined;
       });
       // Cancellation can happen before a caller begins awaiting this shared promise.
       void promise.catch(() => {});
-      refresh = { generation, promise, controller };
+      refresh = { generation, promise };
       state.refresh = refresh;
+      // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
+      // the process from exiting before a rotated token is stored.
+      trackSentRenewal("grok", promise.then(() => true, () => false));
+      onRenewal?.(promise.then(() => {}, () => {}));
     }
     const renewed = await raceAbort(refresh.promise, signal);
     aborted(signal);
@@ -360,19 +420,36 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
   finally { signal?.removeEventListener("abort", detach); detach(); }
 }
 
+/** The login another writer stored while a renewal was in flight: the same rotated pair is that renewal's result, a
+ * different unexpired login is used instead, and anything else fails as a missing or revoked login. */
+async function loginStoredMeanwhile(store: CredentialStore, renewed: GrokTokens, now?: () => number): Promise<GrokTokens> {
+  let current: GrokTokens | null;
+  try { current = (await readSubscriptionLogin(store)).tokens; }
+  catch { throw new Error(grokRevokedSessionError()); }
+  if (!current) throw new Error(MISSING_GROK_SUBSCRIPTION);
+  if (current.accessToken === renewed.accessToken && current.refreshToken === renewed.refreshToken) return renewed;
+  if (!subscriptionAccessExpired(current, (now ?? Date.now)())) return current;
+  throw new Error(grokRevokedSessionError());
+}
+
 /** Share renewal per store while fencing refresh writes against logout and replacement sign-ins. */
-export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number }) {
-  return { getValidAccessToken: (signal?: AbortSignal, rejectedToken?: string, onRenewal?: () => void) => resolveSubscriptionToken(input, signal, rejectedToken, onRenewal) };
+export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number; timeoutMs?: number }) {
+  return { getValidAccessToken: (signal?: AbortSignal, rejectedToken?: string, onRenewal?: (settled: Promise<void>) => void) => resolveSubscriptionToken(input, signal, rejectedToken, onRenewal) };
 }
 /** Bounded refresh transport that sends in the same step that creates the shared renewal, so a renewal that exists has
  * always sent its one request and counted it for its creator. The bounded reader then consumes that same response. */
 function sendWithRefresh(fetchFn: GrokFetch | undefined, signal: AbortSignal): GrokFetch {
-  return (url, init) => {
+  return async (url, init) => {
     // Promise.resolve accepts an injected fetch that returns a Response directly, as the previous transport did.
     const sent = Promise.resolve((fetchFn ?? fetch)(url, { ...init, signal, redirect: "error" }));
     // An abandoned renewal may never read this response: observe its failure and release its body.
     sent.then(response => { if (signal.aborted) void response.body?.cancel().catch(() => {}); }, () => {});
-    return boundedCatalogFetch({ fetch: () => sent, signal, label: "Grok subscription" })(url, init);
+    const response = await abortableCatalogOperation(sent, signal);
+    // A refusal goes on unread: its classifier reads at most a short prefix, and only when the status needs it.
+    if (!response.ok) return response;
+    // A token response is read under the refresh ceiling and the 1 MiB bound.
+    const bytes = response.body ? await readModelCatalogBody(response, signal, "Grok subscription") : new Uint8Array();
+    return new Response(bytes.byteLength ? bytes : null, { status: response.status, headers: response.headers });
   };
 }
 async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
@@ -393,7 +470,8 @@ export async function fetchDiscoveryCatalog(input: {
   /** Register every selected credential read, including fresh reads after concurrent replacement. */
   onCredential?: (raw: string) => void;
 }): Promise<ModelListResult> {
-  const getToken = (rejectedToken?: string) => resolveSubscriptionToken(input, input.signal, rejectedToken);
+  // Discovery's deadline bounds only its wait: a renewal it sent still completes and stores the rotated token.
+  const getToken = (rejectedToken?: string) => resolveSubscriptionToken(input, input.signal, rejectedToken).catch((error: unknown) => { throw forListing(error); });
   let accessToken = await getToken();
   let authError: unknown;
   const authorizedFetch: GrokFetch = async (url, init) => {
