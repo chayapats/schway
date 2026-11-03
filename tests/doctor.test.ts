@@ -672,11 +672,11 @@ test("doctor reports Grok subscription states without contacting auth or consult
     const report = await diagnose({ cwd: workspace, env: { HOME: home, XAI_API_KEY: "billing" }, args: { ...args, provider: "xai", xaiAuth: "grok" }, store: { ...store(null), get: async identity => {
       if (identity.account === "api-key:anthropic") return null;
       expect(identity.account).toBe("grok-subscription:xai");
-      return state === "missing" ? null : state === "invalid" ? "malformed" : JSON.stringify({ accessToken: "private", obtainedAt: 0, ...(state !== "present" ? { expiresAt: Date.now() + 90_000 } : {}), ...(state === "refresh" ? { refreshToken: "refresh" } : {}) });
+      return state === "missing" ? null : state === "invalid" ? "malformed" : JSON.stringify({ accessToken: "grok-access-secret-sentinel", obtainedAt: 0, ...(state !== "present" ? { expiresAt: Date.now() + 90_000 } : {}), ...(state === "refresh" ? { refreshToken: "refresh" } : {}) });
     } } });
     expect(report.authSource).toBe("subscription");
     expect(check(report, "auth")?.status).toBe(state === "present" ? "ok" : state === "refresh" ? "warning" : "error");
-    expect(JSON.stringify(report)).not.toContain("private");
+    expect(JSON.stringify(report)).not.toContain("grok-access-secret-sentinel");
   }
 });
 
