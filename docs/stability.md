@@ -154,7 +154,10 @@ The additive `schway.host.effort/v1` slice also remains under
 exact effort support from the adapter's own policy. Route models accept listed
 account evidence and an opt-in exact effort pin; a pin the adapter would refuse
 or drop rejects `invalid-input` before any request, and a conflicting request is
-refused by identity and never retried. `HostDispatch` and `HostRunAttemptUsage`
+refused by identity and never retried. `classifyAuthError` maps a route-control
+refusal, by identity on the error or its `cause`, to `model-unavailable` with the
+refusal's message as `nextAction`; for the effort-conflict refusal this means the
+request disagreed with its own pin. `HostDispatch` and `HostRunAttemptUsage`
 report the effort requested, the exact control sent and, per attempt, what the
 response stated. Without the new options, request bytes and behavior are
 unchanged, and the CLI/TUI path is unchanged. This is a minor, additive host API
