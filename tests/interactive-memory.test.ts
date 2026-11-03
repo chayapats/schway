@@ -12,8 +12,8 @@ import { resolveWorkspace } from "../src/workspace/workspace.ts";
 import { withTempDir, buildIsolatedCliEnv } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
-// Each fresh interactive fixture process is killed at this bound (its exit draft save has a 4 s
-// budget inside it). A test's timeout covers all of its processes at this bound.
+// Each fixture process these tests spawn is killed at this bound (an interactive process's exit draft
+// save has a 4 s budget inside it). A test's timeout covers all of its processes at this bound.
 const FIXTURE_PROCESS_BOUND_MS = 8000;
 /** Test timeout for `processes` sequential fixture processes, each at its kill bound, plus in-process work. */
 const fixtureProcessesTimeout = (processes: number) => processes * FIXTURE_PROCESS_BOUND_MS + 5_000;
@@ -347,7 +347,7 @@ test("a live preference writer excludes contenders and SIGKILL releases ownershi
     const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interactive-memory-lock-owner.ts"), root], {
       cwd: join(import.meta.dir, ".."), env: buildIsolatedCliEnv(home), stdout: "pipe", stderr: "pipe",
     });
-    const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+    const timer = setTimeout(() => child.kill("SIGKILL"), FIXTURE_PROCESS_BOUND_MS);
     try {
       const reader = child.stdout.getReader();
       expect(new TextDecoder().decode((await reader.read()).value)).toContain("LOCKED");
@@ -369,7 +369,7 @@ test("a live preference writer excludes contenders and SIGKILL releases ownershi
       const forgotten = await launch(home, root); expect(forgotten.editor.settings.model).toBe(""); forgotten.controller.dispose();
     } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
   });
-}, 10000);
+}, fixtureProcessesTimeout(1));
 
 test("corrupt memory cannot choose a fallback route but complete explicit CLI settings remain authoritative", async () => {
   await withTempDir(async root => {

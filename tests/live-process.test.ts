@@ -1,5 +1,5 @@
 import Ajv from "ajv";
-import { expect, spyOn, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -16,10 +16,11 @@ const settings = (providers: Array<"compatible" | "openai-api-key">, timeoutMs =
   enabled: true, revision, timeoutMs, providers, env: {} as Record<string, string>,
 });
 // Real-time bounds nest so a stuck lane fails with its own message, never the test timeout:
-// a fixture barrier wait (5 s) < the lane backstop (15 s) < the lane test timeout (30 s).
-const BARRIER_WAIT_MS = 5_000;
+// a fixture barrier wait (6 s; two in sequence stay below the backstop) < the lane backstop (15 s)
+// < the lane test timeout (30 s).
+const BARRIER_WAIT_MS = 6_000;
 // Stops a stuck or abandoned lane, killing its process group and removing its workspace. It is far
-// beyond any lane's own sub-second work, so it never decides an outcome.
+// beyond any lane's own work, and a test fails whenever it fires, so it never decides an outcome.
 const LANE_BACKSTOP_MS = 15_000;
 // One backstop plus reaping, one barrier wait and the test's own work.
 const LANE_TEST_TIMEOUT_MS = 30_000;
@@ -31,22 +32,33 @@ const WORKER_BUDGET_MS = 60_000;
 const INSTALLED_BUDGET_MS = 10_000;
 /** Cover each installed run's budget plus reaping and start-up, so a stuck run reports before the test times out. */
 const installedTimeout = (runs: number) => runs * (INSTALLED_BUDGET_MS + 5_000) + 5_000;
-/** Lane deadlines that expire when a test advances them past an explicit barrier, or at the real-time backstop. */
+// Backstops that fired during the current test. A held lane must end through its explicit expiry
+// or its worker's own outcome; a backstop timeout could hide a broken supervisor deadline.
+let backstopsFired = 0;
+afterEach(() => {
+  const fired = backstopsFired;
+  backstopsFired = 0;
+  if (fired) throw Error(`${fired} held lane(s) ended at the real-time backstop`);
+});
+/** Lane deadlines that expire when a test advances them past an explicit barrier; the real-time backstop only cleans up a stuck lane, and fails its test. */
 const heldDeadline = () => {
   const clock = manualClock();
+  let fired = false;
   const sleep = (ms: number, signal: AbortSignal) => Promise.race([clock.sleep(ms, signal), new Promise<void>(resolve => {
-    const backstop = setTimeout(resolve, LANE_BACKSTOP_MS);
+    const backstop = setTimeout(() => { fired = true; backstopsFired++; resolve(); }, LANE_BACKSTOP_MS);
     signal.addEventListener("abort", () => clearTimeout(backstop), { once: true });
   })]);
-  return { clock: { now: clock.now, sleep }, expire: clock.advance };
+  return { clock: { now: clock.now, sleep }, expire: clock.advance, backstopFired: () => fired };
 };
-/** A lane only the real-time backstop can expire, so the worker's own behavior decides the outcome. */
+/** A held lane no test expires, so the worker's own behavior decides the outcome; its backstop only cleans up. */
 const backstopOnly = () => heldDeadline().clock;
-/** Expire a held lane once `barrier` passes or fails, so a failed barrier still stops the worker group and removes its workspace. */
-async function expireAfterBarrier<T>(pending: Promise<T>, deadline: { expire(ms: number): Promise<void> }, ms: number,
+/** Expire a held lane once `barrier` passes or fails, then require that this explicit expiry, not the backstop, ended it. */
+async function expireAfterBarrier<T>(pending: Promise<T>, deadline: ReturnType<typeof heldDeadline>, ms: number,
   barrier: () => Promise<unknown>): Promise<T> {
+  // Expiring on failure too still stops the worker group and removes its workspace.
   try { await barrier(); }
   finally { await deadline.expire(ms); await pending; }
+  if (deadline.backstopFired()) throw Error("held lane ended at its real-time backstop, not its explicit expiry");
   return pending;
 }
 const gone = (pid: number) => {
