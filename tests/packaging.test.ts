@@ -109,10 +109,10 @@ test("validating the release artifact does not publish it", async () => {
   const scriptText = Object.values(pkg.scripts).join("\n").toLowerCase();
   expect(scriptText.includes("npm publish")).toBe(false);
   expect(scriptText.includes("release")).toBe(false);
-  // Travis CI validates with typecheck and tests only; no registry publish or release step.
-  // URLs are stripped first so the pinned toolchain download does not trip the check.
-  const travis = await source(".travis.yml");
-  const lowered = travis.toLowerCase().replace(/https?:\/\/\S+/g, "");
+  // GitHub Actions validates with typecheck and tests only; no registry publish or release step.
+  // URLs are stripped first so a pinned toolchain download cannot trip the check.
+  const workflow = await source(".github/workflows/checks.yml");
+  const lowered = workflow.toLowerCase().replace(/https?:\/\/\S+/g, "");
   expect(/\bpublish\b/.test(lowered)).toBe(false);
   expect(/\brelease\b/.test(lowered)).toBe(false);
   expect(lowered.includes("typecheck")).toBe(true);
@@ -182,7 +182,6 @@ test("npm pack installs the public extension API and completes a headless tool r
     // Tests, CI config, and repo docs stay out of the installed artifact.
     expect(entries.some((entry) => entry.startsWith("package/tests/"))).toBe(false);
     expect(entries.some((entry) => entry.startsWith("package/.github/"))).toBe(false);
-    expect(entries.includes("package/.travis.yml")).toBe(false);
     expect(entries.includes("package/docs/releasing.md")).toBe(false);
     expect(entries.includes("package/docs/release-verification.md")).toBe(false);
     expect(entries.some((entry) => entry.startsWith("package/docs/demo/"))).toBe(false);
@@ -457,12 +456,13 @@ export default defineExtension(ctx => ctx.registerTool({
   });
 }, 180_000);
 
-test("travis commands have no unquoted YAML mapping inside list items", async () => {
-  // A `: ` inside an unquoted `- ` item parses as a mapping, not a command.
-  // That silently breaks the CI step (e.g. `echo "unsupported arch: ..."`).
-  const raw = await source(".travis.yml");
+test("CI workflow run steps have no unquoted YAML mapping in their commands", async () => {
+  // A `: ` inside an unquoted `run:` value parses as a nested mapping, not a command,
+  // which silently breaks the step (e.g. `echo "unsupported arch: ..."`).
+  const raw = await source(".github/workflows/checks.yml");
   const suspicious = raw
     .split("\n")
-    .filter((line) => /^  - [^'\"]/.test(line) && line.includes(": "));
+    .map((line) => /^\s*(?:- )?run: (.*)$/.exec(line)?.[1])
+    .filter((value): value is string => value !== undefined && !/^['"|>]/.test(value) && value.includes(": "));
   expect(suspicious).toEqual([]);
 });
