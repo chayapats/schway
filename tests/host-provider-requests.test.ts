@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { checkAuthReadiness, createHost, createHostCredentialLifecycle, HostError, type HostOptions, type HostProgressEvent, type Model } from "schway/host";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, type CredentialStore } from "../src/auth/store.ts";
+import { refreshSubscriptionTokens as refreshGrokTokens } from "../src/model/providers/grok-subscription.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
@@ -373,7 +374,7 @@ test("a redirected codex refresh is one counted renewal request and never reache
       // submit (and the CLI) show the fixed refresh message, never the transport text or token URL.
       const submitted = await session.submit({ text: "renew again" }, await host.auth!.createModel(), { clock: fastClock });
       if (submitted.outcome !== "error") throw new Error("expected error");
-      expect(submitted.error.message).toBe("The ChatGPT subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later.");
+      expect(submitted.error.message).toBe("The ChatGPT subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later; Schway never falls back to API-key billing after explicit chatgpt selection.");
       expect(tokenPosts).toBe(2);
       expect(redirected).toBe(0);
       await session.close(); await host.close();
@@ -381,43 +382,77 @@ test("a redirected codex refresh is one counted renewal request and never reache
   });
 });
 
-/** A response whose body stays open until the request is aborted, like a healthy stream mid-answer. */
-function openStream(init?: RequestInit): Response {
+/** A response that sends `prefix`, then stays open until the request is aborted, like a healthy stream mid-answer. */
+function openStream(init: RequestInit | undefined, prefix: string): Response {
   const body = new ReadableStream<Uint8Array>({ start(controller) {
+    controller.enqueue(new TextEncoder().encode(prefix));
     init?.signal?.addEventListener("abort", () => controller.error(new DOMException("Aborted", "AbortError")), { once: true });
   } });
   return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
 }
+const partialAnswer = (route: Route) => route === "codex"
+  ? `${[{ type: "response.created", response: { id: "r", status: "in_progress" } }, { type: "response.output_text.delta", output_index: 0, delta: "partial" }].map(event => `data: ${JSON.stringify(event)}\n\n`).join("")}`
+  : encodeXaiSse(XAI_TEXT_EVENTS.slice(0, 3));
 
-// Codex reports a 5xx without a status, so the loop retries only Grok's; the retried variant uses Grok.
+// Codex reports a 5xx without a status, so the loop retries only Grok's; the retried variants use Grok.
 for (const [route, failFirst] of [["codex", false], ["grok", false], ["grok", true]] as const) {
-  test(`a ${route} deadline mid-stream reports ${failFirst ? "the observed provider failure" : "the admission verdict"}`, async () => {
+  test(`a ${route} deadline mid-answer reports the admission verdict${failFirst ? " after a recovered retry" : ""}`, async () => {
     await withTempDir(async dir => {
       const store = fakeCredentialStore(); await store.set(identityFor(route), valid());
-      const streaming = Promise.withResolvers<void>();
+      const answering = Promise.withResolvers<void>();
       let requests = 0;
       const fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
         requests++;
         if (failFirst && requests === 1) return new Response("busy", { status: 503 });
-        streaming.resolve();
-        return openStream(init);
+        return openStream(init, partialAnswer(route));
       }) as never;
       const host = await createHost(await options(dir, { route, model: modelFor(route), store, fetch }));
       const session = await host.createSession();
       const deadline = deadlineClock();
-      const pending = session.submitWithRoute({ text: "long answer" }, { clock: deadline.clock });
-      await streaming.promise;
+      const progress: HostProgressEvent[] = [];
+      const pending = session.submitWithRoute({ text: "long answer" }, { clock: deadline.clock, onProgress: event => {
+        progress.push(event);
+        if (event.type === "delta") answering.resolve();
+      } });
+      await answering.promise;
       deadline.fire();
       const run = await pending;
       expect(run.outcome).toBe("limit_exceeded");
       if (!("auth" in run)) throw new Error("expected auth detail");
-      // A deadline alone is not evidence the route is unreachable; a retried 503 still is.
-      expect(run.auth.status).toBe(failFirst ? "integration-unavailable" : "configured-unverified");
+      // A deadline is not evidence of an unreachable route, and a recovered retry is no longer evidence either.
+      expect(run.auth.status).toBe("configured-unverified");
+      expect(progress.filter(event => event.type === "retry")).toHaveLength(failFirst ? 1 : 0);
       expect(run.usage.providerRequests).toEqual({ initialSends: requests, authRetrySends: 0, renewalRequests: 0 });
       await session.close(); await host.close();
     });
   });
 }
+
+test("a deadline during backoff after a retried failure reports that failure", async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore(); await store.set(grokSubscriptionIdentity(), valid());
+    let requests = 0;
+    const fetch = (async () => { requests++; return new Response("busy", { status: 503 }); }) as never;
+    const host = await createHost(await options(dir, { route: "grok", model: "grok-4.7", store, fetch }));
+    const session = await host.createSession();
+    const backingOff = Promise.withResolvers<void>(), fire = Promise.withResolvers<void>();
+    // Backoff waits for abort, so the retried 503 is the last thing observed when the deadline fires.
+    const clock = { now: () => Date.now(), sleep: (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+      if (ms < 60_000) backingOff.resolve(); else void fire.promise.then(() => resolve());
+      signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }) };
+    const pending = session.submitWithRoute({ text: "flaky" }, { clock });
+    await backingOff.promise;
+    fire.resolve();
+    const run = await pending;
+    expect(run.outcome).toBe("limit_exceeded");
+    if (!("auth" in run)) throw new Error("expected auth detail");
+    expect(run.auth.status).toBe("integration-unavailable");
+    expect(requests).toBe(1);
+    expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 0 });
+    await session.close(); await host.close();
+  });
+});
 
 test("a stream that aborts on its own leaves the run signal live, so the settling read runs", async () => {
   await withTempDir(async dir => {
@@ -436,5 +471,50 @@ test("a stream that aborts on its own leaves the run signal live, so the settlin
     // Admission, the adapter's credential, then the settling read.
     expect(store.reads).toBe(3);
     await session.close(); await host.close();
+  });
+});
+
+const GROK_REFRESH_REDIRECT = "The Grok subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later; Schway never falls back to xAI API-key billing.";
+
+test("a redirected grok refresh reports a fixed message on every path and one counted renewal", async () => {
+  await withTempDir(async dir => {
+    let tokenPosts = 0, redirected = 0, inference = 0;
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+      if (new URL(request.url).pathname === "/elsewhere") { redirected++; return Response.json({ access_token: "fresh", expires_in: 3600 }); }
+      tokenPosts++;
+      return new Response(null, { status: 307, headers: { Location: "/elsewhere" } });
+    } });
+    try {
+      // The direct refresh, as the CLI calls it.
+      const direct = await refreshGrokTokens({ refreshToken: "redirect-refresh", fetch: (_input, init) => globalThis.fetch(new URL("/oauth2/token", server.url), init) })
+        .then(() => undefined, (error: unknown) => error as Error);
+      expect(direct?.message).toBe(GROK_REFRESH_REDIRECT);
+      expect(tokenPosts).toBe(1);
+
+      const store = fakeCredentialStore();
+      await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "stale", refreshToken: "redirect-refresh", obtainedAt: 1, expiresAt: 1 }));
+      const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        if (isToken(input)) return globalThis.fetch(new URL("/oauth2/token", server.url), init);
+        inference++;
+        return xaiSse();
+      }) as never;
+      const host = await createHost(await options(dir, { route: "grok", model: "grok-4.7", store, fetch }));
+      const session = await host.createSession();
+      const progress: HostProgressEvent[] = [];
+      const run = await session.submitWithRoute({ text: "renew" }, { clock: fastClock, onProgress: event => progress.push(event) });
+      expect(run.outcome).toBe("error");
+      expect(tokenPosts).toBe(2);
+      expect(redirected).toBe(0);
+      expect(inference).toBe(0);
+      expect(progress.filter(event => event.type === "retry")).toHaveLength(0);
+      expect(run.usage.providerRequests).toEqual({ initialSends: 0, authRetrySends: 0, renewalRequests: 1 });
+      if (!("auth" in run)) throw new Error("expected auth detail");
+      expect(run.auth.status).toBe("integration-unavailable");
+      expect(run.auth.nextAction).toBe("The Grok subscription answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing.");
+      const submitted = await session.submit({ text: "renew again" }, await host.auth!.createModel(), { clock: fastClock });
+      if (submitted.outcome !== "error") throw new Error("expected error");
+      expect(submitted.error.message).toBe(GROK_REFRESH_REDIRECT);
+      await session.close(); await host.close();
+    } finally { server.stop(true); }
   });
 });

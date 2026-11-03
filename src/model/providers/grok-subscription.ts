@@ -3,7 +3,7 @@ import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, type C
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
 import { boundedCatalogFetch, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { GROK_CHALLENGE_ERROR, GROK_QUOTA_ERROR } from "../grok-errors.ts";
-import { countingRenewalFetch } from "../dispatch.ts";
+import { countingRenewalFetch, isRefusedRedirect, redirectRefusal } from "../dispatch.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -86,8 +86,10 @@ async function formRequest(url: string, fields: Record<string, string>, options:
   try {
     const response = await (options.fetch ?? fetch)(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ client_id: GROK_CLIENT_ID, ...fields }).toString(), redirect: "error", signal: options.signal });
     aborted(options.signal); return response;
-  } catch { aborted(options.signal); throw new Error("The Grok sign-in endpoint could not be reached. Retry /login grok."); }
+  } catch (error) { aborted(options.signal); throw new Error("The Grok sign-in endpoint could not be reached. Retry /login grok.", { cause: error }); }
 }
+/** Sanitized refresh failure when the token endpoint answers with a redirect, which refresh never follows. */
+const GROK_REFRESH_REDIRECT_ERROR = "The Grok subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later; Schway never falls back to xAI API-key billing.";
 async function payload(response: Response, signal?: AbortSignal): Promise<Record<string, unknown>> {
   try { const value: unknown = await response.json(); aborted(signal); if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>; }
   catch { aborted(signal); }
@@ -103,7 +105,12 @@ export async function exchangeCodeForTokens(input: { code: string; verifier: str
 export async function refreshSubscriptionTokens(input: { refreshToken: string; fetch?: GrokFetch; signal?: AbortSignal; now?: () => number }): Promise<GrokTokens> {
   let response: Response;
   try { response = await formRequest(GROK_TOKEN_URL, { grant_type: "refresh_token", refresh_token: input.refreshToken, referrer: GROK_REFERRER }, input); }
-  catch { aborted(input.signal); throw new Error(grokRefreshFailedError("connection failed")); }
+  catch (error) {
+    aborted(input.signal);
+    // The endpoint answered; report that without the transport's raw text or the token URL.
+    if (isRefusedRedirect(error)) throw redirectRefusal(GROK_REFRESH_REDIRECT_ERROR);
+    throw new Error(grokRefreshFailedError("connection failed"));
+  }
   if ([400, 401, 403].includes(response.status)) throw new Error(grokRevokedSessionError());
   if (!response.ok) throw new Error(grokRefreshFailedError(`HTTP ${response.status}`));
   try { return tokensFromPayload(await payload(response, input.signal), (input.now ?? Date.now)()); }

@@ -528,3 +528,19 @@ test("grok 401, renewal, then a redirected resend is one authorized resend that 
     } finally { server.stop(true); }
   });
 });
+
+test("provider text echoing the redirect wording never gets the redirect guidance", async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore(); await seed(store, "codex");
+    const wire = transport("codex", { inference: [() => new Response("edge: The ChatGPT subscription answered with an HTTP redirect.", { status: 400 })] });
+    const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch: wire.fetch }));
+    const session = await host.createSession();
+    const run = await session.submitWithRoute({ text: "echo" }, { clock: fastClock });
+    expect(run.outcome).toBe("error");
+    if (!("auth" in run)) throw new Error("expected auth detail");
+    expect(run.auth.nextAction).not.toContain("answered with an HTTP redirect");
+    const selection = { route: "codex" as const, model: "gpt-5.4" };
+    expect(classifyAuthError(new Error("The ChatGPT subscription answered with an HTTP redirect."), selection).nextAction).not.toContain("redirect");
+    await session.close(); await host.close();
+  });
+});

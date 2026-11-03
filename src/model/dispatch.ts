@@ -80,7 +80,22 @@ export function isRefusedRedirect(error: unknown): boolean {
   return chain.some(item => (item as { code?: unknown }).code === "UnexpectedRedirect");
 }
 
+// Schway's own refused-redirect errors, so classification never trusts text a provider could echo.
+const redirects = new WeakSet<Error>();
+
+/** Create one of Schway's own refused-redirect failures, recognized later by identity only. @internal */
+export function redirectRefusal(message: string): Error {
+  const error = new Error(message);
+  redirects.add(error);
+  return error;
+}
+
+/** True when the error or an error it wraps as `cause` is a refused-redirect failure Schway created. @internal */
+export function hasRedirectRefusal(error: unknown): boolean {
+  return causeChain(error).some(item => item instanceof Error && redirects.has(item));
+}
+
 /** Sanitized, non-transient failure for a route send whose endpoint answered with a redirect; no URL or transport text. @internal */
 export function redirectRefusedError(label: string): Error {
-  return new Error(`The ${label} answered with an HTTP redirect. Route requests never follow redirects, so the request was not resent. Retry later.`);
+  return redirectRefusal(`The ${label} answered with an HTTP redirect. Route requests never follow redirects, so the request was not resent. Retry later.`);
 }

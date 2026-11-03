@@ -19,7 +19,7 @@ import type {
   ModelTool,
   ThinkingLevel,
 } from "../model.ts";
-import { countingRenewalFetch, isRefusedRedirect, providerDispatch, redirectRefusedError } from "../dispatch.ts";
+import { countingRenewalFetch, isRefusedRedirect, providerDispatch, redirectRefusal, redirectRefusedError } from "../dispatch.ts";
 import {
   CODEX_SUBSCRIPTION_LABEL,
   codexSubscriptionIdentity,
@@ -429,7 +429,7 @@ export async function exchangeCodeForTokens(input: {
 }
 
 /** Sanitized refresh failure when the token endpoint answers with a redirect, which refresh never follows. */
-const CODEX_REFRESH_REDIRECT_ERROR = "The ChatGPT subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later.";
+const CODEX_REFRESH_REDIRECT_ERROR = "The ChatGPT subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later; Schway never falls back to API-key billing after explicit chatgpt selection.";
 
 /** Renew short-lived access with the offline_access refresh token in one transport attempt. */
 export async function refreshSubscriptionTokens(input: {
@@ -456,7 +456,7 @@ export async function refreshSubscriptionTokens(input: {
   } catch (error) {
     throwIfAborted(input.signal);
     // The endpoint answered; report that without the transport's raw text or the token URL.
-    if (isRefusedRedirect(error)) throw new Error(CODEX_REFRESH_REDIRECT_ERROR);
+    if (isRefusedRedirect(error)) throw redirectRefusal(CODEX_REFRESH_REDIRECT_ERROR);
     throw new Error(codexRefreshFailedError(messageOf(error)));
   }
   throwIfAborted(input.signal);

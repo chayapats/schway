@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Model, ModelCallOptions } from "../model/model.ts";
-import { dispatchRefusedError, withProviderDispatch, type ProviderDispatch } from "../model/dispatch.ts";
+import { dispatchRefusedError, hasRedirectRefusal, withProviderDispatch, type ProviderDispatch } from "../model/dispatch.ts";
 import type { HostAuthRoute } from "./auth-routes.ts";
 import type { HostProviderRequests } from "./index.ts";
 import { HostError } from "./index.ts";
@@ -48,7 +48,7 @@ export function routeModelOptions(input: unknown): HostRouteModelOptions {
   return authorize === undefined ? {} : { authorizeDispatch: authorize as HostDispatchAuthorizer };
 }
 
-type RunState = { initialSends: number; authRetrySends: number; renewalRequests: number; unobserved: boolean; lastSendRefused: boolean };
+type RunState = { initialSends: number; authRetrySends: number; renewalRequests: number; unobserved: boolean; lastSendRefused: boolean; lastRedirectRefused: boolean };
 type CallMeter = { attached: boolean; readonly state: RunState };
 const RUN_METER = Symbol("schway.host.runMeter");
 type MeteredCall = ModelCallOptions & { readonly [RUN_METER]?: CallMeter };
@@ -61,15 +61,18 @@ export interface RunMeter {
   snapshot(): HostProviderRequests | null;
   /** True when the most recent model call ended on a refused dispatch; each new call clears it. */
   readonly lastSendRefused: boolean;
+  /** True when the most recent model call ended on one of Schway's refused redirects; each new call clears it. */
+  readonly lastRedirectRefused: boolean;
 }
 
 /** Start exact accounting for one run; zero model calls report zero requests. @internal */
 export function createRunMeter(): RunMeter {
-  const state: RunState = { initialSends: 0, authRetrySends: 0, renewalRequests: 0, unobserved: false, lastSendRefused: false };
+  const state: RunState = { initialSends: 0, authRetrySends: 0, renewalRequests: 0, unobserved: false, lastSendRefused: false, lastRedirectRefused: false };
   return {
     begin(call) {
       // A refusal belongs to its own call: a later call that fails before sending reports its own failure.
       state.lastSendRefused = false;
+      state.lastRedirectRefused = false;
       const meter: CallMeter = { attached: false, state };
       return { call: { ...call, [RUN_METER]: meter } as MeteredCall, settle() { if (!meter.attached) state.unobserved = true; } };
     },
@@ -77,6 +80,7 @@ export function createRunMeter(): RunMeter {
       return state.unobserved ? null : Object.freeze({ initialSends: state.initialSends, authRetrySends: state.authRetrySends, renewalRequests: state.renewalRequests });
     },
     get lastSendRefused() { return state.lastSendRefused; },
+    get lastRedirectRefused() { return state.lastRedirectRefused; },
   };
 }
 
@@ -127,6 +131,8 @@ export function dispatchRouteModel(model: Model, route: HostAuthRoute, authorize
       },
       renewal() { if (meter) meter.state.renewalRequests++; },
     };
-    yield* stream(request, withProviderDispatch(call, hooks));
+    // The loop keeps only the message, so the run learns of Schway's own redirect failures here, by identity.
+    try { yield* stream(request, withProviderDispatch(call, hooks)); }
+    catch (error) { if (meter && hasRedirectRefusal(error)) meter.state.lastRedirectRefused = true; throw error; }
   } } as Model);
 }

@@ -2,7 +2,7 @@ import type { Model } from "../model/model.ts";
 import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 import { dispatchRouteModel, routeModelOptions, type HostRouteModelOptions } from "./dispatch.ts";
-import { hasDispatchRefusal } from "../model/dispatch.ts";
+import { hasDispatchRefusal, hasRedirectRefusal } from "../model/dispatch.ts";
 import { HostError } from "./index.ts";
 
 export { isCleanupUncertain, isCredentialWriteRefused };
@@ -375,7 +375,8 @@ function errorText(error: unknown): string {
  * Classification is message- and category-based: provider adapters throw sanitized
  * plain messages (and the loop drops transport status), so status-less bodies must
  * still hit their documented category through these patterns. A dispatch refusal is
- * recognized only by identity, directly or as a `cause`, so echoed refusal wording never reads as `dispatch-refused`. */
+ * recognized only by identity, directly or as a `cause`, so echoed refusal wording never reads as `dispatch-refused`;
+ * Schway's own refused-redirect failures are recognized the same way. */
 export function classifyAuthError(error: unknown, selection: HostAuthSelection): HostAuthReadiness {
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
@@ -429,8 +430,8 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
     return { ...base, status: "model-unavailable",
       nextAction: `Model ${valid.model} is not available on this subscription. Choose a listed model for this route.` };
   }
-  // The endpoint answered, so this is not "could not reach"; route sends never follow the redirect.
-  if (/answered with an HTTP redirect/.test(text)) {
+  // The endpoint answered, so this is not "could not reach". Identity only: echoed provider text never matches.
+  if (hasRedirectRefusal(error)) {
     return { ...base, status: "integration-unavailable",
       nextAction: valid.route === "codex"
         ? "The ChatGPT subscription answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing."

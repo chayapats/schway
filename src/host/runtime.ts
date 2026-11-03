@@ -32,7 +32,7 @@ import { imageProbeRecords, type HostImageRoute } from "./image-input.ts";
 import { managedSessionInventory, type HostSessionInventoryOptions } from "./session-inventory.ts";
 import { acquireCredentialLifecycle, type CredentialLifecycleLease } from "./credential-lifecycle.ts";
 import { createRunMeter, type HostDispatchAuthorizer, type RunMeter } from "./dispatch.ts";
-import { DISPATCH_REFUSED_MESSAGE, dispatchRefusedError } from "../model/dispatch.ts";
+import { DISPATCH_REFUSED_MESSAGE, dispatchRefusedError, redirectRefusedError } from "../model/dispatch.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
@@ -555,8 +555,10 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               signal, webSearch: "off", exactTools: true, clock })) {
               const seen = observe(event, report, collect);
               if (seen.reason) reason = seen.reason;
-              // A retried provider failure is evidence too, even when the deadline ends its backoff.
+              // A retried provider failure is evidence too, even when the deadline ends its backoff,
+              // until a later attempt streams or completes and shows the route answering again.
               if (event.type === "model.retry") lastRetry = new Error(event.message);
+              else if (event.type === "model.delta" || event.type === "model.finished" || (event.type === "model.usage" && event.complete)) lastRetry = undefined;
               if (event.type === "error") {
                 // Provider errors arrive as sanitized plain messages without status,
                 // so route classification stays message- and category-based (see classifyAuthError).
@@ -615,6 +617,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           }
           // A refused last send ends the run even when the loop's final message names a later consequence.
           if (meter.lastSendRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(dispatchRefusedError(), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+          // The loop keeps only the message; the meter saw Schway's own redirect failure by identity.
+          if (meter.lastRedirectRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(redirectRefusedError("route"), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
           const auth = classifyAuthError(lastError ?? new Error("Provider request failed"), authSelection);
           // Preserve retry category when the sanitized message alone is ambiguous.
           if (auth.status === "integration-unavailable" && typeof lastCategory === "string") {
