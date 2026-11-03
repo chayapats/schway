@@ -180,6 +180,22 @@ structural `HostDispatch`, `HostRunAttemptUsage`, `HostModelChoice`,
 `HostAuthDescription` or `HostCapabilities` values must add the new fields. See
 [host contracts](host.md#output-caps).
 
+The additive `schway.host.route-renewal/v1` slice also remains under
+`schway.host.release/v2`. `HostAuthBinding.renew()` and `renewAuthRoute()` renew
+the selected route's credential at most once, through its existing refresher,
+without inference, catalog requests or route, model and billing changes. They
+report `fresh`, `renewed`, `failed`, `cancelled` or `limit_exceeded` with the
+token requests the call started and a model-free route status. Renewal shares the
+route's single-flight renewal, write guard and lifecycle fencing with runs, and a
+shared request is counted once. Failures keep the route-run classification. A
+stopped renewal settles promptly and never stores a late token response. Listing
+guidance for an expired login now names this renewal instead of a route-bound
+request. Run, listing and readiness behavior and request bytes are otherwise
+unchanged, and the CLI/TUI path is unchanged. This is a minor, additive host API
+change. Consumers that construct structural `HostAuthBinding` or
+`HostCapabilities` values must add the new members. See
+[host contracts](host.md#explicit-route-renewal).
+
 ## Core tool semantics
 
 The core tools are `read`, `write`, `edit`, `bash`, `web_fetch`, `grep`, `find`

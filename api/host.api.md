@@ -240,6 +240,7 @@ export interface HostAuthBinding {
     readonly credential: HostCredentialReference;
     // (undocumented)
     readonly model: string;
+    renew(options?: HostRouteRenewalOptions): Promise<HostRouteRenewal>;
     // (undocumented)
     readonly route: HostAuthRoute;
 }
@@ -354,6 +355,7 @@ export interface HostCapabilities {
     readonly providerRequestsContract: "schway.host.provider-requests/v1";
     // (undocumented)
     readonly releaseContract: "schway.host.release/v2";
+    readonly routeRenewalContract: "schway.host.route-renewal/v1";
     // (undocumented)
     readonly runContract: "schway.host.run-control/v1";
     // (undocumented)
@@ -755,6 +757,22 @@ export type HostRouteModels = {
 };
 
 // @public
+export interface HostRouteRenewal {
+    readonly auth: HostRouteRenewalStatus;
+    readonly outcome: "fresh" | "renewed" | "failed" | "cancelled" | "limit_exceeded";
+    readonly renewalRequests: 0 | 1;
+}
+
+// @public
+export interface HostRouteRenewalOptions {
+    readonly deadlineMs?: number;
+    readonly signal?: AbortSignal;
+}
+
+// @public
+export type HostRouteRenewalStatus = Omit<HostAuthReadiness, "model">;
+
+// @public
 export interface HostRouteRunOptions extends HostRunOptions {
     readonly authorizeDispatch?: HostDispatchAuthorizer;
 }
@@ -1115,6 +1133,9 @@ export type ProviderMetadata = Record<string, unknown>;
 
 // @public
 export const RELEASE_CONTRACT: "schway.host.release/v2";
+
+// @public
+export function renewAuthRoute(selection: Omit<HostAuthSelection, "model">, options?: HostRouteRenewalOptions): Promise<HostRouteRenewal>;
 
 // @public
 export interface SearchProvider {

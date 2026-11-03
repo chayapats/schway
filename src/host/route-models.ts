@@ -97,7 +97,7 @@ export async function listRouteModels(selection: Omit<HostAuthSelection, "model"
   });
   if (refreshBlocked) {
     if (guardRefused) return failure("store-unavailable", "The embedding application's credential fence refused renewal. Retry listing after the fence allows the normal route to renew credentials.");
-    return failure("needs-login", "Renew the subscription through sign-in or a normal route-bound request, then retry listing models. Catalog requests never renew or write credentials.");
+    return failure("needs-login", "Renew the route credential, which sends no inference, or sign in again. Then retry listing models. Catalog requests never renew or write credentials.");
   }
   if (result.error) {
     if (/invalid JSON|invalid model list|Could not read|exceeds|timed out|Could not reach/i.test(result.error)) {

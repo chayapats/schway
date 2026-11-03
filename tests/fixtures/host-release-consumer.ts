@@ -10,6 +10,7 @@ import {
   describeAuthRoute,
   isDispatchRefused,
   listRouteModels,
+  renewAuthRoute,
   credentialReferenceForRoute,
   validateSnapshotShape,
   hashSnapshotBytes,
@@ -31,6 +32,7 @@ type Input =
   | { action: "release"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string; restoreDirectory: string }
   | { action: "codex-route" | "grok-route"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
+  | { action: "route-renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "inventory"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "dispatch"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "core-tools" | "web-tools"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
@@ -430,6 +432,62 @@ if (input.action === "capabilities") {
   await host.close();
   await peer.close(); await lifecycle.close();
   console.log(JSON.stringify({ outcome: "completed", refreshes, inferences }));
+} else if (input.action === "route-renewal") {
+  // A pinned host that starts after token expiry: renew without inference, then list and run with an exact effort pin.
+  const { route, workspaceRoot, homeDirectory, sessionDirectory } = input;
+  const modelId = route === "codex" ? "gpt-6-luna" : "grok-4.7";
+  const level = route === "codex" ? "high" : "low";
+  const store = fakeStore();
+  await store.set(credentialReferenceForRoute(route), JSON.stringify({
+    accessToken: `${route}-expired-token`, refreshToken: `${route}-refresh-token`, obtainedAt: 1, expiresAt: 1,
+  }));
+  const lifecycle = createHostCredentialLifecycle({ store });
+  const counts = { token: 0, catalog: 0, inference: 0 };
+  const efforts: Array<string | null> = [];
+  const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const target = String(url);
+    if (target.includes("/oauth/token") || target.includes("auth.x.ai")) {
+      counts.token++;
+      return Response.json({ access_token: `${route}-renewed-token`, refresh_token: `${route}-refresh-token`, expires_in: 3600 });
+    }
+    if (init?.method === "GET") {
+      counts.catalog++;
+      return Response.json(route === "codex"
+        ? { models: [{ slug: modelId, visibility: "list", supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }], default_reasoning_level: "low" }] }
+        : { data: [{ id: modelId, supported_reasoning_levels: ["low", "high"], default_reasoning_effort: "high" }] });
+    }
+    counts.inference++;
+    const body = JSON.parse(String(init?.body ?? "{}")) as { reasoning?: { effort?: string } };
+    efforts.push(body.reasoning?.effort ?? null);
+    return route === "codex" ? codexOk() : grokOk();
+  }) as never;
+  const selection = { route, lifecycle, fetch, env: { OPENAI_API_KEY: "billing-bait", XAI_API_KEY: "billing-bait" } };
+  const host = await createHost({
+    workspaceRoot, homeDirectory, sessionDirectory,
+    context: { policy: "strict", systemPrompt: "Release route renewal probe", sections: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
+    limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 },
+    auth: { ...selection, model: modelId },
+  });
+  const stuck = await listRouteModels(selection);
+  const renewal = await host.auth!.renew({ deadlineMs: 10_000 });
+  const afterRenewal = { ...counts };
+  const again = await renewAuthRoute(selection);
+  const listing = await listRouteModels(selection);
+  if (listing.status !== "listed") throw new Error(`Expected a listing after renewal, got ${listing.status}`);
+  const choice = listing.models.find((model) => model.id === modelId);
+  if (!choice) throw new Error("Expected the bound model in the listing");
+  const session = await host.createSession();
+  const run = await session.submit({ text: "pinned" }, await host.auth!.createModel({ catalogModel: choice, effort: { level, mode: "exact" } }));
+  const combined = JSON.stringify([stuck, renewal, again, listing, run]);
+  for (const secret of [`${route}-expired-token`, `${route}-renewed-token`, `${route}-refresh-token`, "billing-bait"]) {
+    if (combined.includes(secret)) throw new Error("Credential material leaked into a renewal result");
+  }
+  await session.close();
+  await host.close();
+  await lifecycle.close();
+  console.log(JSON.stringify({ contract: hostCapabilities().routeRenewalContract, stuck: stuck.status, renewal, afterRenewal,
+    again: again.outcome, listed: listing.status, run: run.outcome, providerRequests: run.usage.providerRequests, counts, efforts }));
 } else if (input.action === "core-tools") {
   const { workspaceRoot, homeDirectory, sessionDirectory } = input;
   if (hostCapabilities().coreToolsContract !== CORE_TOOLS_CONTRACT) throw new Error("Missing core-tools contract");

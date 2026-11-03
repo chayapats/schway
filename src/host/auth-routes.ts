@@ -277,7 +277,8 @@ export interface HostReadinessOptions {
 
 const MAX_READINESS_DEADLINE_MS = 86_400_000;
 
-function readinessBounds(input: unknown): HostReadinessOptions {
+/** Validate a `{ signal, deadlineMs }` bound, rejecting `invalid-input` for any other shape. @internal */
+export function readinessBounds(input: unknown): HostReadinessOptions {
   if (input === undefined) return {};
   if (typeof input !== "object" || input === null || Array.isArray(input) ||
       Object.keys(input).some(key => key !== "signal" && key !== "deadlineMs")) throw new HostError("invalid-input");
@@ -315,36 +316,47 @@ export async function checkAuthReadiness(selection: HostAuthSelection, options?:
 
 /** Read and parse the selected identity, stopping after the read once the caller has settled. */
 async function readiness(selection: HostAuthSelection, abandoned: () => boolean): Promise<HostAuthReadiness> {
+  return (await routeCredentialState(selection, abandoned)).readiness;
+}
+
+/** Readiness of the selected identity and whether its access is expired or inside the refresh skew with a refresh token to renew it.
+ * Reads through `store` (the selection's effective store by default); after an abandoned read it throws `AbortError`
+ * without parsing or loading an adapter. @internal */
+export async function routeCredentialState(selection: HostAuthSelection, abandoned: () => boolean, store?: CredentialStore): Promise<{ readiness: HostAuthReadiness; renewalDue: boolean }> {
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
   const base = { route: valid.route, model: valid.model, credential, observedInference: "not-checked" as const };
+  const settled = (readiness: HostAuthReadiness, renewalDue = false) => ({ readiness, renewalDue });
   // Memoize on the caller selection identity, not the validated copy, so one
   // runtime shares one default native store across readiness and model runs.
-  const store = effectiveStore(selection);
+  const source = store ?? effectiveStore(selection);
   const identity = valid.route === "codex" ? codexSubscriptionIdentity() : grokSubscriptionIdentity();
   let raw: string | null;
   try {
-    raw = await store.get(identity);
+    raw = await source.get(identity);
   } catch {
-    return { ...base, status: "store-unavailable", nextAction: storeUnavailableAction() };
+    return settled({ ...base, status: "store-unavailable", nextAction: storeUnavailableAction() });
   }
   // An abandoned check never parses, loads an adapter or acts on the late value; its caller already settled.
   if (abandoned()) throw new DOMException("The readiness check was aborted.", "AbortError");
-  if (!raw?.trim()) return { ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) };
+  if (!raw?.trim()) return settled({ ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) });
+  let expired: boolean;
   try {
+    let refreshToken: string | undefined;
     if (valid.route === "codex") {
       const { parseSubscriptionTokens, subscriptionAccessExpired } = await import("../model/providers/codex-subscription.ts");
       const tokens = parseSubscriptionTokens(raw);
-      if (subscriptionAccessExpired(tokens) && !tokens.refreshToken) return { ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) };
+      ({ refreshToken } = tokens); expired = subscriptionAccessExpired(tokens);
     } else {
       const { parseSubscriptionTokens, subscriptionAccessExpired } = await import("../model/providers/grok-subscription.ts");
       const tokens = parseSubscriptionTokens(raw);
-      if (subscriptionAccessExpired(tokens) && !tokens.refreshToken) return { ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) };
+      ({ refreshToken } = tokens); expired = subscriptionAccessExpired(tokens);
     }
+    if (expired && !refreshToken) return settled({ ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) });
   } catch {
-    return { ...base, status: "invalid-store", nextAction: invalidStoreAction(valid.route) };
+    return settled({ ...base, status: "invalid-store", nextAction: invalidStoreAction(valid.route) });
   }
-  return { ...base, status: "configured-unverified", nextAction: "Run a route-bound request to observe inference; static configuration alone does not prove live access." };
+  return settled({ ...base, status: "configured-unverified", nextAction: "Run a route-bound request to observe inference; static configuration alone does not prove live access." }, expired);
 }
 
 /** Create only the selected subscription adapter; the unselected route and TUI never load.

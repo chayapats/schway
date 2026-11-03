@@ -89,6 +89,14 @@
   `maxOutputTokens` and `requireOutputCap`; Codex, whose endpoint rejects caps,
   refuses them before any request. `HostDispatch.outputCap` and per-attempt
   usage record the cap sent. Token caps are not monetary bounds (#446).
+- Renew a route credential without inference with `host.auth.renew()` or
+  `renewAuthRoute(selection)`, advertised by `routeRenewalContract:
+  "schway.host.route-renewal/v1"`. A host that starts after its access token
+  expired can now renew, list models and pin an exact effort without first
+  sending an unpinned request. Renewal sends at most one token request through
+  the route's refresher, shares single-flight renewal, fencing and counts with
+  runs, keeps the run failure classification, and never stores a late token
+  response after an abort or deadline (#455).
 - Export `SearchProvider`, `createWebSearchTool(provider, options?)` and
   `createWebFetchTool(options?)` through `schway/host`, advertised by
   `webToolsContract: "schway.host.web-tools/v1"`. Explicit read-only tools keep
