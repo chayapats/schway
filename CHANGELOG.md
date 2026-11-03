@@ -96,8 +96,9 @@
   sending an unpinned request. Renewal sends at most one token request through
   the route's refresher, shares single-flight renewal, fencing and counts with
   runs and keeps the run failure categories. An abort or deadline settles
-  promptly; a token request that already left still completes and stores its
-  rotated credential, so a stopped renewal never forces a new sign-in (#455).
+  promptly, and a token request that the stopped renewal itself sent still
+  completes and stores its rotated credential. A renewal that only joined a
+  run's request follows that run's cancellation, tracked in #456 (#455).
 - Export `SearchProvider`, `createWebSearchTool(provider, options?)` and
   `createWebFetchTool(options?)` through `schway/host`, advertised by
   `webToolsContract: "schway.host.web-tools/v1"`. Explicit read-only tools keep

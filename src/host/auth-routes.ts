@@ -441,7 +441,7 @@ export function classifyRouteFailure(error: unknown, selection: HostAuthSelectio
     }
     return { ...base, status: "store-unavailable",
       nextAction: renewal
-        ? "The embedding application's credential fence refused the renewal. No credential was changed. Retry the renewal after the fence allows writes."
+        ? "The embedding application's credential fence refused the renewal. No credential was changed. Retry the renewal after the fence allows writes; if that renewal is rejected, sign in again."
         : "The embedding application's credential fence refused a credential write. No credential was changed. Retry the turn after the fence allows writes." };
   }
   // A lock refusal already names its cause and next step; the generic store

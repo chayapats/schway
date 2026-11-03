@@ -7,6 +7,8 @@ import { codexSubscriptionIdentity, credentialLockError, grokSubscriptionIdentit
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir } from "./helpers.ts";
 import { encodeXaiSse } from "./fixtures/xai.ts";
+import { createSubscriptionTokenRefresher as createCodexRefresher } from "../src/model/providers/codex-subscription.ts";
+import { createSubscriptionTokenRefresher as createGrokRefresher } from "../src/model/providers/grok-subscription.ts";
 
 type Route = "codex" | "grok";
 type Kind = "store" | "lifecycle";
@@ -17,7 +19,8 @@ const MODEL: Record<Route, string> = { codex: "gpt-6-luna", grok: "grok-4.7" };
 const PIN = { codex: { level: "high", sent: "high" }, grok: { level: "low", sent: "low" } } as const;
 const SENTINELS = ["expired-access-sentinel", "stored-refresh-sentinel", "renewed-access-sentinel", "renewed-refresh-sentinel", "rotated-refresh-sentinel", "fresh-access-sentinel", "billing-bait", "guard-secret-sentinel"];
 const BAIT = { OPENAI_API_KEY: "billing-bait", XAI_API_KEY: "billing-bait" };
-const FENCE_REFUSED = "The embedding application's credential fence refused the renewal. No credential was changed. Retry the renewal after the fence allows writes.";
+// A fence that refuses the write after the provider rotated the token leaves the stored one invalid.
+const FENCE_REFUSED = "The embedding application's credential fence refused the renewal. No credential was changed. Retry the renewal after the fence allows writes; if that renewal is rejected, sign in again.";
 const LOCK_REASON = "Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry.";
 const UNREACHABLE: Record<Route, string> = {
   codex: "Could not reach the ChatGPT subscription to renew its credential. Retry the renewal later; Schway never falls back to API-key billing.",
@@ -617,4 +620,36 @@ test("renewal rejects malformed bounds and selections", async () => {
     await expect(renewAuthRoute(input as never)).rejects.toThrow();
   }
   expect(store.reads).toBe(0);
+});
+
+for (const route of ROUTES) test(`${route} sends the token request in the same step that creates the shared renewal`, async () => {
+  // Caller A creates the renewal; caller B joins one microtask later and, while joining, stops A. Any request
+  // sent after that step would be counted on A after A settled with nothing counted, and on no one else.
+  const base = await seeded(route, EXPIRED);
+  const gate = Promise.withResolvers<void>();
+  let reads = 0;
+  const store: CredentialStore = { ...base, get: async identity => { await gate.promise; const value = await base.get(identity); reads++; return value; } };
+  let sends = 0, counted = 0;
+  const fetch: HostAuthFetch = async () => { sends++; return renewedTokens(); };
+  const first = new AbortController(), second = new AbortController();
+  let joined = false, atStop: { counted: number; sends: number } | undefined;
+  const listen = second.signal.addEventListener.bind(second.signal);
+  Object.defineProperty(second.signal, "addEventListener", { value: (...args: Parameters<AbortSignal["addEventListener"]>) => {
+    // B's first registration after both reads answered is its join of A's renewal.
+    if (reads === 2 && !joined) { joined = true; first.abort(); atStop = { counted, sends }; }
+    return listen(...args);
+  } });
+  const refresher = route === "codex" ? createCodexRefresher({ store, fetch }) : createGrokRefresher({ store, fetch });
+  const call = (signal: AbortSignal, onRenewal: () => void) => route === "codex"
+    ? (refresher as ReturnType<typeof createCodexRefresher>).getValidAccessToken(signal, onRenewal)
+    : (refresher as ReturnType<typeof createGrokRefresher>).getValidAccessToken(signal, undefined, onRenewal);
+  const a = call(first.signal, () => { counted++; }).then(() => "renewed", () => "stopped");
+  const b = call(second.signal, () => { throw new Error("the joiner never starts a request"); });
+  gate.resolve();
+  expect(await a).toBe("stopped");
+  // When A stops, its request has already left and is already counted on A, the way a renewal snapshots it.
+  expect(joined).toBe(true);
+  expect(atStop).toEqual({ counted: 1, sends: 1 });
+  await b;
+  expect({ counted, sends }).toEqual({ counted: 1, sends: 1 });
 });

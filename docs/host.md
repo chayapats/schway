@@ -437,18 +437,20 @@ Only the selected provider adapter loads. Renewal never lists models or creates
 catalog evidence, so list again after renewing; a logout still invalidates every
 earlier listing.
 
-**Sharing and counting.** Renewal joins the route's single-flight renewal for the
-same store identity. `host.auth.renew()` uses the host's own selection, so it
-shares renewal with that host's runs. With a `HostCredentialLifecycle`, both
+**Sharing and counting.** Renewal joins the route's single-flight renewal for
+the same store identity. `host.auth.renew()` uses the host's own selection, so
+it shares renewal with that host's runs. With a `HostCredentialLifecycle`, both
 `renew()` and `renewAuthRoute` share renewal with every host on that lifecycle.
 They also take part in it as a run does, under the same write guard and logout
-fencing. Without a lifecycle, `renewAuthRoute` shares only with calls that resolve
-the same effective store: the same explicit store object when no
+fencing. Without a lifecycle, `renewAuthRoute` shares only with calls that
+resolve the same effective store: the same explicit store object when no
 `credentialWriteGuard` is set, otherwise the same selection object. Use a
 lifecycle or `host.auth.renew()` to share with runs. `renewalRequests` is 1 only
-when this call started the token request. A call that joins a run's renewal
-reports 0 because the run counts it, and a run that joins a renewal counts 0
-because the renewal did, so summed counts never double-count.
+when this call started the token request. Both routes send that request in the
+same step that creates the shared renewal, so a renewal that exists has already
+sent its one request and counted it for its creator. A call that joins a run's
+renewal reports 0 because the run counts it, and a run that joins a renewal
+counts 0 because the renewal did, so summed counts never double-count.
 
 **Failures.** `failed` keeps the route-run status categories of
 `classifyAuthError`. Next actions are the same except where a run's would say to
@@ -466,16 +468,19 @@ consulted again around the write, as for runs.
 
 **Bounds.** An abort settles `cancelled` and `deadlineMs` expiry (whole
 milliseconds, 1–86,400,000) settles `limit_exceeded`. Both settle promptly, even
-when a store read, guard or token request cannot be cancelled. A stop before this
-call sends its token request reports `renewalRequests: 0`; nothing is sent
-afterwards, and a late store value is never used. A stop after the request left
-reports `renewalRequests: 1`, and that request still runs to completion in the
-background. The provider may already have rotated the refresh token, so its
-response is stored unless a logout or a write fence refuses it; discarding it
-would force a new sign-in. Later renewals and runs join that request instead of
-sending another. With a lifecycle, the stopped renewal stays a participant until
-the request settles, so the owner's `close()` reports `busy` until then, which is
-bounded by the refresher's 30-second timeout and the store write.
+when a store read, guard or token request cannot be cancelled. A stop before
+this call sends its token request reports `renewalRequests: 0`; nothing is sent
+afterwards, and a late store value is never used. A stop after this call's
+request left reports `renewalRequests: 1`, and that request still runs to
+completion in the background. The provider may already have rotated the refresh
+token, so its response is stored unless a logout or a write fence refuses it;
+discarding it would force a new sign-in. Later renewals and runs join that
+request instead of sending another. With a lifecycle, the stopped renewal stays
+a participant until the request settles, so the owner's `close()` reports `busy`
+until then, which is bounded by the refresher's 30-second timeout and the store
+write. A renewal that only joined another caller's request stops waiting and
+leaves that request to its starter; a run's cancellation is tracked in
+[#456](https://github.com/chayapats/schway/issues/456).
 
 When a renewal stops, decide on `outcome`, not `auth.status`. `auth` is the
 verdict read before the stop. If the store had not answered, it is
