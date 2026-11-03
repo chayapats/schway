@@ -109,14 +109,28 @@ test("validating the release artifact does not publish it", async () => {
   const scriptText = Object.values(pkg.scripts).join("\n").toLowerCase();
   expect(scriptText.includes("npm publish")).toBe(false);
   expect(scriptText.includes("release")).toBe(false);
-  // GitHub Actions validates with typecheck and tests only; no registry publish or release step.
-  // URLs are stripped first so a pinned toolchain download cannot trip the check.
-  const workflow = await source(".github/workflows/checks.yml");
-  const lowered = workflow.toLowerCase().replace(/https?:\/\/\S+/g, "");
-  expect(/\bpublish\b/.test(lowered)).toBe(false);
-  expect(/\brelease\b/.test(lowered)).toBe(false);
+  // GitHub Actions validates with typecheck and tests and packs a workflow artifact; no registry publish or
+  // release step, in any workflow or the CI scripts they run. URLs are stripped first so a pinned toolchain
+  // download cannot trip the check.
+  const workflows = (await readdir(join(import.meta.dir, "../.github/workflows"))).filter(name => /\.ya?ml$/.test(name));
+  expect(workflows).toContain("checks.yml");
+  for (const name of workflows) {
+    const lowered = (await source(`.github/workflows/${name}`)).toLowerCase().replace(/https?:\/\/\S+/g, "");
+    expect(/\bpublish\b/.test(lowered), name).toBe(false);
+    expect(/\brelease\b/.test(lowered), name).toBe(false);
+    // The packed artifact needs no credentials: no secrets, registry tokens or write permissions.
+    expect(lowered, name).not.toMatch(/\bsecrets\.|npm_token|node_auth_token|:\s*write\b/);
+  }
+  for (const name of await readdir(join(import.meta.dir, "../scripts/ci"))) {
+    const script = (await source(`scripts/ci/${name}`)).toLowerCase();
+    expect(script, name).not.toMatch(/\b(?:npm|bun|yarn|pnpm)\s+publish\b|\bgh\s+release\b/);
+  }
+  const lowered = (await source(".github/workflows/checks.yml")).toLowerCase();
   expect(lowered.includes("typecheck")).toBe(true);
   expect(lowered).toContain("bun test");
+  expect(lowered).toContain("scripts/ci/pack-artifact.sh");
+  expect(lowered).toContain("actions/upload-artifact");
+  expect(await source("scripts/ci/pack-artifact.sh")).toContain("bun pm pack");
 });
 
 test("npm pack installs the public extension API and completes a headless tool round trip", async () => {

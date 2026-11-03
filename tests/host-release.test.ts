@@ -1,23 +1,32 @@
 import { expect, test } from "bun:test";
-import { lstat, mkdir, readFile, readlink, realpath, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { copyFile, lstat, mkdir, readFile, readlink, realpath, stat } from "node:fs/promises";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { mkdtemp, rm } from "node:fs/promises";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 
 const root = resolve(import.meta.dir, "..");
 
-/** Pack the current checkout and install the tarball into an isolated consumer. */
+/**
+ * Pack the current checkout, or copy the prebuilt tarball named by `SCHWAY_PACKED_TARBALL` (CI's
+ * uploaded artifact), and install it into an isolated consumer.
+ */
 async function packAndInstall(dir: string): Promise<{ consumer: string; tarball: string }> {
   const packDir = join(dir, "pack");
   await mkdir(packDir, { recursive: true });
-  const pack = Bun.spawn(["bun", "pm", "pack", "--destination", packDir], {
-    cwd: root, stdout: "pipe", stderr: "pipe",
-  });
-  const [packOut, packErr, packCode] = await Promise.all([
-    new Response(pack.stdout).text(), new Response(pack.stderr).text(), pack.exited,
-  ]);
-  expect(packCode, packOut + packErr).toBe(0);
+  const prebuilt = process.env.SCHWAY_PACKED_TARBALL?.trim();
+  if (prebuilt) {
+    expect(isAbsolute(prebuilt) && prebuilt.endsWith(".tgz"), `SCHWAY_PACKED_TARBALL must be an absolute .tgz path: ${prebuilt}`).toBe(true);
+    await copyFile(prebuilt, join(packDir, basename(prebuilt)));
+  } else {
+    const pack = Bun.spawn(["bun", "pm", "pack", "--destination", packDir], {
+      cwd: root, stdout: "pipe", stderr: "pipe",
+    });
+    const [packOut, packErr, packCode] = await Promise.all([
+      new Response(pack.stdout).text(), new Response(pack.stderr).text(), pack.exited,
+    ]);
+    expect(packCode, packOut + packErr).toBe(0);
+  }
   const entries = await Array.fromAsync(new Bun.Glob("*.tgz").scan({ cwd: packDir }));
   expect(entries.length).toBe(1);
   const tarball = join(packDir, entries[0]!);
