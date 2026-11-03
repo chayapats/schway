@@ -1,18 +1,26 @@
-import { realpathSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 /** Live roots from `makeTempRoot`, each mapped to the canonical temp directory it was created in. */
 const ownedTempRoots = new Map<string, string>();
 
-/** Create a canonical `mkdtemp` root directly under the OS temp directory; only `removeTempRoot` deletes it. */
-export async function makeTempRoot(prefix = "schway-"): Promise<string> {
-  const parent = await realpath(tmpdir());
-  const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
+/** Record a fresh `mkdtemp` root after checking it sits directly in the canonical temp directory. */
+function ownTempRoot(parent: string, dir: string): string {
   if (dirname(dir) !== parent) throw new Error(`Temporary root ${dir} is not directly inside ${parent}`);
   ownedTempRoots.set(dir, parent);
   return dir;
+}
+
+/** Create a canonical `mkdtemp` root directly under the OS temp directory; only the removal helpers here delete it. */
+export async function makeTempRoot(prefix = "schway-"): Promise<string> {
+  return ownTempRoot(await realpath(tmpdir()), await realpath(await mkdtemp(join(tmpdir(), prefix))));
+}
+
+/** Synchronous `makeTempRoot` for synchronous hooks and fixtures. */
+export function makeTempRootSync(prefix = "schway-"): string {
+  return ownTempRoot(realpathSync(tmpdir()), realpathSync(mkdtempSync(join(tmpdir(), prefix))));
 }
 
 /** True when `path` is `ancestor` or lies inside it. */
@@ -21,9 +29,31 @@ function within(ancestor: string, path: string): boolean {
   return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
 }
 
-/** Canonical form of `path` when it exists, else the path itself. */
+/** Canonical form of an absolute path: its deepest existing ancestor resolved through symlinks, plus the missing rest. */
 function canonical(path: string): string {
-  try { return realpathSync(path); } catch { return path; }
+  const rest: string[] = [];
+  for (let current = path; ; current = dirname(current)) {
+    try { return join(realpathSync(current), ...rest); } catch { /* Try the parent. */ }
+    if (dirname(current) === current) return path;
+    rest.unshift(basename(current));
+  }
+}
+
+function refusal(path: string, reason: string): Error {
+  return new Error(`Refusing to remove ${JSON.stringify(path)}: ${reason}`);
+}
+
+/** Throw when removing `path` would also remove the working directory, HOME, the checkout or the temp directory. */
+function assertKeepsProtectedPaths(path: string, tempParent: string): void {
+  let cwd: string | undefined;
+  // A working directory that no longer exists can't be harmed, and process.cwd() may throw for it.
+  try { cwd = process.cwd(); } catch { cwd = undefined; }
+  const kept = [cwd !== undefined && existsSync(cwd) ? cwd : undefined, homedir(), resolve(import.meta.dir, ".."), tempParent];
+  for (const protectedPath of kept) {
+    if (protectedPath === undefined) continue;
+    const resolved = canonical(protectedPath);
+    if (within(path, resolved)) throw refusal(path, `it contains ${resolved}`);
+  }
 }
 
 /**
@@ -32,12 +62,8 @@ function canonical(path: string): string {
  */
 export function assertRemovableTempRoot(dir: string): void {
   const parent = ownedTempRoots.get(dir);
-  if (parent === undefined || dirname(dir) !== parent) {
-    throw new Error(`Refusing to remove ${JSON.stringify(dir)}: not a temporary root this test process created`);
-  }
-  for (const kept of [process.cwd(), homedir(), resolve(import.meta.dir, ".."), parent].map(canonical)) {
-    if (within(dir, kept)) throw new Error(`Refusing to remove ${JSON.stringify(dir)}: it contains ${kept}`);
-  }
+  if (parent === undefined || dirname(dir) !== parent) throw refusal(dir, "not a temporary root this test process created");
+  assertKeepsProtectedPaths(dir, parent);
 }
 
 /** Recursively remove a root that `makeTempRoot` created; refuses any other path (see `assertRemovableTempRoot`). */
@@ -47,14 +73,58 @@ export async function removeTempRoot(dir: string): Promise<void> {
   await rm(dir, { recursive: true, force: true });
 }
 
+/** Synchronous `removeTempRoot`. */
+export function removeTempRootSync(dir: string): void {
+  assertRemovableTempRoot(dir);
+  ownedTempRoots.delete(dir);
+  rmSync(dir, { recursive: true, force: true });
+}
+
+/**
+ * Return the path that removing `path` would delete, after checking it lies strictly inside `root`, a live
+ * root from `makeTempRoot`. Directories on the way are resolved through symlinks, so a link can't lead the
+ * removal outside the root; a final symlink is removed itself, not its target.
+ */
+export function assertRemovableOwnedTree(root: string, path: string): string {
+  const parent = ownedTempRoots.get(root);
+  if (parent === undefined) throw refusal(path, `${JSON.stringify(root)} is not a temporary root this test process created`);
+  if (!isAbsolute(path)) throw refusal(path, "not an absolute path");
+  const lexical = resolve(path);
+  const target = join(canonical(dirname(lexical)), basename(lexical));
+  if (target === root || !within(root, target)) throw refusal(path, `not strictly inside ${root}`);
+  assertKeepsProtectedPaths(target, parent);
+  return target;
+}
+
+/** Recursively remove `path` strictly inside the owned temp root `root`; refuses anything else (see `assertRemovableOwnedTree`). */
+export async function removeOwnedTree(root: string, path: string): Promise<void> {
+  await rm(assertRemovableOwnedTree(root, path), { recursive: true, force: true });
+}
+
+/** Synchronous `removeOwnedTree`. */
+export function removeOwnedTreeSync(root: string, path: string): void {
+  rmSync(assertRemovableOwnedTree(root, path), { recursive: true, force: true });
+}
+
+/** Run `body`, then `cleanup`. A cleanup failure never hides the body's error: it becomes that error's cause. */
+async function thenCleanUp(body: () => Promise<void>, cleanup: () => Promise<void>): Promise<void> {
+  let failure: { error: unknown } | undefined;
+  try { await body(); } catch (error) { failure = { error }; }
+  try { await cleanup(); } catch (cleanupError) {
+    if (!failure) throw cleanupError;
+    if (failure.error instanceof Error && failure.error.cause === undefined) {
+      failure.error.cause = cleanupError;
+      throw failure.error;
+    }
+    throw new AggregateError([failure.error, cleanupError], "The test failed, and so did removing its temporary root");
+  }
+  if (failure) throw failure.error;
+}
+
 /** Allocate and remove a canonical fixture root so runtime identity checks agree across OS temp aliases. */
 export async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
   const dir = await makeTempRoot();
-  try {
-    await fn(dir);
-  } finally {
-    await removeTempRoot(dir);
-  }
+  await thenCleanUp(() => fn(dir), () => removeTempRoot(dir));
 }
 
 export async function makeDir(path: string): Promise<string> {
@@ -98,7 +168,7 @@ export async function withIsolatedCliDirs(
   fn: (dirs: IsolatedCliDirs) => Promise<void>,
 ): Promise<void> {
   const root = await makeTempRoot("schway-cli-");
-  try {
+  await thenCleanUp(async () => {
     const home = join(root, "home");
     const work = join(root, "work");
     await mkdir(home, { recursive: true });
@@ -107,9 +177,7 @@ export async function withIsolatedCliDirs(
     const sentinelPath = join(root, "sentinel.txt");
     await writeFile(sentinelPath, sentinelContent, "utf8");
     await fn({ root, home, work, sentinelPath, sentinelContent });
-  } finally {
-    await removeTempRoot(root);
-  }
+  }, () => removeTempRoot(root));
 }
 
 /** Build an explicit child env with isolated HOME, stripped credentials, and test overrides. */
