@@ -15,26 +15,47 @@ const revision = "0123456789012345678901234567890123456789";
 const settings = (providers: Array<"compatible" | "openai-api-key">, timeoutMs = 600) => ({
   enabled: true, revision, timeoutMs, providers, env: {} as Record<string, string>,
 });
-// Production and protocol workers keep their own real-time deadline. This budget keeps it out of
-// any test's reach, so only a held supervisor clock (below) can expire a lane.
+// Real-time bounds nest so a stuck lane fails with its own message, never the test timeout:
+// a fixture barrier wait (5 s) < the lane backstop (15 s) < the lane test timeout (30 s).
+const BARRIER_WAIT_MS = 5_000;
+// Stops a stuck or abandoned lane, killing its process group and removing its workspace. It is far
+// beyond any lane's own sub-second work, so it never decides an outcome.
+const LANE_BACKSTOP_MS = 15_000;
+// One backstop plus reaping, one barrier wait and the test's own work.
+const LANE_TEST_TIMEOUT_MS = 30_000;
+// Production and protocol workers keep their own real-time deadline. This budget keeps it beyond
+// the backstop, so only the supervisor's test clock or backstop can expire a lane.
 const WORKER_BUDGET_MS = 60_000;
 // The installed command cannot take a test clock. Its budget only bounds a stuck run, far beyond
 // the observed sub-second ARM64 runs, so it never decides an outcome.
-const INSTALLED_BUDGET_MS = "20000";
-/** Lane deadlines that expire only when a test advances them past an explicit barrier; reaping keeps real time. */
+const INSTALLED_BUDGET_MS = 10_000;
+/** Cover each installed run's budget plus reaping and start-up, so a stuck run reports before the test times out. */
+const installedTimeout = (runs: number) => runs * (INSTALLED_BUDGET_MS + 5_000) + 5_000;
+/** Lane deadlines that expire when a test advances them past an explicit barrier, or at the real-time backstop. */
 const heldDeadline = () => {
   const clock = manualClock();
-  return { clock: { now: clock.now, sleep: clock.sleep }, expire: clock.advance };
+  const sleep = (ms: number, signal: AbortSignal) => Promise.race([clock.sleep(ms, signal), new Promise<void>(resolve => {
+    const backstop = setTimeout(resolve, LANE_BACKSTOP_MS);
+    signal.addEventListener("abort", () => clearTimeout(backstop), { once: true });
+  })]);
+  return { clock: { now: clock.now, sleep }, expire: clock.advance };
 };
-/** A lane clock that never reaches its deadline, so only the worker's own behavior decides the outcome. */
-const neverExpires = () => heldDeadline().clock;
+/** A lane only the real-time backstop can expire, so the worker's own behavior decides the outcome. */
+const backstopOnly = () => heldDeadline().clock;
+/** Expire a held lane once `barrier` passes or fails, so a failed barrier still stops the worker group and removes its workspace. */
+async function expireAfterBarrier<T>(pending: Promise<T>, deadline: { expire(ms: number): Promise<void> }, ms: number,
+  barrier: () => Promise<unknown>): Promise<T> {
+  try { await barrier(); }
+  finally { await deadline.expire(ms); await pending; }
+  return pending;
+}
 const gone = (pid: number) => {
   try { process.kill(pid, 0); return false; }
   catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
 };
 /** Poll a fixture barrier. The bound only names a stuck fixture; no outcome under test depends on it. */
 async function until<T>(read: () => Promise<T | undefined>, what: string): Promise<T> {
-  const end = Date.now() + 8_000;
+  const end = Date.now() + BARRIER_WAIT_MS;
   for (;;) {
     const value = await read();
     if (value !== undefined) return value;
@@ -155,9 +176,7 @@ test("hard-stop progress rejects malformed, oversized and symlinked checkpoints 
           else writeFileSync(join(path, ".smoke-progress.json"), checkpoint);
         } });
       // Expire the lane only once the worker has recorded that its model stream started.
-      await waitForModelStart(() => root);
-      await deadline.expire(200);
-      const report = await pending;
+      const report = await expireAfterBarrier(pending, deadline, 200, () => waitForModelStart(() => root));
       expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "unavailable", toolRoundTrip: false });
       expect(report.scenarios[0]).not.toHaveProperty("diagnostics");
       expect(JSON.stringify(report)).not.toMatch(/PRIVATE_SECRET|private\.json/);
@@ -165,7 +184,7 @@ test("hard-stop progress rejects malformed, oversized and symlinked checkpoints 
     }
     expect(await readFile(secretPath, "utf8")).toBe(JSON.stringify(progress));
   });
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("framed replies reject malformed numeric diagnostics without publishing provider content", async () => {
   if (process.platform === "win32") return;
@@ -177,11 +196,11 @@ const input = JSON.parse(raw);
 console.log(JSON.stringify({ provider: input.provider, model: input.model, authSource: "env", status: "passed", reason: "verified",
   durationMs: 1, toolRoundTrip: true, diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1,
     providerRetries: 0, httpRequestsStarted: 2, httpResponsesReceived: 2, lastHttpStatus: 200, providerBody: "PRIVATE_SECRET" } }));`);
-    const report = await runLiveProcesses(settings(["openai-api-key"]), { workerFile, ...neverExpires() });
+    const report = await runLiveProcesses(settings(["openai-api-key"]), { workerFile, ...backstopOnly() });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error", toolRoundTrip: false });
     expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
   });
-});
+}, LANE_TEST_TIMEOUT_MS);
 
 test("supervised timeout retains HTTP 503 and Schway retry counts without retaining the error body", async () => {
   if (process.platform === "win32") return;
@@ -198,9 +217,8 @@ test("supervised timeout retains HTTP 503 and Schway retry counts without retain
     const pending = runLiveProcesses({ ...settings(["compatible", "openai-api-key"], WORKER_BUDGET_MS),
       compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } }, { ...deadline.clock, onWorkspace: path => { root = path; } });
     // Expire the lane during the backoff after the second 503, once the worker has checkpointed that retry.
-    await waitForProgress(() => root, diagnostics => diagnostics.providerRetries === 2);
-    await deadline.expire(WORKER_BUDGET_MS);
-    const report = await pending;
+    const report = await expireAfterBarrier(pending, deadline, WORKER_BUDGET_MS,
+      () => waitForProgress(() => root, diagnostics => diagnostics.providerRetries === 2));
     expect(calls).toBe(2);
     expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "none", toolRoundTrip: false,
       diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 0, toolResultsCompleted: 0,
@@ -208,7 +226,7 @@ test("supervised timeout retains HTTP 503 and Schway retry counts without retain
     expect(report.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
     expect(JSON.stringify(report)).not.toMatch(/PRIVATE_PROVIDER_BODY|127\.0\.0\.1/);
   } finally { server.stop(true); }
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("real non-cooperative process and same-group descendant die, workspace removed, no later provider starts", async () => {
   if (process.platform === "win32") return;
@@ -220,10 +238,11 @@ test("real non-cooperative process and same-group descendant die, workspace remo
       SCHWAY_FIXTURE_MODE: "hang-with-descendant", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET",
     } }, { workerFile: fixture, ...deadline.clock, onWorkspace: root => roots.push(root) });
     // Expire the lane only once the worker and its same-group descendant have both published their PIDs.
-    const pid = await waitForPid(pidPath);
-    const descendant = await waitForPid(`${pidPath}.descendant`);
-    await deadline.expire(450);
-    const report = await reportPromise;
+    let pid = 0, descendant = 0;
+    const report = await expireAfterBarrier(reportPromise, deadline, 450, async () => {
+      pid = await waitForPid(pidPath);
+      descendant = await waitForPid(`${pidPath}.descendant`);
+    });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "timeout" });
     expect(report.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
     expect(roots).toHaveLength(1);
@@ -232,7 +251,29 @@ test("real non-cooperative process and same-group descendant die, workspace remo
     await expect(access(roots[0]!)).rejects.toThrow();
     expect(JSON.stringify(report)).not.toMatch(/PRIVATE_SECRET|worker\.pid|schway-live-/);
   });
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
+
+test("the default real-time deadline stops a worker group that never replies", async () => {
+  if (process.platform === "win32") return;
+  await withTempDir(async temp => {
+    const pidPath = join(temp, "worker.pid");
+    const roots: string[] = [];
+    // Production hooks and a short real budget. This worker never replies or records a stream start,
+    // so the lane can only end as a runner timeout, however early or late the deadline fires.
+    const report = await runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 300), env: {
+      SCHWAY_FIXTURE_MODE: "hang-with-descendant", SCHWAY_FIXTURE_PID_FILE: pidPath,
+    } }, { workerFile: fixture, onWorkspace: root => roots.push(root) });
+    expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "timeout" });
+    expect(report.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
+    // Without a barrier, either process may have been stopped before publishing; any published PID must be gone.
+    for (const path of [pidPath, `${pidPath}.descendant`]) {
+      const pid = Number(await readFile(path, "utf8").catch(() => ""));
+      if (pid > 0) expect(gone(pid)).toBe(true);
+    }
+    expect(roots.length).toBeLessThanOrEqual(1);
+    for (const root of roots) await expect(access(root)).rejects.toThrow();
+  });
+}, LANE_TEST_TIMEOUT_MS);
 
 test("started model process that ignores abort is classified as provider timeout after hard kill", async () => {
   if (process.platform === "win32") return;
@@ -243,17 +284,18 @@ test("started model process that ignores abort is classified as provider timeout
     const pending = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 350), env: {
       SCHWAY_FIXTURE_MODE: "hang-stream", SCHWAY_FIXTURE_PID_FILE: pidPath,
     } }, { workerFile: fixture, ...deadline.clock, onWorkspace: path => { root = path; } });
-    const pid = await waitForPid(pidPath);
     // The stream-start evidence is what makes this a provider timeout, so expire only after it exists.
-    await waitForModelStart(() => root);
-    await deadline.expire(350);
-    const report = await pending;
+    let pid = 0;
+    const report = await expireAfterBarrier(pending, deadline, 350, async () => {
+      pid = await waitForPid(pidPath);
+      await waitForModelStart(() => root);
+    });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout" });
     expect(report.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
     expect(gone(pid)).toBe(true);
     await expect(access(root)).rejects.toThrow();
   });
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("a worker cannot report pass while its descendant remains alive", async () => {
   if (process.platform === "win32") return;
@@ -262,12 +304,12 @@ test("a worker cannot report pass while its descendant remains alive", async () 
     let root = "";
     const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "orphan", SCHWAY_FIXTURE_PID_FILE: pidPath,
-    } }, { workerFile: fixture, ...neverExpires(), onWorkspace: path => { root = path; } });
+    } }, { workerFile: fixture, ...backstopOnly(), onWorkspace: path => { root = path; } });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "process_group_leak" });
     expect(gone(await waitForPid(`${pidPath}.descendant`))).toBe(true);
     await expect(access(root)).rejects.toThrow();
   });
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("non-cooperative output-limit worker is hard stopped without changing provider failure to timeout", async () => {
   if (process.platform === "win32") return;
@@ -276,7 +318,7 @@ test("non-cooperative output-limit worker is hard stopped without changing provi
     const roots: string[] = [];
     const report = await runLiveProcesses({ ...settings(["openai-api-key"], 1200), env: {
       SCHWAY_FIXTURE_MODE: "deferred-output", SCHWAY_FIXTURE_PID_FILE: pidPath,
-    } }, { workerFile: fixture, ...neverExpires(), onWorkspace: root => roots.push(root) });
+    } }, { workerFile: fixture, ...backstopOnly(), onWorkspace: root => roots.push(root) });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit" });
     expect(report.scenarios[0]).not.toHaveProperty("cleanup");
     expect(roots).toHaveLength(1);
@@ -284,7 +326,7 @@ test("non-cooperative output-limit worker is hard stopped without changing provi
     expect(gone(await waitForPid(`${pidPath}.descendant`))).toBe(true);
     await expect(access(roots[0]!)).rejects.toThrow();
   });
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("oversized stdout and malformed worker response are rejected without echo, cleaned up and reaped", async () => {
   if (process.platform === "win32") return;
@@ -293,22 +335,22 @@ test("oversized stdout and malformed worker response are rejected without echo, 
     let root = "";
     const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "oversized", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET",
-    } }, { workerFile: fixture, ...neverExpires(), onWorkspace: path => { root = path; } });
+    } }, { workerFile: fixture, ...backstopOnly(), onWorkspace: path => { root = path; } });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
     expect(gone(await waitForPid(pidPath))).toBe(true);
     await expect(access(root)).rejects.toThrow();
     expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
     const forged = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "forged", OPENAI_API_KEY: "PRIVATE_SECRET",
-    } }, { workerFile: fixture, ...neverExpires() });
+    } }, { workerFile: fixture, ...backstopOnly() });
     expect(forged.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
     expect(JSON.stringify(forged)).not.toContain("PRIVATE_SECRET");
     const fakeTimeout = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "fake-timeout",
-    } }, { workerFile: fixture, ...neverExpires() });
+    } }, { workerFile: fixture, ...backstopOnly() });
     expect(fakeTimeout.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
   });
-});
+}, LANE_TEST_TIMEOUT_MS);
 
 test("cancellation kills the non-cooperative worker before cleanup or another provider launch", async () => {
   if (process.platform === "win32") return;
@@ -318,7 +360,7 @@ test("cancellation kills the non-cooperative worker before cleanup or another pr
     const roots: string[] = [];
     const pending = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 1500), signal: controller.signal,
       env: { SCHWAY_FIXTURE_MODE: "hang", SCHWAY_FIXTURE_PID_FILE: pidPath } },
-    { workerFile: fixture, ...neverExpires(), onWorkspace: root => roots.push(root) });
+    { workerFile: fixture, ...backstopOnly(), onWorkspace: root => roots.push(root) });
     const pid = await waitForPid(pidPath);
     controller.abort();
     const report = await pending;
@@ -327,7 +369,7 @@ test("cancellation kills the non-cooperative worker before cleanup or another pr
     expect(roots).toHaveLength(1);
     await expect(access(roots[0]!)).rejects.toThrow();
   });
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("selected worker fake succeeds without loading a sibling or printing an injected credential", async () => {
   if (process.platform === "win32") return;
@@ -335,14 +377,14 @@ test("selected worker fake succeeds without loading a sibling or printing an inj
     const roots: string[] = [];
     const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_PID_FILE: join(temp, "worker.pid"), OPENAI_API_KEY: "PRIVATE_SECRET",
-    } }, { workerFile: fixture, ...neverExpires(), onWorkspace: root => roots.push(root) });
+    } }, { workerFile: fixture, ...backstopOnly(), onWorkspace: root => roots.push(root) });
     expect(report.aggregate).toBe("passed");
     expect(report.scenarios).toMatchObject([{ status: "passed", provider: "openai-api-key", toolRoundTrip: true }]);
     expect(roots).toHaveLength(1);
     await expect(access(roots[0]!)).rejects.toThrow();
     expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
   });
-});
+}, LANE_TEST_TIMEOUT_MS);
 
 test("installed live command rejects credentialed HTTP before a local fake endpoint receives any request", async () => {
   let calls = 0;
@@ -374,7 +416,7 @@ test("installed command uses supervised child and local fake compatible HTTP tra
   } });
   try {
     const proc = Bun.spawn([process.execPath, "run", "live-smoke", "--enable-live", "--provider", "compatible", "--base-url",
-      `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", INSTALLED_BUDGET_MS], {
+      `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", String(INSTALLED_BUDGET_MS)], {
       cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "LOCAL_FAKE_SECRET" }, stdout: "pipe", stderr: "pipe",
     });
     const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -384,7 +426,7 @@ test("installed command uses supervised child and local fake compatible HTTP tra
     expect(stdout + stderr).not.toContain("LOCAL_FAKE_SECRET");
     expect(JSON.parse(stdout)).toMatchObject({ aggregate: "passed", scenarios: [{ status: "passed", toolRoundTrip: true, authSource: "none" }] });
   } finally { server.stop(true); }
-}, 30_000);
+}, installedTimeout(1));
 
 test("supervised shared deadline preserves the completed tool round and second request progress", async () => {
   if (process.platform === "win32") return;
@@ -410,9 +452,8 @@ test("supervised shared deadline preserves the completed tool round and second r
       models: { compatible: "gpt-4o" }, env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "PRIVATE_KEY" } };
     const pending = runLiveProcesses(selection, deadline.clock);
     // Barrier: the first round and its tool result completed and the second request started, all within budget.
-    expect(await Promise.race([secondRequest, pending.then(() => "lane ended")])).toBe("second request");
-    await deadline.expire(share);
-    const timed = await pending;
+    const timed = await expireAfterBarrier(pending, deadline, share, async () =>
+      expect(await Promise.race([secondRequest, pending.then(() => "lane ended")])).toBe("second request"));
     expect(calls).toBe(2);
     expect(timed.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "none", toolRoundTrip: false,
       diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 1, toolResultsCompleted: 1, providerRetries: 0,
@@ -420,13 +461,13 @@ test("supervised shared deadline preserves the completed tool round and second r
     expect(timed.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
     expect(JSON.stringify(timed)).not.toMatch(/PRIVATE_KEY|PRIVATE_HEADER|private-generation-id|smoke-sentinel|127\.0\.0\.1|schway-live-/);
     holding = false;
-    const passed = await runLiveProcesses({ ...selection, providers: ["compatible"] }, neverExpires());
+    const passed = await runLiveProcesses({ ...selection, providers: ["compatible"] }, backstopOnly());
     expect(passed.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true,
       diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1, providerRetries: 0,
         httpRequestsStarted: 2, httpResponsesReceived: 2, lastHttpStatus: 200 } });
     expect(calls).toBe(4);
   } finally { release(); server.stop(true); }
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("checkpoint write or rename failures do not change a verified supervised round trip", async () => {
   if (process.platform === "win32") return;
@@ -440,7 +481,7 @@ test("checkpoint write or rename failures do not change a verified supervised ro
       let root = "";
       const before = calls;
       const report = await runLiveProcesses({ ...settings(["compatible"], WORKER_BUDGET_MS), models: { compatible: "gpt-4o" },
-        compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } }, { ...neverExpires(), onWorkspace: path => {
+        compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } }, { ...backstopOnly(), onWorkspace: path => {
         root = path;
         // A directory deterministically rejects writing the temp file or renaming onto the destination.
         mkdirSync(join(path, blockedPath));
@@ -452,7 +493,7 @@ test("checkpoint write or rename failures do not change a verified supervised ro
       await expect(access(root)).rejects.toThrow();
     }
   } finally { server.stop(true); }
-}, 10_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("private worker validates the shared thinking enum before any credential or catalog lookup", async () => {
   const safe = { provider: "grok", model: "grok-4.7", timeoutMs: 500, workspaceRoot: join(tmpdir(), "schway-live-fixture") };
@@ -483,7 +524,7 @@ test("supervised production worker carries exact thinking into both real adapter
           compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" }, env: {
             SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
             OPENAI_API_KEY: "PRIVATE_KEY", XAI_API_KEY: "PRIVATE_XAI_KEY",
-          } }, { workerFile: fixture, ...neverExpires() });
+          } }, { workerFile: fixture, ...backstopOnly() });
         expect(report.scenarios[0]).toMatchObject({ provider, model, status: "passed", toolRoundTrip: true });
         if (explicit) expect(report.scenarios[0]?.thinking).toBe(level);
         else expect(report.scenarios[0]).not.toHaveProperty("thinking");
@@ -510,7 +551,7 @@ test("supervised production worker carries exact thinking into both real adapter
       }
     }
   });
-}, 15_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("supervised account and endpoint discovery refuses unsupported or absent capabilities before inference", async () => {
   if (process.platform === "win32") return;
@@ -523,7 +564,7 @@ test("supervised account and endpoint discovery refuses unsupported or absent ca
           thinking: { [provider]: "medium" }, compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" },
           env: { SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
             SCHWAY_FIXTURE_CATALOG_MODE: catalogMode, XAI_API_KEY: "PRIVATE_KEY" },
-        }, { workerFile: fixture, ...neverExpires() });
+        }, { workerFile: fixture, ...backstopOnly() });
         expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", thinking: "medium", toolRoundTrip: false,
           reason: catalogMode === "failure" ? "thinking_capability_unavailable" : "unsupported_thinking" });
         const requests = JSON.parse(await readFile(requestFile, "utf8")) as Array<{ body?: unknown }>;
@@ -533,7 +574,7 @@ test("supervised account and endpoint discovery refuses unsupported or absent ca
       }
     }
   });
-}, 15_000);
+}, LANE_TEST_TIMEOUT_MS);
 
 test("supervisor rejects dropped, changed, invalid or unsolicited thinking in bounded replies", async () => {
   if (process.platform === "win32") return;
@@ -547,14 +588,14 @@ const input = JSON.parse(raw);
 console.log(JSON.stringify({ provider: input.provider, model: input.model, thinking: ${JSON.stringify(returned) ?? "undefined"},
 authSource: "env", status: "passed", reason: "verified", durationMs: 1, toolRoundTrip: true }));`);
       const report = await runLiveProcesses({ ...settings(["openai-api-key"]),
-        ...(expected ? { thinking: { "openai-api-key": expected } } : {}) }, { workerFile, ...neverExpires() });
+        ...(expected ? { thinking: { "openai-api-key": expected } } : {}) }, { workerFile, ...backstopOnly() });
       expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error", toolRoundTrip: false });
       if (expected) expect(report.scenarios[0]?.thinking).toBe(expected);
       else expect(report.scenarios[0]).not.toHaveProperty("thinking");
       expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
     }
   });
-});
+}, LANE_TEST_TIMEOUT_MS);
 
 test("supervisor preserves explicit thinking on timeout and later pending lanes", async () => {
   if (process.platform === "win32") return;
@@ -563,12 +604,10 @@ test("supervisor preserves explicit thinking on timeout and later pending lanes"
   const pending = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 250),
     thinking: { "openai-api-key": "high", compatible: "medium" }, env: { SCHWAY_FIXTURE_MODE: "hang-stream" } },
   { workerFile: fixture, ...deadline.clock, onWorkspace: path => { root = path; } });
-  await waitForModelStart(() => root);
-  await deadline.expire(250);
-  const report = await pending;
+  const report = await expireAfterBarrier(pending, deadline, 250, () => waitForModelStart(() => root));
   expect(report.scenarios).toMatchObject([{ thinking: "high", status: "failed_provider", reason: "timeout" },
     { thinking: "medium", status: "pending", reason: "prior_run_timeout" }]);
-});
+}, LANE_TEST_TIMEOUT_MS);
 
 test("installed thinking option reaches the production worker and unsupported compatible levels make no request", async () => {
   if (process.platform === "win32") return;
@@ -584,7 +623,7 @@ test("installed thinking option reaches the production worker and unsupported co
     for (const level of ["off", "medium"]) {
       const before = calls;
       const proc = Bun.spawn([process.execPath, "run", "live-smoke", "--enable-live", "--provider", "compatible",
-        "--thinking", `compatible=${level}`, "--base-url", `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", INSTALLED_BUDGET_MS], {
+        "--thinking", `compatible=${level}`, "--base-url", `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", String(INSTALLED_BUDGET_MS)], {
         cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "PRIVATE_UNUSED_KEY" }, stdout: "pipe", stderr: "pipe",
       });
       const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -595,7 +634,7 @@ test("installed thinking option reaches the production worker and unsupported co
       expect(stdout + stderr).not.toContain("PRIVATE_UNUSED_KEY");
     }
   } finally { server.stop(true); }
-}, 30_000);
+}, installedTimeout(2));
 
 test("supervised discovery accepts production-size catalogs before both inference rounds", async () => {
   if (process.platform === "win32") return;
@@ -610,7 +649,7 @@ test("supervised discovery accepts production-size catalogs before both inferenc
         compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" },
         env: { SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
           SCHWAY_FIXTURE_CATALOG_BYTES: String(catalogBytes) },
-      }, { workerFile: fixture, ...neverExpires() });
+      }, { workerFile: fixture, ...backstopOnly() });
       expect(report.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true,
         diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1,
           httpRequestsStarted: 3, httpResponsesReceived: 3 } });
@@ -618,4 +657,4 @@ test("supervised discovery accepts production-size catalogs before both inferenc
       expect(requests.filter(request => request.body).map(request => request.body?.model)).toEqual([model, model]);
     }
   });
-}, 15_000);
+}, LANE_TEST_TIMEOUT_MS);

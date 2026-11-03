@@ -70,7 +70,7 @@ if (import.meta.main) {
     await rename(`${target}.tmp`, target);
   };
   // Reply only once the descendant exists, so the supervisor's group kill cannot race its start.
-  // The cap only ends a stuck fixture; the supervising test bounds the run.
+  // The 10 s cap only ends a stuck fixture, before the tests' 15 s lane backstop and 30 s test timeout.
   const descendantPublished = async () => {
     for (const end = Date.now() + 10_000; path && Date.now() < end;) {
       try { await access(`${path}.descendant`); return; } catch { await Bun.sleep(5); }

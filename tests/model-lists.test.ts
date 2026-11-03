@@ -240,7 +240,7 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
     const view = createConversationView(terminal.renderer, { controller, workspaceRoot: root, home, env: {}, secrets: [], quit() {},
       submit: (value, accepted) => dispatchEditorInput(value, controller, async () => false, accepted) });
     const settle = async () => { await Bun.sleep(5); view.refresh(); await terminal.flush(); };
-    /** Settle until the frame shows `text`; the bound only reports a stuck render through the assertion below. */
+    /** Settle until the frame shows `text`; the 5 s bound, inside the 15 s test timeout, reports a stuck render through the assertions below. */
     const waitForFrame = async (text: string) => {
       for (const end = Date.now() + 5_000; !terminal.captureCharFrame().includes(text) && Date.now() < end;) await settle();
       return terminal.captureCharFrame();
@@ -302,7 +302,7 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
       }
     } finally { view.destroy(); controller.dispose(); terminal.renderer.destroy(); }
   });
-});
+}, 15_000);
 
 test("initial sign-in preserves memory failure warnings while suppressing setup success notices", async () => {
   await withTempDir(async root => {

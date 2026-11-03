@@ -20,7 +20,8 @@ let submission: Promise<unknown> | undefined;
 let selection: Promise<unknown> | undefined;
 // A fresh Bun draft worker can miss the interactive 500 ms exit budget on a loaded CI runner. These
 // processes prove memory restoration, not exit latency, so their exit draft save gets an explicit 4 s
-// budget, still inside the 8 s bound each test puts on the whole process.
+// budget. That fits inside the 8 s kill bound the tests put on each process, and each test's timeout
+// covers all of its processes at that bound (`fixtureProcessesTimeout` in interactive-memory.test.ts).
 const DRAFT_SAVE_BUDGET_MS = 4000;
 const exitPath = join(import.meta.dir, "../../src/drafts/exit.ts");
 const exit = await import(exitPath) as typeof import("../../src/drafts/exit.ts");
