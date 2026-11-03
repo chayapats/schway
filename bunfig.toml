@@ -8,3 +8,5 @@ silent = true
 
 [test]
 root = "."
+# Pin the credential-store lock to a per-run temporary file (see the preload).
+preload = ["./tests/fixtures/credential-store-lock/isolate-preload.ts"]

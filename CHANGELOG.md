@@ -12,6 +12,15 @@
 
 ### Fixed
 
+- Serialize OS secure-store saves and deletions across processes with a SQLite
+  `BEGIN IMMEDIATE` lock that the operating system releases when its holder
+  exits, even on SIGKILL. Concurrent contenders after a crashed holder can no
+  longer remove a live holder's lock, so two Schway mutations never overlap.
+  The bounded wait still fails closed with a sanitized store error.
+  `SCHWAY_CREDENTIAL_LOCK_FILE` moves the lock to an absolute path. An earlier
+  release's lock directory is honored but never removed; once the lock file
+  exists, earlier releases fail closed on saves and deletions until upgraded
+  (#428).
 - Classify Grok subscription spending-limit denials as `quota-exceeded`, with
   a subscription usage link and no API-key billing fallback. Catalog, inference
   and host status agree; plan rejection remains distinct from transient

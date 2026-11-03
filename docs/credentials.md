@@ -155,6 +155,90 @@ working secure storage. ChatGPT subscription OAuth uses a separate stored
 identity; see [subscription login](configuration.md#chatgpt-subscription-codex-oauth).
 Credentials are never migrated from another CLI.
 
+## Credential-store lock
+
+Saves, deletions and exact-value cleanups that Schway makes in the OS secure
+store take one lock shared by every local Schway process, including separate
+host runs that share a credential lifecycle. Two Schway-mediated mutations never
+overlap. Reads stay outside the lock. Raw keychain tools and other applications
+are outside this guarantee.
+
+**Primitive.** The lock is a SQLite `BEGIN IMMEDIATE` transaction (`bun:sqlite`)
+on a lock file. The transaction writes nothing and creates no journal. SQLite
+holds it as a POSIX advisory record lock (`fcntl`) on macOS and Linux, including
+Raspberry Pi ARM64, and as a `LockFileEx` lock on Windows. The operating system
+drops the lock when the holding process exits for any reason, including SIGKILL,
+an out-of-memory kill or a crash. There is no owner file, liveness check or stale
+lock to remove, so concurrent contenders cannot remove each other's lock.
+Record locks belong to the process, so a child process such as a running tool
+never keeps the lock after Schway exits. The child-process tests check blocking
+and SIGKILL release on whichever platform runs them; Windows is not covered.
+
+**Crash semantics.** If the holder dies mid-mutation, the next contender gets the
+lock as soon as the operating system reaps that process. Whatever the secure
+store committed before the crash stays; Schway does not roll it back. Guarded
+host writes keep their own exact-value cleanup rules (see
+[device-code sign-in](host.md#device-code-sign-in)).
+
+**Bounded wait.** A contender polls every 10 ms for up to 2 seconds while another
+process holds the lock, without blocking the JavaScript event loop. If the
+holder outlasts the wait, the operation fails closed before contacting the
+secure store, with the usual sanitized error, for example `Cannot save credential
+in the OS secure store. …`. Nothing changes, and retrying is safe. A second
+acquisition inside one process waits out the same bound and fails closed rather
+than deadlocking.
+
+**Location.** The lock file is `~/.schway/credential-store.lock`, created once
+with mode `0600` and never removed; missing parent directories are created with
+mode `0700`. Without a home directory, Schway uses
+`schway-credential-store-<uid>.lock` in the system temporary directory. The lock
+file must be on a local filesystem with POSIX advisory locks; network homes (NFS
+without a lock daemon, some SMB mounts) may not provide them. Do not delete or
+replace the file while any Schway process runs: a new file lets a later process
+lock a different inode than the current holder.
+
+**Override.** Set `SCHWAY_CREDENTIAL_LOCK_FILE` to an absolute file path to move
+the lock, for example for an isolated test root or a service identity whose
+home is read-only (systemd `ProtectHome=`). Point it at a writable local path
+such as one under the unit's `StateDirectory=`. Schway reads the variable on every
+save or deletion and creates missing parent directories. A blank value uses the
+default location. A relative value is refused: saves and deletions fail closed
+with the sanitized store error immediately, without contacting the store.
+Processes that should serialize must use the same path; processes with
+different paths do not exclude each other.
+
+**Upgrading from earlier releases.** Earlier releases used a directory at the
+same path as their lock and removed a stopped owner's directory by path, which
+could admit two writers. A directory at the lock path is that older lock.
+Current Schway honors it for the bounded wait and never removes it. Once the
+older holder releases it, current Schway creates the lock file in its place.
+Earlier releases then cannot create their directory or read an owner from the
+file, so their saves and deletions fail closed until they are upgraded. Only one
+scheme can admit a writer. Stop or upgrade older Schway processes, including
+embedded copies, before relying on the new lock.
+
+If saves and deletions keep failing and `~/.schway/credential-store.lock` is a
+directory, an older Schway crashed while holding it. Confirm that no older Schway
+process is running, then remove that directory.
+
+While older Schway processes still run, they keep their own stale-removal race
+with each other. At the moment of upgrade, that race could also remove a
+just-created lock file and admit an older writer alongside a newer one. It needs
+a crashed older holder and two older contenders within microseconds. Stopping
+older processes before upgrading avoids it.
+
+**Reusing the primitive.** Embedders that build their own lock this way should
+follow the same rules. Create the file once with an exclusive create (`wx`).
+Never open an existing lock file outside SQLite in the locking process: under
+POSIX rules, closing any descriptor for that file can release all of the
+process's record locks on it. Never delete or replace the file. Use
+`PRAGMA busy_timeout = 0` and poll asynchronously, because a SQLite busy timeout
+blocks the thread, so an in-process holder could never release. A second
+connection in the same process contends exactly like another process. Close the
+connection to release the lock. Evidence is in `tests/credential-store-lock.test.ts`,
+which holds the lock in child processes, kills them with SIGKILL and races
+contenders after a crashed holder.
+
 ## ChatGPT catalog protocol compatibility
 
 Schway pins the catalog request's `client_version` to the verified Codex protocol
