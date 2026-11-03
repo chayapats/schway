@@ -386,3 +386,42 @@ test("a failed renewal is left for the exit notice only when no waiting caller r
   expect(takeUnsavedRenewals()).toEqual(["grok"]);
   expect(takeUnsavedRenewals()).toEqual([]);
 });
+
+test("a renewal that a sign-in or sign-out replaced leaves nothing for the exit notice", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const { saveSubscriptionTokens, deleteSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const store = fakeCredentialStore();
+  const expired = { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 };
+  let release!: () => void, fail = false;
+  const fetch: GrokFetch = async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return fail ? json({ error: "invalid_grant" }, 400) : json({ access_token: "renewed", refresh_token: "rotated", expires_in: 3600 });
+  };
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+  const stoppedRenewal = async (during: () => Promise<unknown>) => {
+    release = undefined!;
+    const stop = new AbortController();
+    const stopped = refresher.getValidAccessToken(stop.signal);
+    while (!release) await flush();
+    stop.abort();
+    await expect(stopped).rejects.toThrow();
+    await during();
+    release();
+    for (let i = 0; i < 5; i++) await flush();
+  };
+
+  // Signing out while the stopped turn's renewal is in flight fences its write; that is the user's choice, not a loss.
+  await saveSubscriptionTokens(store, expired);
+  await stoppedRenewal(() => deleteSubscriptionTokens(store));
+  expect(takeUnsavedRenewals()).toEqual([]);
+
+  // A failure recorded earlier stops mattering once the user signs in again.
+  await saveSubscriptionTokens(store, expired);
+  fail = true;
+  await stoppedRenewal(async () => {});
+  await saveSubscriptionTokens(store, { ...expired, accessToken: "fresh", expiresAt: 10_000 });
+  expect(takeUnsavedRenewals()).toEqual([]);
+});

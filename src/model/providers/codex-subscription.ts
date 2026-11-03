@@ -27,7 +27,7 @@ import {
   replaceCredential,
   type CredentialStore,
 } from "../../auth/store.ts";
-import { trackSentRenewal, type TrackedRenewal } from "../../auth/renewals.ts";
+import { forgetUnsavedRenewals, trackSentRenewal, type TrackedRenewal } from "../../auth/renewals.ts";
 
 /** Public Codex CLI OAuth client shipped in the official Codex CLI binary, shared rather than private. */
 export const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -307,6 +307,7 @@ export async function saveSubscriptionTokens(
   // invalidate a concurrent refresh, which would then misreport as revoked.
   await serializeCodexWrite(state, () => writeCodexTokens(store, tokens));
   state.generation++;
+  forgetUnsavedRenewals("codex");
 }
 
 /** Persist a completed sign-in, reporting the write-start boundary and successful secure-store commit. */
@@ -331,6 +332,7 @@ export async function clearSubscriptionTokens(
     catch (error) { throw preserveRefusal("delete", error); }
   });
   state.generation++;
+  forgetUnsavedRenewals("codex");
   return existed;
 }
 
@@ -609,7 +611,8 @@ export function createSubscriptionTokenRefresher(input: {
         void promise.catch(() => {});
         // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
         // the process from exiting before a rotated token is stored.
-        refresh = { generation, promise, tracked: trackSentRenewal("codex", promise.then(() => true, () => false)) };
+        // A renewal that a sign-in or sign-out replaced leaves the sign-in the user chose, so it needs no warning.
+        refresh = { generation, promise, tracked: trackSentRenewal("codex", promise.then(() => true, () => state.generation !== generation)) };
         state.refresh = refresh;
         onRenewal?.(promise.then(() => {}, () => {}));
       }

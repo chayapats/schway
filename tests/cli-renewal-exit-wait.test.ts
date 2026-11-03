@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createRenewalExit, RENEWAL_EXIT_LIMIT_MS, RENEWAL_TERMINATE_LIMIT_MS, renewedSignInNotSaved, SAVING_RENEWED_SIGN_IN,
   SAVING_RENEWED_SIGN_IN_HINT, type RenewalExitOptions } from "../src/cli/renewal-exit.ts";
-import { takeUnsavedRenewals, trackSentRenewal, type RenewalRoute, type SentRenewal } from "../src/auth/renewals.ts";
+import { forgetUnsavedRenewals, takeUnsavedRenewals, trackSentRenewal, withoutShowingRenewalFailures, type RenewalRoute, type SentRenewal } from "../src/auth/renewals.ts";
 
 const NOT_SAVED = "Renewed sign-in not saved · /login chatgpt sign in again if rejected";
 
@@ -158,7 +158,7 @@ test("a renewal sent while the wait runs is waited for too", async () => {
   const lines: string[] = [];
   const first = Promise.withResolvers<boolean>(), second = Promise.withResolvers<boolean>();
   const live = new Set<SentRenewal>([{ route: "codex", saved: first.promise }]);
-  const exit = createRenewalExit({ stderr: { write: text => { lines.push(text); } }, interactive: false, limitMs: 60_000, renewals: () => [...live] });
+  const exit = createRenewalExit({ stderr: { write: text => { lines.push(text); } }, interactive: false, limitMs: 60_000, renewals: () => [...live], unsaved: () => [] });
   const settling = exit.settle(0);
   live.add({ route: "grok", saved: second.promise });
   first.resolve(true);
@@ -194,4 +194,30 @@ test("the registry keeps each failed save until it is reported, and only once", 
   await new Promise<void>(resolve => setImmediate(resolve));
   expect(takeUnsavedRenewals().sort()).toEqual(["codex", "grok"]);
   expect(takeUnsavedRenewals()).toEqual([]);
+});
+
+test("a later saved renewal or a sign-in on the route clears its earlier failure", async () => {
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  trackSentRenewal("codex", Promise.resolve(false));
+  await flush();
+  trackSentRenewal("codex", Promise.resolve(true));
+  trackSentRenewal("grok", Promise.resolve(false));
+  await flush();
+  forgetUnsavedRenewals("grok");
+  expect(takeUnsavedRenewals()).toEqual([]);
+});
+
+test("a failure shown to a waiting caller is not named again, unless that caller never shows errors", async () => {
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  trackSentRenewal("codex", Promise.resolve(false)).shown();
+  await flush();
+  expect(takeUnsavedRenewals()).toEqual([]);
+  // The scope must reach a caller resumed inside an async generator, as a compaction summary's model stream is.
+  const tracked = trackSentRenewal("grok", Promise.resolve(false));
+  async function* stream() { await flush(); tracked.shown(); yield 1; }
+  await withoutShowingRenewalFailures(async () => { for await (const _ of stream()) await flush(); });
+  await flush();
+  expect(takeUnsavedRenewals()).toEqual(["grok"]);
 });

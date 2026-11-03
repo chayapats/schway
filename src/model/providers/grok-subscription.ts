@@ -4,7 +4,7 @@ import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
 import { abortableCatalogOperation, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { GROK_CHALLENGE_ERROR, GROK_QUOTA_ERROR } from "../grok-errors.ts";
 import { isRefusedRedirect, redirectRefusal } from "../dispatch.ts";
-import { trackSentRenewal, type TrackedRenewal } from "../../auth/renewals.ts";
+import { forgetUnsavedRenewals, trackSentRenewal, type TrackedRenewal } from "../../auth/renewals.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -321,14 +321,17 @@ async function writeTokens(store: CredentialStore, tokens: GrokTokens): Promise<
 export async function saveSubscriptionTokens(store: CredentialStore, tokens: GrokTokens): Promise<void> {
   const state = credentialLifecycle(store); state.generation++;
   await serializeCredentialWrite(state, () => writeTokens(store, tokens));
+  forgetUnsavedRenewals("grok");
 }
 /** Invalidate pending refreshes and delete the login after earlier credential writes finish. */
 export async function deleteSubscriptionTokens(store: CredentialStore): Promise<boolean> {
   const state = credentialLifecycle(store); state.generation++;
-  return serializeCredentialWrite(state, async () => {
+  const removed = await serializeCredentialWrite(state, async () => {
     try { return await store.delete(grokSubscriptionIdentity()); }
     catch (error) { throw preserveRefusal("delete", error); }
   });
+  forgetUnsavedRenewals("grok");
+  return removed;
 }
 /** Inputs retain the original lifecycle identity when discovery memoizes its first credential read. */
 interface SubscriptionTokenInput {
@@ -408,7 +411,8 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       void promise.catch(() => {});
       // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
       // the process from exiting before a rotated token is stored.
-      refresh = { generation, promise, tracked: trackSentRenewal("grok", promise.then(() => true, () => false)) };
+      // A renewal that a sign-in or sign-out replaced leaves the sign-in the user chose, so it needs no warning.
+      refresh = { generation, promise, tracked: trackSentRenewal("grok", promise.then(() => true, () => state.generation !== generation)) };
       state.refresh = refresh;
       onRenewal?.(promise.then(() => {}, () => {}));
     }

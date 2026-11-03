@@ -2,6 +2,7 @@ import { GROK_QUOTA_ERROR } from "../model/grok-errors.ts";
 import { isOpenRouterEndpoint, resolveThinkingSelection } from "../model/thinking.ts";
 import { openRouterModelCapabilities } from "../model/model-list.ts";
 import { isOpenAIAuthPreference, resolveProviderCredential } from "../auth/credentials.ts";
+import { withoutShowingRenewalFailures } from "../auth/renewals.ts";
 import { redactSecrets } from "../auth/secrets.ts";
 import type { ContextManager } from "../context/manager.ts";
 import { listCatalog, type ModelCapability } from "../model/catalog.ts";
@@ -225,7 +226,12 @@ export abstract class ModelsLayer extends CommandsLayer {
   }
 
   /** Fill connected routes together so one slow list cannot consume another's deadline. */
-  protected async loadRouteModelLists(signal: AbortSignal, current: () => boolean): Promise<void> {
+  protected loadRouteModelLists(signal: AbortSignal, current: () => boolean): Promise<void> {
+    // A list failure shows only behind F2, so a renewal failure here is still named when the CLI exits.
+    return withoutShowingRenewalFailures(() => this.fillRouteModelLists(signal, current));
+  }
+
+  private async fillRouteModelLists(signal: AbortSignal, current: () => boolean): Promise<void> {
     const load = this.credentials?.listRouteModels;
     if (!current()) return;
     const tasks: Promise<void>[] = [];
