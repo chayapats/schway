@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Packs the checked-out commit as schway-<version>-<short-sha>.tgz with a matching .sha256 file in <dir>,
 # verifies the checksum, then installs that exact tarball in the packed-consumer test. When GITHUB_OUTPUT is
-# set, it records `name` (the tarball without .tgz) and `dir` for the upload step. Nothing leaves this machine.
+# set, it records `name` (the tarball without .tgz) and `dir` for the workflow's upload step; the script
+# itself uploads nothing.
 #   pack-artifact.sh <dir>
 set -euo pipefail
 
