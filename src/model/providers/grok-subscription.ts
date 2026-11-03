@@ -380,6 +380,8 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       const refreshToken = tokens.refreshToken, controller = new AbortController(), replaced = state.replaced;
       // Every renewal keeps this safety ceiling; a caller's earlier cancellation or deadline detaches only its wait.
       const timer = setTimeout(() => controller.abort(new DOMException("Refresh timed out", "TimeoutError")), input.timeoutMs ?? 30_000);
+      // Set once this renewal's own write lands, so a sign-in that fences it afterwards cannot make it look lost.
+      let landed = false;
       const promise = (async () => {
         let renewed: GrokTokens;
         try {
@@ -401,6 +403,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
           try { wrote = await replaceCredential(owner, grokSubscriptionIdentity(), startedFrom!, JSON.stringify(merged)); }
           catch (error) { throw preserveRefusal("save", error); }
           if (!wrote) return loginStoredMeanwhile(owner, merged, input.now);
+          landed = true;
           if (state.generation !== generation) throw new Error(grokRevokedSessionError());
           state.generation++;
           return merged;
@@ -416,7 +419,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
       // the process from exiting before a rotated token is stored.
       // A renewal that a landed sign-in or sign-out replaced leaves the sign-in the user chose, so it needs no warning.
-      refresh = { generation, promise, tracked: trackSentRenewal("grok", promise.then(() => true, () => state.replaced !== replaced)) };
+      refresh = { generation, promise, tracked: trackSentRenewal("grok", promise.then(() => true, () => landed || state.replaced !== replaced)) };
       state.refresh = refresh;
       onRenewal?.(promise.then(() => {}, () => {}));
     }

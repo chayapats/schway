@@ -30,6 +30,7 @@ import {
   buildCodexAuthorizeUrl,
   clearPendingBrowserAttempt,
   clearSubscriptionTokens,
+  recordSubscriptionSignOut,
   codexRequestHeaders,
   createCodexSubscriptionModel,
   createPkceChallenge,
@@ -2196,6 +2197,11 @@ test("a Codex renewal that a sign-out replaced leaves nothing for the exit notic
   // Signing out while the stopped turn's renewal is in flight fences its write; that is the user's choice, not a loss.
   await saveSubscriptionTokens(store, expired);
   await stoppedRenewal(() => clearSubscriptionTokens(store));
+  expect(takeUnsavedRenewals()).toEqual([]);
+
+  // The TUI deletes directly, so a hung renewal write cannot hold sign-out, then records the sign-out the same way.
+  await saveSubscriptionTokens(store, expired);
+  await stoppedRenewal(async () => { await store.delete(codexSubscriptionIdentity()); recordSubscriptionSignOut(store); });
   expect(takeUnsavedRenewals()).toEqual([]);
 
   // A failure recorded earlier stops mattering once the user signs out.

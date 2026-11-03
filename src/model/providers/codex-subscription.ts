@@ -331,9 +331,14 @@ export async function clearSubscriptionTokens(
     try { return await store.delete(codexSubscriptionIdentity()); }
     catch (error) { throw preserveRefusal("delete", error); }
   });
-  state.generation++;
-  forgetUnsavedRenewals("codex");
+  recordSubscriptionSignOut(store);
   return existed;
+}
+
+/** After the subscription identity was deleted, fence off renewals still in flight and clear the route's unnamed failure. */
+export function recordSubscriptionSignOut(store: CredentialStore): void {
+  codexLifecycle(store).generation++;
+  forgetUnsavedRenewals("codex");
 }
 
 /** Parse stored subscription tokens, rejecting malformed or secretless payloads. */

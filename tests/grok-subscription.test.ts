@@ -457,3 +457,36 @@ test("a Grok sign-in whose write fails still leaves the replaced renewal for the
   for (let i = 0; i < 5; i++) await flush();
   expect(takeUnsavedRenewals()).toEqual(["grok"]);
 });
+
+test("a Grok renewal whose own write landed is not named, even when a failed sign-in fences it right after", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const { saveSubscriptionTokens, loadSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const saved = fakeCredentialStore();
+  let signIn: Promise<unknown> | undefined;
+  const store: typeof saved = { ...saved, async set(identity, value) {
+    if (value.includes("signed-in-access")) throw new Error("secure store unavailable");
+    await saved.set(identity, value);
+    // The renewal's write has landed; a sign-in starts before the renewal's own fence check, then fails to store.
+    if (value.includes("rotated") && !signIn) signIn = saveSubscriptionTokens(store, { accessToken: "signed-in-access", obtainedAt: 0 }).catch(() => {});
+  } };
+  await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 });
+  let release!: () => void;
+  const fetch: GrokFetch = async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return json({ access_token: "renewed", refresh_token: "rotated", expires_in: 3600 });
+  };
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+  const stop = new AbortController();
+  const stopped = refresher.getValidAccessToken(stop.signal);
+  while (!release) await flush();
+  stop.abort();
+  await expect(stopped).rejects.toThrow();
+  release();
+  for (let i = 0; i < 10; i++) await flush();
+  await signIn;
+  expect((await loadSubscriptionTokens(saved))?.refreshToken).toBe("rotated");
+  expect(takeUnsavedRenewals()).toEqual([]);
+});
