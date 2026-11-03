@@ -592,7 +592,9 @@ or inference for the description, whether the route sends a provider-enforced
 output cap. Codex reports `{ enforced: false, default: null, maximum: null }`:
 its subscription endpoint rejects output caps, so the adapter never sends one.
 Grok reports `enforced: true` with `default` and `maximum` set to the cap the
-adapter sends when you set none, from Schway's model catalog. This uses the same
+adapter sends when you set none. That value comes from Schway's model catalog;
+xAI models missing from it, which today is all of them, get Schway's
+conservative fallback of 16,384. It is not a provider limit. This uses the same
 listing surface as effort support, so one read covers both.
 
 **Set and require a cap.** `createModel({ maxOutputTokens })` sends exactly that
@@ -600,12 +602,16 @@ cap on every call, compaction summaries and auth-retry resends included. It must
 be a positive safe integer at or below `maximum`. `requireOutputCap: true` makes
 every call carry a provider-enforced cap. On a route that sends no cap, either
 option rejects `invalid-input` at `createModel`, before any request; out-of-range
-values reject the same way. Each body is checked before the authorizer runs, and
+values reject the same way. Malformed options share `invalid-input`, so check
+`outputCap.enforced` and `outputCap.maximum` first. Each body is checked before the authorizer runs, and
 a body without the required cap is refused with an error `isRouteControlRefused`
 recognizes. Without these options, request bytes are unchanged, and the CLI/TUI
 path is unchanged. `submitWithRoute` takes no cap options; it keeps the route
-default, which `HostDispatch.outputCap` reports. Use the #444 authorizer for a
-call-count ceiling.
+default, which `HostDispatch.outputCap` reports. Capped work uses `createModel`
+with `submit`, so its results carry `submit`'s error message rather than
+`submitWithRoute`'s `auth` detail. A wrapper must pass `call` as-is or spread to
+keep each attempt's `outputCap`. Use the #444 authorizer for a call-count
+ceiling.
 
 **Observe what was sent.** Every `HostDispatch` carries `outputCap: { sent }`
 (`HostDispatchOutputCap`), the exact `max_output_tokens` value in the body, or

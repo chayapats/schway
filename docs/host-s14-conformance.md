@@ -160,8 +160,9 @@ To bound output, read `outputCap.enforced` from the route description or a liste
 model. On Grok, pass `maxOutputTokens` (at most `outputCap.maximum`) and
 `requireOutputCap: true` to `createModel`; on Codex, `requireOutputCap` rejects
 `invalid-input` because the endpoint accepts no cap. Read `HostDispatch.outputCap`
-and each attempt's `outputCap.sent`. Caps are not monetary bounds; subscription
-spend stays unknown.
+and each attempt's `outputCap.sent`. Grok's 16,384 default is Schway's
+conservative catalog fallback, not a provider limit. Caps are not monetary
+bounds; subscription spend stays unknown.
 
 | Seam | Coverage |
 | --- | --- |
