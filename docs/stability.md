@@ -132,9 +132,10 @@ The additive `schway.host.dispatch-authorization/v1` and
 route models call immediately before each physical inference send, auth-retry
 resends included, with a frozen credential-free `HostDispatch`. A refusal never
 sends, is never retried, never switches route, model or billing, and adds the
-`dispatch-refused` member to `HostAuthStatusCode`. Route sends refuse HTTP
-redirects; CLI requests are unchanged. Without an authorizer,
-behavior and request bytes are unchanged. The second adds
+`dispatch-refused` member to `HostAuthStatusCode`. Host route models refuse HTTP
+redirects with or without an authorizer, and token refresh requests never follow
+redirects; request bytes are unchanged, and the CLI/TUI inference path is
+unchanged. The second adds
 `HostRunUsage.providerRequests`: exact initial, auth-retry and renewal request
 counts when every model call is observable, and `null` otherwise; a shared
 renewal counts once, for the run that started it. Local readiness accepts an

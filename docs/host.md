@@ -431,26 +431,33 @@ frozen, credential-free `HostDispatch`: `route`, adapter `provider`
 (`codex-subscription` or `xai`), `model`, `kind` (`initial` or `auth-retry`), a
 1-based `sequence` within one model stream, and `bodySha256` plus `bodyBytes` of
 the exact body about to be sent. Bodies carry no credentials; tokens travel only
-in headers the authorizer never sees. Route sends refuse HTTP redirects, so a 3xx
-fails that request instead of resending the body somewhere the authorizer never
-judged; the CLI's own requests are unchanged. Schway keeps credentials, protocol,
-renewal and retries. Renewal requests carry no conversation content, so they are
-counted but not authorized.
+in headers the authorizer never sees. Host route models refuse HTTP redirects,
+with or without an authorizer, so every physical send stays authorized and
+counted: a 3xx fails that request, is not retried, and reports
+`integration-unavailable` with guidance that the endpoint answered with a
+redirect. Request bytes are unchanged, and the CLI/TUI path is unchanged. Token
+refresh requests never follow redirects on any path, so a refresh token is never
+resent and each renewal call is exactly one request. Schway keeps credentials,
+protocol, renewal and retries. Renewal requests carry no conversation content, so
+they are counted but not authorized.
 
 Throwing refuses that send, and so does returning a promise, which is never
 awaited. A refused send never leaves the process; earlier sends in the same run
 may already have, and the refusal text speaks only of the refused request. The
 stream ends with a credential-free refusal error. `isDispatchRefused(error)`
 recognizes that error object by identity only: a copied message, or a provider
-error that echoes the wording, is never treated as a refusal. Direct stream
+error that echoes the wording, is never treated as a refusal. Identity is per
+installed copy of Schway (a module-private set), so a wrapper must rethrow the
+original error or chain it as `cause`, never copy its message. Direct stream
 callers find the authorizer's own error as its `cause`. The loop never retries a
-refusal and never falls back to another route, model or API-key billing. When a
+refusal, even when a wrapper chains it as `cause` above an authorizer error that
+looks transient, and never falls back to another route, model or API-key billing. When a
 run's last model call ended on a refusal, `submitWithRoute` reports
 `auth.status: "dispatch-refused"` and `submit` reports the stable refusal message
 in `error.message`, even if the loop then failed on a consequence such as
 overflow recovery that could not compact. A refusal in one model call, such as a
 pressure compaction the run survives, never hides a later call's own failure.
-Without an authorizer, behavior and request bytes are unchanged. `submit` and `compact` reject `authorizeDispatch` as
+Without an authorizer, route request bytes are unchanged. `submit` and `compact` reject `authorizeDispatch` as
 `invalid-input`: Schway cannot see a host-supplied model's sends, so authorize
 them through a route model instead.
 
@@ -479,14 +486,17 @@ settling it never parses the value or loads an adapter. Rejection is used instea
 of a status so an abandoned check never reads as a credential verdict such as
 `needs-login` or `store-unavailable`. Malformed bounds reject `invalid-input`.
 
-`submitWithRoute` runs its admission readiness read, and the settling read after
-a `cancelled` or `max_turns` loop, inside the run bound: the caller's signal,
-session `cancel()` and `deadlineMs` interrupt a blocked store read, and the lease
-is released when the run settles. An interrupted admission read settles as
-`cancelled` (or `limit_exceeded` at the deadline) with `auth.status:
-"store-unavailable"`, guidance that the store had not answered, and zero
-provider requests. An interrupted settling read settles the same way and reports
-the admission verdict, because the run had not settled yet.
+`submitWithRoute` runs its admission readiness read, and any settling read,
+inside the run bound: the caller's signal, session `cancel()` and `deadlineMs`
+interrupt a blocked store read, and the lease is released when the run settles.
+An interrupted admission read settles as `cancelled` (or `limit_exceeded` at the
+deadline) with `auth.status: "store-unavailable"`, guidance that the store had
+not answered, and zero provider requests. A settling read runs only while the run
+signal is still live: after `max_turns`, or after a `cancelled` loop whose stream
+was aborted without the run signal, such as a lifecycle logout. A caller-cancelled
+run never reads again and reports its admission verdict. An interrupted settling
+read settles as `cancelled` (or `limit_exceeded`) and also reports the admission
+verdict, because the run had not settled yet.
 
 See `tests/host-dispatch-authorization.test.ts`,
 `tests/host-provider-requests.test.ts` and the packed consumer in

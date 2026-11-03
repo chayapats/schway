@@ -136,8 +136,10 @@ that drops `call`); treat it as unknown, never zero. Bound local readiness with
 `checkReadiness({ signal, deadlineMs })`; it rejects `AbortError` or
 `TimeoutError` and never writes. `submitWithRoute` reads readiness inside its run
 bound, so the run's signal, `cancel()` and `deadlineMs` interrupt a blocked store
-read. A wrapping model keeps counts only by passing `call` as-is or spread.
-`isDispatchRefused` matches the thrown refusal by identity, never by message.
+read. A wrapping model keeps counts only by passing `call` as-is or spread, and
+must rethrow a refusal or chain it as `cause`: `isDispatchRefused` matches the
+thrown refusal by identity per installed Schway copy, never by message. Route
+sends refuse redirects and report `integration-unavailable` without retrying.
 
 | Seam | Coverage |
 | --- | --- |
