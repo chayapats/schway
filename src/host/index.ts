@@ -39,6 +39,9 @@ export { beginDeviceSignIn } from "./device-sign-in.ts";
 /** Read-only account catalogs with bounded selectable models and safe route failures. */
 export type { HostModelChoice, HostRouteModels } from "./route-models.ts";
 export { listRouteModels } from "./route-models.ts";
+/** Explicit route credential renewal without inference, sharing single-flight renewal and fencing with runs. */
+export type { HostRouteRenewal, HostRouteRenewalOptions, HostRouteRenewalStatus } from "./route-renewal.ts";
+export { renewAuthRoute } from "./route-renewal.ts";
 /** Quiesced native-state snapshot and validated restore for owned managed sessions. */
 export type {
   HostSessionSnapshot, HostSnapshotArtifact, HostSnapshotArtifactKind, HostSnapshotOptions, HostSnapshotQuarantineReason,
@@ -112,6 +115,8 @@ export interface HostCapabilities {
   readonly effortContract: "schway.host.effort/v1";
   /** Static output-cap support per route and model, opt-in exact or required caps, and the cap sent per send and attempt. */
   readonly outputCapContract: "schway.host.output-cap/v1";
+  /** Explicit route credential renewal without inference, counted and fenced like a run's renewal. */
+  readonly routeRenewalContract: "schway.host.route-renewal/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -278,6 +283,8 @@ export interface HostAuthBinding {
   checkReadiness(options?: import("./auth-routes.ts").HostReadinessOptions): Promise<import("./auth-routes.ts").HostAuthReadiness>;
   /** Create only the selected adapter, optionally authorizing each physical send; a wrapper keeps run counts only by passing `call` as-is or spread. */
   createModel(options?: import("./dispatch.ts").HostRouteModelOptions): Promise<Model>;
+  /** Renew this route's credential at most once without inference, sharing renewal, fencing and lifecycle with this host's runs. */
+  renew(options?: import("./route-renewal.ts").HostRouteRenewalOptions): Promise<import("./route-renewal.ts").HostRouteRenewal>;
 }
 
 /** Headless composition of native loop, context and persistence without CLI or provider construction. */
@@ -343,6 +350,7 @@ const capabilities: HostCapabilities = Object.freeze({
   providerRequestsContract: "schway.host.provider-requests/v1",
   effortContract: "schway.host.effort/v1",
   outputCapContract: "schway.host.output-cap/v1",
+  routeRenewalContract: "schway.host.route-renewal/v1",
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */
