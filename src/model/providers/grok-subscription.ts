@@ -368,7 +368,8 @@ export function createSubscriptionTokenRefresher(input: { store: CredentialStore
  * always sent its one request and counted it for its creator. The bounded reader then consumes that same response. */
 function sendWithRefresh(fetchFn: GrokFetch | undefined, signal: AbortSignal): GrokFetch {
   return (url, init) => {
-    const sent = (fetchFn ?? fetch)(url, { ...init, signal, redirect: "error" });
+    // Promise.resolve accepts an injected fetch that returns a Response directly, as the previous transport did.
+    const sent = Promise.resolve((fetchFn ?? fetch)(url, { ...init, signal, redirect: "error" }));
     // An abandoned renewal may never read this response: observe its failure and release its body.
     sent.then(response => { if (signal.aborted) void response.body?.cancel().catch(() => {}); }, () => {});
     return boundedCatalogFetch({ fetch: () => sent, signal, label: "Grok subscription" })(url, init);
