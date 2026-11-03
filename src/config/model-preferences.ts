@@ -1,6 +1,6 @@
-import { Database } from "bun:sqlite";
-import { mkdirSync, closeSync, openSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { openPrivateDatabase, proveWritable } from "../storage/sqlite-file-lock.ts";
 
 /** User-wide opaque route identities ordered by pin time and successful use. */
 export interface ModelPreferencesSnapshot {
@@ -38,11 +38,19 @@ export class ModelPreferences {
     if (change && !validIdentity(change.identity)) throw new Error("Invalid model identity");
     if (change?.model && (!validIdentity(change.model.groupIdentity) || !validModelId(change.model.modelId))) throw new Error("Invalid model identity");
     mkdirSync(join(this.path, ".."), { recursive: true, mode: 0o700 });
-    try { closeSync(openSync(this.path, "wx", 0o600)); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-    const db = new Database(this.path);
+    // A missing database is created empty and private without a descriptor outside SQLite. Unlike the lock files, the
+    // connection is not pinned: it lives only within this synchronous call, so it stays reachable until closed below.
+    const db = openPrivateDatabase(this.path);
     try {
-      db.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE; CREATE TABLE IF NOT EXISTS preferences (identity TEXT PRIMARY KEY, pinned INTEGER, recent INTEGER, model TEXT, route TEXT)");
+      // One statement per exec: Bun reports only the last statement's error, and a lost BEGIN IMMEDIATE error
+      // would run every later statement unlocked, each in its own autocommit transaction.
+      db.exec("PRAGMA busy_timeout = 0");
+      db.exec("BEGIN IMMEDIATE");
+      db.exec("CREATE TABLE IF NOT EXISTS preferences (identity TEXT PRIMARY KEY, pinned INTEGER, recent INTEGER, model TEXT, route TEXT)");
+      // A read-only connection's BEGIN IMMEDIATE takes only a read lock beside a writer, so refuse it before a change
+      // reads the rows it merges. A plain read still runs: its shared lock gives a consistent snapshot and it writes
+      // nothing. The probe changes nothing, and the database keeps its rollback journal, which a crash mid-commit needs.
+      if (change) proveWritable(db, "preferences");
       const rows = db.query("SELECT identity, pinned, recent, model, route FROM preferences").all() as { identity: string; pinned: number | null; recent: number | null; model: string | null; route: string | null }[];
       if (rows.length > 160 || rows.some(row => !validIdentity(row.identity) || !validOrder(row.pinned) || !validOrder(row.recent) || (row.model !== null || row.route !== null) && (!validModelId(row.model) || !validIdentity(row.route)))) throw new Error("Invalid model preferences");
       if (change) {

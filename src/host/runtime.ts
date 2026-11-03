@@ -31,6 +31,7 @@ import { HostImageError, MAX_IMAGE_BYTES, inputImages, requestImages, validateIm
 import { imageProbeRecords, type HostImageRoute } from "./image-input.ts";
 import { managedSessionInventory, type HostSessionInventoryOptions } from "./session-inventory.ts";
 import { acquireCredentialLifecycle, type CredentialLifecycleLease } from "./credential-lifecycle.ts";
+import { renewSelectedRoute } from "./route-renewal.ts";
 import { createRunMeter, type HostDispatchAuthorizer, type RunMeter } from "./dispatch.ts";
 import { DISPATCH_REFUSED_MESSAGE, dispatchRefusedError, redirectRefusedError } from "../model/dispatch.ts";
 
@@ -282,6 +283,10 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
     },
     async createModel(options?: import("./dispatch.ts").HostRouteModelOptions) {
       return createAuthRouteModel(authSelection, options);
+    },
+    // The runtime's own selection keys the effective store, so renewal joins this host's runs.
+    async renew(options?: import("./route-renewal.ts").HostRouteRenewalOptions) {
+      return renewSelectedRoute(authSelection, authSelection, options);
     },
   }) : undefined;
   let closed = false, opening = 0;

@@ -326,7 +326,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
         let renewed: GrokTokens;
         try {
           renewed = await refreshSubscriptionTokens({ refreshToken, now: input.now, signal: controller.signal,
-            fetch: boundedCatalogFetch({ fetch: countingRenewalFetch(input.fetch, onRenewal), signal: controller.signal, label: "Grok subscription" }) });
+            fetch: sendWithRefresh(countingRenewalFetch(input.fetch, onRenewal), controller.signal) });
         } catch (error) {
           if (controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") throw new Error(grokRefreshFailedError("timed out"));
           throw error;
@@ -363,6 +363,17 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
 /** Share renewal per store while fencing refresh writes against logout and replacement sign-ins. */
 export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number }) {
   return { getValidAccessToken: (signal?: AbortSignal, rejectedToken?: string, onRenewal?: () => void) => resolveSubscriptionToken(input, signal, rejectedToken, onRenewal) };
+}
+/** Bounded refresh transport that sends in the same step that creates the shared renewal, so a renewal that exists has
+ * always sent its one request and counted it for its creator. The bounded reader then consumes that same response. */
+function sendWithRefresh(fetchFn: GrokFetch | undefined, signal: AbortSignal): GrokFetch {
+  return (url, init) => {
+    // Promise.resolve accepts an injected fetch that returns a Response directly, as the previous transport did.
+    const sent = Promise.resolve((fetchFn ?? fetch)(url, { ...init, signal, redirect: "error" }));
+    // An abandoned renewal may never read this response: observe its failure and release its body.
+    sent.then(response => { if (signal.aborted) void response.body?.cancel().catch(() => {}); }, () => {});
+    return boundedCatalogFetch({ fetch: () => sent, signal, label: "Grok subscription" })(url, init);
+  };
 }
 async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;

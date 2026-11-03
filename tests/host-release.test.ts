@@ -98,6 +98,7 @@ test("packed release artifact installs without private source access and adverti
       dataContract: "schway.host.managed-session-data/v1",
       snapshotContract: "schway.host.session-snapshot/v1",
       dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1",
+      routeRenewalContract: "schway.host.route-renewal/v1",
       providerRequestsContract: "schway.host.provider-requests/v1",
       effortContract: "schway.host.effort/v1",
       outputCapContract: "schway.host.output-cap/v1",

@@ -386,6 +386,10 @@ follow the same rules:
   the file unchanged and creates no side file.
 - Use `PRAGMA busy_timeout = 0` and poll asynchronously. A SQLite busy timeout
   blocks the thread, so an in-process holder could never release.
+- Run `BEGIN IMMEDIATE` as its own statement, or as the last one in an `exec`.
+  Bun's `Database.exec` reports only the last statement's error, so a busy
+  `BEGIN IMMEDIATE` followed by other statements is silently skipped, and those
+  statements then run unlocked.
 - Keep a strong reference to the holding connection until you close it. If the
   garbage collector finalizes it, for example while the holder awaits a promise
   nothing else references, the lock is dropped.
@@ -396,6 +400,15 @@ Evidence is in `tests/credential-store-lock.test.ts`, which holds the lock in
 child processes, kills them with SIGKILL, races contenders that start after a
 crashed holder or are already polling when it dies, and refuses read-only
 connections beside a live holder.
+
+Schway's other SQLite locks use the same implementation: the history, undo
+and interactive-memory lock files, and the model-preferences database. Each
+keeps its own wait: history waits up to its bound, while undo and interactive
+memory reject contention at once. The preferences database has content, so it
+skips the rules for an empty lock file and keeps its rollback journal. Before a
+change, it proves the write lock with a deletion that matches no row. A plain
+read skips that check, because a read-only connection still reads a consistent
+snapshot and writes nothing. `tests/sqlite-file-locks.test.ts` covers each one.
 
 ## ChatGPT catalog protocol compatibility
 

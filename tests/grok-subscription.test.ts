@@ -87,6 +87,17 @@ test("single-flight refresh persists rotated tokens and missing rotation retains
   const noRotation = createSubscriptionTokenRefresher({ store, fetch: async () => json({ access_token: "newer" }) });
   await noRotation.getValidAccessToken(undefined, "new"); expect((await loadSubscriptionTokens(store))!.refreshToken).toBe("rotated");
 });
+test("refresh accepts an injected fetch that returns a Response directly", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { saveSubscriptionTokens, loadSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const store = fakeCredentialStore();
+  await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 });
+  // Not async: the fetch seam has always tolerated a synchronous Response.
+  const fetch = (() => json({ access_token: "new", refresh_token: "rotated", expires_in: 3600 })) as unknown as GrokFetch;
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+  expect(await refresher.getValidAccessToken()).toBe("new");
+  expect((await loadSubscriptionTokens(store))!.refreshToken).toBe("rotated");
+});
 test("Grok models refresh once on 401, filter chat models, and map plan or revoked errors", async () => {
   const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
   const { saveSubscriptionTokens, fetchSubscriptionModels } = await import("../src/model/providers/grok-subscription.ts");

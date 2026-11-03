@@ -111,7 +111,7 @@ now ship in the S15 slice below. Do not add Jit-owned refresh or retry protocols
 
 ## S15 dispatch authorization and provider requests
 
-Two more additive slices remain under `schway.host.release/v2`:
+These additive slices remain under `schway.host.release/v2`:
 
 | Capability property | Exact version |
 | --- | --- |
@@ -119,8 +119,11 @@ Two more additive slices remain under `schway.host.release/v2`:
 | `providerRequestsContract` | `schway.host.provider-requests/v1` |
 | `effortContract` | `schway.host.effort/v1` |
 | `outputCapContract` | `schway.host.output-cap/v1` |
+| `routeRenewalContract` | `schway.host.route-renewal/v1` |
 
-Require both before reporting governed model dispatch as guarded. Pass a
+`routeRenewalContract` adds renewal that sends no inference. A process that may start after token expiry calls `host.auth.renew()`, or `renewAuthRoute(selection)` with the same `lifecycle`, before `listRouteModels`. Decide on the result's `outcome`; see [the host guide](host.md).
+
+Require the dispatch and provider-request contracts before reporting governed model dispatch as guarded. Pass a
 synchronous `authorizeDispatch` to `submitWithRoute(input, { authorizeDispatch })`
 or to `host.auth.createModel({ authorizeDispatch })` for `submit` and `compact`.
 It runs once per physical inference send, immediately before the request starts,
