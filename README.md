@@ -2,6 +2,7 @@
 
 [![GitHub stars](https://img.shields.io/github/stars/chayapats/schway?style=social)](https://github.com/chayapats/schway/stargazers)
 [![Greptile: The War on Bugs](https://www.greptile.com/badge.svg)](https://www.greptile.com/?utm_source=oss_badge&utm_medium=readme&utm_campaign=greptile_for_open_source)
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/chayapats/badge.svg)](https://hub.xerj.org/contributors/chayapats)
 
 A lean, fast coding agent for your terminal.
 
