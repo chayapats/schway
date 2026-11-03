@@ -1,23 +1,61 @@
 import { expect, test } from "bun:test";
-import { lstat, mkdir, readFile, readlink, realpath, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { mkdtemp, rm } from "node:fs/promises";
-import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
+import { realpathSync } from "node:fs";
+import { copyFile, lstat, mkdir, readFile, readlink, stat, writeFile } from "node:fs/promises";
+import { basename, isAbsolute, join, resolve } from "node:path";
+import { buildIsolatedCliEnv, makeTempRoot, removeTempRoot, withTempDir } from "./helpers.ts";
 
 const root = resolve(import.meta.dir, "..");
 
-/** Pack the current checkout and install the tarball into an isolated consumer. */
+/** This checkout's short commit, or undefined when it isn't the top of a Git work tree (a copy without .git). */
+function checkoutRevision(): string | undefined {
+  try {
+    const result = Bun.spawnSync(["git", "rev-parse", "--show-toplevel", "--short=7", "HEAD"], { cwd: root, stdout: "pipe", stderr: "pipe" });
+    const [toplevel, revision] = result.stdout.toString().trim().split("\n");
+    if (result.exitCode !== 0 || !toplevel || !revision) return undefined;
+    return realpathSync(toplevel) === realpathSync(root) ? revision : undefined;
+  } catch { return undefined; }
+}
+
+/**
+ * Check that `path` is a `schway-<version>-<short-sha>.tgz` packed from this checkout: its name and its packed
+ * manifest carry this package.json version, and its short SHA is this commit's when Git can tell.
+ */
+async function checkPrebuiltTarball(path: string): Promise<string> {
+  const version = ((await Bun.file(join(root, "package.json")).json()) as { version: string }).version;
+  const refuse = (reason: string): never => {
+    throw new Error(`SCHWAY_PACKED_TARBALL=${path} ${reason}. Unset it to pack this checkout, or point it at the schway-${version}-<short-sha>.tgz packed from this commit.`);
+  };
+  if (!isAbsolute(path)) refuse("is not an absolute path");
+  const name = /^schway-(.+)-([0-9a-f]{7,40})\.tgz$/.exec(basename(path)) ?? refuse("is not named schway-<version>-<short-sha>.tgz");
+  if (name[1] !== version) refuse(`is named for version ${name[1]}, but package.json has ${version}`);
+  const revision = checkoutRevision();
+  if (revision !== undefined && name[2] !== revision) refuse(`was packed from ${name[2]}, but this checkout is at ${revision}`);
+  const manifest = Bun.spawnSync(["tar", "-xzOf", path, "package/package.json"], { stdout: "pipe", stderr: "pipe" });
+  if (manifest.exitCode !== 0) refuse("can't be read as a package tarball");
+  const packed = (JSON.parse(manifest.stdout.toString()) as { version?: string }).version;
+  if (packed !== version) refuse(`contains version ${packed}, but package.json has ${version}`);
+  return path;
+}
+
+/**
+ * Pack the current checkout, or copy the prebuilt tarball named by `SCHWAY_PACKED_TARBALL` (CI's
+ * uploaded artifact, checked against this checkout first), and install it into an isolated consumer.
+ */
 async function packAndInstall(dir: string): Promise<{ consumer: string; tarball: string }> {
   const packDir = join(dir, "pack");
   await mkdir(packDir, { recursive: true });
-  const pack = Bun.spawn(["bun", "pm", "pack", "--destination", packDir], {
-    cwd: root, stdout: "pipe", stderr: "pipe",
-  });
-  const [packOut, packErr, packCode] = await Promise.all([
-    new Response(pack.stdout).text(), new Response(pack.stderr).text(), pack.exited,
-  ]);
-  expect(packCode, packOut + packErr).toBe(0);
+  const prebuilt = process.env.SCHWAY_PACKED_TARBALL?.trim();
+  if (prebuilt) {
+    await copyFile(await checkPrebuiltTarball(prebuilt), join(packDir, basename(prebuilt)));
+  } else {
+    const pack = Bun.spawn(["bun", "pm", "pack", "--destination", packDir], {
+      cwd: root, stdout: "pipe", stderr: "pipe",
+    });
+    const [packOut, packErr, packCode] = await Promise.all([
+      new Response(pack.stdout).text(), new Response(pack.stderr).text(), pack.exited,
+    ]);
+    expect(packCode, packOut + packErr).toBe(0);
+  }
   const entries = await Array.fromAsync(new Bun.Glob("*.tgz").scan({ cwd: packDir }));
   expect(entries.length).toBe(1);
   const tarball = join(packDir, entries[0]!);
@@ -70,7 +108,7 @@ async function packedConsumer(consumer: string, input: Record<string, unknown>, 
 }
 
 test("packed release artifact installs without private source access and advertises release/v2", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const fixture = await Bun.file(join(root, "tests/fixtures/host-release-consumer.ts")).text();
@@ -105,12 +143,12 @@ test("packed release artifact installs without private source access and adverti
       observedInference: "not-checked",
     });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer composes strict review, lifecycle, cancel and snapshot without private imports", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work");
@@ -135,12 +173,12 @@ test("packed release consumer composes strict review, lifecycle, cancel and snap
     });
     expect(["restored", "partial"]).toContain(result["restored"] as string);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer discovers and retires orphans through metadata only", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work"), homeDirectory = join(consumer, "home"), sessionDirectory = join(consumer, "sessions");
@@ -149,11 +187,11 @@ test("packed release consumer discovers and retires orphans through metadata onl
       `await Bun.plugin({name:'inventory-guard',setup(builder){
         builder.onLoad({filter:/(?:[/\\\\](?:providers|tui)[/\\\\]|@opentui|[/\\\\]openai[/\\\\])/},()=>{throw new Error('Metadata loaded provider or TUI');});
       }});`)).toEqual({ retired: "retired", deleted: "deleted", retry: "already-deleted", tombstone: "deleted" });
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally { await removeTempRoot(dir); }
 }, 120_000);
 
 test("packed release consumer runs core tools over a fake backend through the exact policy", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work-core");
@@ -185,12 +223,12 @@ test("packed release consumer runs core tools over a fake backend through the ex
       written: "box result\n",
     });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer proves codex route isolation without fallback", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work-codex");
@@ -210,12 +248,12 @@ test("packed release consumer proves codex route isolation without fallback", as
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({ outcome: "completed", observed: "observed" });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer proves grok route isolation without fallback", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work-grok");
@@ -234,12 +272,12 @@ test("packed release consumer proves grok route isolation without fallback", asy
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({ outcome: "completed", observed: "observed" });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 test("packed release consumer authorizes each grok dispatch and reads exact provider requests", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  const dir = await makeTempRoot("schway-release-");
   try {
     const { consumer } = await packAndInstall(dir);
     const workspaceRoot = join(consumer, "work-dispatch"), homeDirectory = join(consumer, "home-dispatch"), sessionDirectory = join(consumer, "sessions-dispatch");
@@ -266,13 +304,13 @@ test("packed release consumer authorizes each grok dispatch and reads exact prov
         dispatch: [{ sent: 2048 }], attempts: [{ sent: 2048 }], body: 2048, invalidCap: "invalid-input" },
     });
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }, 120_000);
 
 for (const route of ["codex", "grok"] as const) {
   test(`packed release consumer shares one ${route} renewal without cross-route reads`, async () => {
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+    const dir = await makeTempRoot("schway-release-");
     try {
       const { consumer } = await packAndInstall(dir);
       const workspaceRoot = join(consumer, `work-renewal-${route}`);
@@ -301,7 +339,7 @@ for (const route of ["codex", "grok"] as const) {
         guard) as Record<string, unknown>;
       expect(result).toMatchObject({ outcome: "completed", refreshes: 1, inferences: 2 });
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await removeTempRoot(dir);
     }
   }, 120_000);
 }
@@ -356,7 +394,7 @@ test("packed consumer admits vendor-neutral web tools with guarded untrusted res
 }, 120_000);
 
 test("packed catalog consumer uses only the public API and selected subscription provider", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-catalog-")));
+  const dir = await makeTempRoot("schway-catalog-");
   try {
     const { consumer } = await packAndInstall(dir);
     for (const route of ["codex", "grok"] as const) {
@@ -372,5 +410,32 @@ test("packed catalog consumer uses only the public API and selected subscription
       expect(result).toEqual({ result: { route, status: "listed", containsNoSecrets: true,
         models: [{ id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: true, contextWindow: 64000, effort, outputCap }] }, requests: 1, writes: 0 });
     }
-  } finally { await rm(dir, { recursive: true, force: true }); }
+  } finally { await removeTempRoot(dir); }
 }, 120_000);
+
+test("a prebuilt tarball must match this checkout's version and commit", async () => {
+  await withTempDir(async dir => {
+    const version = ((await Bun.file(join(root, "package.json")).json()) as { version: string }).version;
+    const revision = checkoutRevision();
+    const pack = async (name: string, packedVersion: string) => {
+      await mkdir(join(dir, "src/package"), { recursive: true });
+      await writeFile(join(dir, "src/package/package.json"), JSON.stringify({ name: "schway", version: packedVersion }));
+      const path = join(dir, name);
+      expect(Bun.spawnSync(["tar", "-czf", path, "-C", join(dir, "src"), "package"]).exitCode).toBe(0);
+      return path;
+    };
+    const current = revision ?? "abcdef0", other = current === "0000000" ? "1111111" : "0000000";
+    const good = await pack(`schway-${version}-${current}.tgz`, version);
+    expect(await checkPrebuiltTarball(good)).toBe(good);
+    await expect(checkPrebuiltTarball(`schway-${version}-${current}.tgz`)).rejects.toThrow("is not an absolute path");
+    await expect(checkPrebuiltTarball(await pack("schway.tgz", version))).rejects.toThrow("is not named schway-<version>-<short-sha>.tgz");
+    await expect(checkPrebuiltTarball(await pack(`schway-0.0.1-${current}.tgz`, version))).rejects.toThrow("is named for version 0.0.1");
+    await expect(checkPrebuiltTarball(await pack(`schway-${version}-${current}-stale.tgz`, version))).rejects.toThrow("is not named");
+    await expect(checkPrebuiltTarball(join(dir, `schway-${version}-${current}0.tgz`))).rejects.toThrow(revision ? "was packed from" : "can't be read");
+    const mismatch = checkPrebuiltTarball(await pack(`schway-${version}-${other}.tgz`, version));
+    // Without Git (a copy without .git), only the version is checked.
+    if (revision) await expect(mismatch).rejects.toThrow(`was packed from ${other}, but this checkout is at ${revision}`);
+    else expect(await mismatch).toContain(other);
+    await expect(checkPrebuiltTarball(await pack(`schway-${version}-${current}.tgz`, "0.0.1"))).rejects.toThrow("contains version 0.0.1");
+  });
+});

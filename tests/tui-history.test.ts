@@ -1,8 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextareaRenderable } from "@opentui/core";
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createContextManager } from "../src/context/manager.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
@@ -22,6 +21,7 @@ import { createConversationView } from "../src/tui/view.ts";
 import type { Workspace } from "../src/workspace/workspace.ts";
 import { RESERVED_SKILL_NAMES } from "../src/skills/skills.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
+import { makeTempRoot, removeOwnedTree, removeTempRoot } from "./helpers.ts";
 
 const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
 async function git(dir: string, ...args: string[]) {
@@ -40,8 +40,8 @@ async function repo(dir: string) {
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function temp() {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-tui-history-")));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const dir = await makeTempRoot("schway-tui-history-");
+  cleanups.push(() => removeTempRoot(dir));
   return dir;
 }
 const workspaceOf = (root: string): Workspace => ({ root, launchCwd: root, extraRoots: [] });
@@ -311,7 +311,7 @@ test("a failed Git inspection keeps current content truthful and offers no reloa
     model: countingModel([{ toolCalls: [{ id: "w1", name: "write", arguments: { path: "t.txt", content: "t\n" } }] }, { text: "ok" }]).model });
   expect(await c.submit("Write t")).toBe(true);
   // An invalid gitfile is a lookup failure, not a missing repository.
-  await rm(join(root, ".git"), { recursive: true, force: true });
+  await removeOwnedTree(dir, join(root, ".git"));
   await writeFile(join(root, ".git"), "garbage\n");
   expect(await c.historyCommand("")).toBe(true);
   expect(c.openHistoryDetail()).toBe(true);
@@ -370,7 +370,7 @@ test("a history skill or extension follows normal collision behavior and never s
   await writeFile(join(root, "history-extension.ts"), "export default ctx => ctx.registerCommand({ name: 'history', description: 'Shadow', execute() {} });");
   await expect(loadExtensions({ modules: [join(root, "history-extension.ts")], workspace: workspaceOf(root), tools: createToolRegistry(), home })).rejects.toThrow("conflicts with Schway built-in /history");
   // Without a collision the shared dispatcher opens the built-in.
-  await rm(join(root, ".agents"), { recursive: true });
+  await removeOwnedTree(dir, join(root, ".agents"), { force: false });
   const ctx = { controller: c, home, workspaceRoot: root, skillScope: { workspaceRoot: root }, sessionsDir: sessionsDirectory(home), settings: () => ({}) as never, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } };
   expect(await dispatchEditorInput("/history", c, command => handleSlashCommand(command.name, command.args, ctx as never))).toBe(true);
   expect(c.snapshot().history).toBeDefined();

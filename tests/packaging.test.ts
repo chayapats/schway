@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { readdir, rm } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
+import { buildIsolatedCliEnv, removeOwnedTree, withTempDir } from "./helpers.ts";
 
 /** Read a repo-relative source file as text. */
 async function source(path: string): Promise<string> {
@@ -102,6 +102,119 @@ test("only shipped extension surfaces are present in the base harness", async ()
   }
 });
 
+type Permissions = string | Record<string, unknown> | null | undefined;
+
+/** Bodies of every `${{ … }}` in `text`; single-quoted expression strings may contain `}}`. */
+function expressionsIn(text: string): string[] {
+  const found: string[] = [];
+  for (let start = text.indexOf("${{"); start >= 0; start = text.indexOf("${{", start + 3)) {
+    let i = start + 3, quoted = false;
+    for (; i < text.length; i++) {
+      if (text[i] === "'") quoted = !quoted; // '' inside a string toggles twice and stays quoted
+      else if (!quoted && text.startsWith("}}", i)) break;
+    }
+    found.push(text.slice(start + 3, i));
+    start = i;
+  }
+  return found;
+}
+
+/**
+ * Context references in one expression body, outside its single-quoted strings: any use of `secrets`, and any
+ * use of the workflow token, which is `github.token`, `github['token']`, a computed `github[…]`, or the whole
+ * `github` context (as in `toJSON(github)`), which contains the token. Deeper properties named token, such as
+ * `github.event.inputs.token`, are workflow inputs, not the workflow token, so they pass.
+ */
+function contextUses(expression: string): { secrets: boolean; token: boolean } {
+  let secrets = false, token = false;
+  for (let i = 0; i < expression.length; i++) {
+    if (expression[i] === "'") {
+      for (i++; i < expression.length; i++) if (expression[i] === "'") { if (expression[i + 1] === "'") i++; else break; }
+      continue;
+    }
+    const word = /^[A-Za-z_][\w-]*/.exec(expression.slice(i))?.[0];
+    if (!word) continue;
+    // A property of something else, such as env.secrets_dir, isn't a context.
+    if (i === 0 || !/[\w.-]/.test(expression[i - 1]!)) {
+      if (word.toLowerCase() === "secrets") secrets = true;
+      if (word.toLowerCase() === "github") {
+        const property = /^\s*(?:\.\s*([\w-]+)|\[\s*'((?:[^']|'')*)'\s*\])/.exec(expression.slice(i + word.length));
+        if (!property || (property[1] ?? property[2]!.replaceAll("''", "'")).toLowerCase() === "token") token = true;
+      }
+    }
+    i += word.length - 1;
+  }
+  return { secrets, token };
+}
+
+/** Credential problems in one workflow: non-read token permissions, any secrets, or the workflow token. */
+function workflowCredentialProblems(text: string): string[] {
+  const workflow = Bun.YAML.parse(text) as { permissions?: Permissions; jobs?: Record<string, { permissions?: Permissions; uses?: unknown; secrets?: unknown }> };
+  const problems: string[] = [];
+  // Only read (or none) scopes, as a mapping; `write-all`, `read-all` and write scopes are rejected.
+  const readOnly = (permissions: Permissions) => typeof permissions === "object" && permissions !== null &&
+    Object.values(permissions).every(level => level === "read" || level === "none");
+  if (!readOnly(workflow.permissions)) problems.push(`top-level permissions ${JSON.stringify(workflow.permissions ?? null)}`);
+  for (const [job, body] of Object.entries(workflow.jobs ?? {})) {
+    if (body.permissions !== undefined && !readOnly(body.permissions)) problems.push(`job ${job} permissions ${JSON.stringify(body.permissions)}`);
+    // A job that calls a reusable workflow can pass it secrets, including `secrets: inherit`.
+    if (body.uses !== undefined && body.secrets !== undefined) problems.push(`job ${job} passes secrets to a reusable workflow`);
+  }
+  // Expressions only: every `${{ … }}` in a parsed value, plus `if:` values, which are expressions without the
+  // braces. Comments, step names and run text can't trip the check. Contexts are case-insensitive.
+  const expressions: string[] = [];
+  const visit = (value: unknown, key?: string): void => {
+    if (typeof value === "string") {
+      if (key === "if") expressions.push(value);
+      expressions.push(...expressionsIn(value));
+    } else if (Array.isArray(value)) value.forEach(item => visit(item));
+    else if (typeof value === "object" && value !== null) for (const [name, item] of Object.entries(value)) visit(item, name);
+  };
+  visit(workflow);
+  for (const expression of expressions) {
+    const uses = contextUses(expression);
+    if (uses.secrets) problems.push(`secrets context in \${{${expression}}}`);
+    if (uses.token) problems.push(`github token in \${{${expression}}}`);
+  }
+  if (/npm_token|node_auth_token/i.test(JSON.stringify(workflow))) problems.push("registry token variable");
+  return problems;
+}
+
+test("the workflow credential scan rejects tokens and secrets, not ordinary words", () => {
+  const base = (jobs: string, permissions = "permissions:\n  contents: read\n") => `on: push\n${permissions}jobs:\n${jobs}`;
+  const job = (body: string) => `  build:\n    runs-on: ubuntu-latest\n${body}    steps:\n      - run: echo ok\n`;
+  expect(workflowCredentialProblems(base(job("") + "      # note: write-only\n      - name: Write the shard list\n        run: echo write\n"))).toEqual([]);
+  expect(workflowCredentialProblems(base(job("    permissions:\n      contents: read\n      actions: none\n")))).toEqual([]);
+  for (const bad of [
+    base(job(""), "permissions: write-all\n"),
+    base(job(""), "permissions: read-all\n"),
+    base(job(""), ""),
+    base(job("    permissions:\n      contents: write\n")),
+    base("  call:\n    uses: ./.github/workflows/other.yml\n    secrets: inherit\n"),
+    base(job("    env:\n      TOKEN: ${{ github.token }}\n")),
+    base(job("    env:\n      TOKEN: ${{ github['token'] }}\n")),
+    base(job("    env:\n      TOKEN: ${{ github[\"token\"] }}\n")),
+    base(job("    env:\n      TOKEN: ${{ secrets[\"npm\"] }}\n")),
+    base(job("    env:\n      TOKEN: ${{ secrets.NPM }}\n")),
+    base(job("    env:\n      ALL: ${{ toJSON(secrets) }}\n")),
+    base(job("    env:\n      ALL: prefix-${{ toJSON( Secrets ) }}\n")),
+    base(job("    if: secrets.NPM != ''\n")),
+    base(job("    env:\n      NODE_AUTH_TOKEN: x\n")),
+    base(job("    env:\n      ALL: ${{ toJSON(github) }}\n")),
+    base(job("    env:\n      ALL: ${{ format('{0}', github) }}\n")),
+    base(job("    env:\n      KEY: ${{ github[matrix.key] }}\n")),
+    base(job("    env:\n      HIDDEN: ${{ format('}}', secrets.X) }}\n")),
+    base(job("    env:\n      HIDDEN: ${{ format('it''s }}', github.token) }}\n")),
+  ]) expect(workflowCredentialProblems(bad), bad).not.toEqual([]);
+  // Ordinary words and other contexts pass: a step about secrets, other github properties, env.secrets_dir,
+  // quoted text, and an env key named SECRETS (only a reusable-workflow call passes secrets).
+  const fine = workflowCredentialProblems(base(job("    env:\n      A: ${{ github.event_name }}\n      B: ${{ env.secrets_dir }}\n" +
+    "      C: ${{ github.tokens }}\n      D: ${{ format('secrets and github.token', github.sha) }}\n      SECRETS: plain\n") +
+    "      - name: Check that no secrets leak\n        run: echo github.token secrets.x\n"));
+  expect(fine).toEqual([]);
+  expect(workflowCredentialProblems(base("  call:\n    uses: ./.github/workflows/other.yml\n    secrets: inherit\n"))).toEqual(["job call passes secrets to a reusable workflow"]);
+});
+
 test("validating the release artifact does not publish it", async () => {
   const pkg = (await Bun.file("package.json").json()) as {
     scripts: Record<string, string>;
@@ -109,14 +222,28 @@ test("validating the release artifact does not publish it", async () => {
   const scriptText = Object.values(pkg.scripts).join("\n").toLowerCase();
   expect(scriptText.includes("npm publish")).toBe(false);
   expect(scriptText.includes("release")).toBe(false);
-  // GitHub Actions validates with typecheck and tests only; no registry publish or release step.
-  // URLs are stripped first so a pinned toolchain download cannot trip the check.
-  const workflow = await source(".github/workflows/checks.yml");
-  const lowered = workflow.toLowerCase().replace(/https?:\/\/\S+/g, "");
-  expect(/\bpublish\b/.test(lowered)).toBe(false);
-  expect(/\brelease\b/.test(lowered)).toBe(false);
+  // GitHub Actions validates with typecheck and tests and packs a workflow artifact; no registry publish or
+  // release step, in any workflow or the CI scripts they run, and no credentials. URLs are stripped first so a
+  // pinned toolchain download cannot trip the word check.
+  const workflows = (await readdir(join(import.meta.dir, "../.github/workflows"))).filter(name => /\.ya?ml$/.test(name));
+  expect(workflows).toContain("checks.yml");
+  for (const name of workflows) {
+    const text = await source(`.github/workflows/${name}`);
+    const lowered = text.toLowerCase().replace(/https?:\/\/\S+/g, "");
+    expect(/\bpublish\b/.test(lowered), name).toBe(false);
+    expect(/\brelease\b/.test(lowered), name).toBe(false);
+    expect(workflowCredentialProblems(text), name).toEqual([]);
+  }
+  for (const name of await readdir(join(import.meta.dir, "../scripts/ci"))) {
+    const script = (await source(`scripts/ci/${name}`)).toLowerCase();
+    expect(script, name).not.toMatch(/\b(?:npm|bun|yarn|pnpm)\s+publish\b|\bgh\s+release\b/);
+  }
+  const lowered = (await source(".github/workflows/checks.yml")).toLowerCase();
   expect(lowered.includes("typecheck")).toBe(true);
   expect(lowered).toContain("bun test");
+  expect(lowered).toContain("scripts/ci/pack-artifact.sh");
+  expect(lowered).toContain("actions/upload-artifact");
+  expect(await source("scripts/ci/pack-artifact.sh")).toContain("bun pm pack");
 });
 
 test("npm pack installs the public extension API and completes a headless tool round trip", async () => {
@@ -273,7 +400,7 @@ export default defineExtension(ctx => ctx.registerTool({
 
     // Missing renderer and unused SDK packages prove the installed headless path stays lazy.
     for (const dependency of ["@opentui", "openai", "@anthropic-ai/sdk"]) {
-      await rm(join(installDir, "node_modules", dependency), { recursive: true, force: true });
+      await removeOwnedTree(dir, join(installDir, "node_modules", dependency));
     }
     const marker = join(installDir, "disabled-ran");
     await Bun.write(join(installDir, "disabled.ts"), `await Bun.write(${JSON.stringify(marker)}, 'bad'); throw new Error('disabled extension ran');`);

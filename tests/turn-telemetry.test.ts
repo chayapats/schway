@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { RuntimeEvent } from "../src/agent/events.ts";
 import { runAgentLoop } from "../src/agent/loop.ts";
@@ -17,6 +16,7 @@ import { createSession } from "../src/session/session.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
 import type { ToolDefinition } from "../src/tools/types.ts";
 import type { Workspace } from "../src/workspace/workspace.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const WALL = Date.parse("2026-01-15T09:30:00.000Z");
 const iso = (ms: number) => new Date(WALL + ms).toISOString();
@@ -145,8 +145,8 @@ const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
 test("a cancelled attempt persists no assistant telemetry but still counts in the sidecar model time", async () => {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-telemetry-")));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const dir = await makeTempRoot("schway-telemetry-");
+  cleanups.push(() => removeTempRoot(dir));
   const home = join(dir, "home"), root = join(dir, "work");
   await mkdir(root, { recursive: true });
   const workspace: Workspace = { root, launchCwd: root, extraRoots: [] };

@@ -1,4 +1,5 @@
 import { version } from "../../package.json";
+import { createRenewalExit } from "./renewal-exit.ts";
 import { parseVersionCommand } from "./version.ts";
 import type { CliIo } from "./runtime.ts";
 
@@ -24,23 +25,31 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
 /** Process entrypoint for the `schway` binary. */
 async function main(): Promise<number> {
   const controller = new AbortController();
-  const abort = () => {
+  // A renewal whose request already left may have rotated the refresh token at the provider; exiting before it is
+  // stored would force a new sign-in, so the exit waits for it within bounds that signals can shorten.
+  const exit = createRenewalExit({ stderr: { write: (chunk) => void process.stderr.write(chunk) }, interactive: process.stdin.isTTY === true });
+  const interrupt = () => {
     controller.abort();
+    exit.interrupt();
   };
-  process.on("SIGINT", abort);
-  process.on("SIGTERM", abort);
+  const terminate = () => {
+    controller.abort();
+    exit.terminate();
+  };
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", terminate);
   try {
-    return await runCli(process.argv.slice(2), {
+    return await exit.settle(await runCli(process.argv.slice(2), {
       stdout: { write: (chunk) => void process.stdout.write(chunk) },
       stderr: { write: (chunk) => void process.stderr.write(chunk) },
       env: process.env,
       cwd: process.cwd(),
       terminal: { stdin: process.stdin.isTTY === true, stdout: process.stdout.isTTY === true },
       signal: controller.signal,
-    });
+    }));
   } finally {
-    process.off("SIGINT", abort);
-    process.off("SIGTERM", abort);
+    process.off("SIGINT", interrupt);
+    process.off("SIGTERM", terminate);
   }
 }
 

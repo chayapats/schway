@@ -34,6 +34,36 @@
 
 ### Fixed
 
+- A Codex or Grok run, stream or CLI turn cancelled or timed out after its
+  credential renewal request left no longer loses the refresh token the
+  provider already rotated, which forced a new sign-in. The request completes
+  and its response is stored unless a logout or write fence refuses it. It is
+  written only over the login it started from: with the OS store, that check
+  and the write share the cross-process credential lock, after the write
+  guards run, so a sign-in through any path, or another process's write, wins.
+  A caller waiting on the renewal then uses that login instead of failing.
+  Later runs join the request instead of resending the old token, and
+  `renewalRequests` still counts it once. `HostCredentialStore` gains an
+  optional atomic `compareAndSet`. A lifecycle owner's `close()` reports
+  `busy` until the request settles, at most 30 seconds plus the write guards
+  and the store read, lock wait and write, even when the transport ignores
+  cancellation. In the TUI, a Grok turn stopped with Esc or the Grok model
+  picker no longer loses the token; Codex turns already kept it (#456).
+- `schway models list` and headless runs no longer lose a rotated refresh
+  token when they stop after a renewal request left. Discovery's five-second
+  deadline still ends the listing, but its renewal now finishes and stores the
+  new sign-in; Codex discovery uses the shared ChatGPT refresher, and refresh
+  failures there say to retry the listing. Before it exits, the CLI waits at
+  most 35 seconds for any renewal that already left and writes `Saving the
+  renewed sign-in…` to stderr, adding `Ctrl+C quit without saving` when stdin
+  is a terminal. The wait also ends 5 seconds after a SIGTERM arrives; another
+  Ctrl+C or SIGTERM quits at once with exit code 130 or 143. When it exits
+  without a saved sign-in, stderr names the route's sign-in command, such as
+  `Renewed sign-in not saved · /login chatgpt sign in again if rejected`. On
+  both routes, a token-endpoint 400, 401 or 403 without a JSON body, or a
+  challenge page, now reads as an unavailable service instead of a revoked
+  sign-in, and a ChatGPT JSON 403 says to check the plan's Codex access before
+  signing in again (#458).
 - Serialize OS secure-store saves and deletions across processes with a SQLite
   `BEGIN IMMEDIATE` lock that the operating system releases when its holder
   exits, even on SIGKILL. Concurrent contenders after a crashed holder no longer
@@ -97,8 +127,7 @@
   the route's refresher, shares single-flight renewal, fencing and counts with
   runs and keeps the run failure categories. An abort or deadline settles
   promptly, and a token request that the stopped renewal itself sent still
-  completes and stores its rotated credential. A renewal that only joined a
-  run's request follows that run's cancellation, tracked in #456 (#455).
+  completes and stores its rotated credential (#455).
 - Export `SearchProvider`, `createWebSearchTool(provider, options?)` and
   `createWebFetchTool(options?)` through `schway/host`, advertised by
   `webToolsContract: "schway.host.web-tools/v1"`. Explicit read-only tools keep

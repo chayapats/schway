@@ -1,6 +1,6 @@
 import { DeviceFlowError, deviceFlowExpiresAt, sleepDeviceFlow, validateDeviceVerificationUri, withinDeviceFlow, type DeviceFlowAuthorization } from "../../auth/device-flow.ts";
 import { imageInputPart } from "../../conversation/images.ts";
-import { abortableCatalogOperation, boundedCatalogFetch, fetchProviderModelListResult, type ModelListResult } from "../model-list.ts";
+import { abortableCatalogOperation, fetchProviderModelListResult, readModelCatalogBody, type ModelListResult } from "../model-list.ts";
 import { assertThinking } from "../thinking.ts";
 import type {
   AssistantContent,
@@ -19,13 +19,15 @@ import type {
   ModelTool,
   ThinkingLevel,
 } from "../model.ts";
-import { countingRenewalFetch, isRefusedRedirect, providerDispatch, redirectRefusal, redirectRefusedError, reportedEffort, sentControls } from "../dispatch.ts";
+import { isRefusedRedirect, providerDispatch, redirectRefusal, redirectRefusedError, reportedEffort, sentControls } from "../dispatch.ts";
 import {
   CODEX_SUBSCRIPTION_LABEL,
   codexSubscriptionIdentity,
   preserveRefusal,
+  replaceCredential,
   type CredentialStore,
 } from "../../auth/store.ts";
+import { forgetUnsavedRenewals, trackSentRenewal, type TrackedRenewal } from "../../auth/renewals.ts";
 
 /** Public Codex CLI OAuth client shipped in the official Codex CLI binary, shared rather than private. */
 export const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -239,28 +241,45 @@ export function codexRevokedSessionError(): string {
   return "The ChatGPT subscription session was revoked or rejected by the provider. Sign in again in interactive mode with /login chatgpt; stored API keys are never used as a silent fallback.";
 }
 
+const RETRY_TURN = ". Retry the turn; Schway owns retries and never falls back to API-key billing after explicit chatgpt selection.";
+const RETRY_LISTING = ". Retry schway models list; Schway never falls back to API-key billing after explicit chatgpt selection.";
+
 /** Actionable error when renewal fails transiently, keeping retry ownership with Schway. */
 export function codexRefreshFailedError(detail?: string): string {
   const suffix = detail?.trim() ? ` (${detail.trim()})` : "";
-  return `Refreshing the ChatGPT subscription session failed${suffix}. Retry the turn; Schway owns retries and never falls back to API-key billing after explicit chatgpt selection.`;
+  return `Refreshing the ChatGPT subscription session failed${suffix}${RETRY_TURN}`;
+}
+
+/** Actionable error when the provider refuses to renew for this account, as a plan, region or entitlement block does. */
+export function codexRefreshForbiddenError(): string {
+  return "The ChatGPT subscription refused to renew this session (HTTP 403). Check that this ChatGPT plan includes Codex access for this account, then sign in again in interactive mode with /login chatgpt.";
+}
+
+/** Word a shared-refresh failure for `schway models list`, which has no turn to retry. */
+function forListing(error: unknown): unknown {
+  if (!(error instanceof Error) || !error.message.endsWith(RETRY_TURN)) return error;
+  return new Error(`${error.message.slice(0, -RETRY_TURN.length)}${RETRY_LISTING}`, { cause: error });
 }
 
 /** Load the stored subscription tokens, returning null when this identity was never saved. */
 export async function loadSubscriptionTokens(
   store: CredentialStore,
 ): Promise<CodexTokens | null> {
+  return (await readSubscriptionLogin(store)).tokens;
+}
+
+/** Read the stored login with its exact stored value, which a renewal later replaces only if it is unchanged. */
+async function readSubscriptionLogin(store: CredentialStore): Promise<{ raw: string; tokens: CodexTokens } | { raw: null; tokens: null }> {
   const raw = await store.get(codexSubscriptionIdentity());
-  if (!raw?.trim()) {
-    return null;
-  }
-  return parseSubscriptionTokens(raw);
+  if (!raw?.trim()) return { raw: null, tokens: null };
+  return { raw, tokens: parseSubscriptionTokens(raw) };
 }
 
 /** Route-scoped renewal lifecycle shared across refresher instances for one store. */
 type CodexLifecycle = {
   generation: number;
   writes: Promise<void>;
-  refresh?: { generation: number; promise: Promise<CodexTokens> };
+  refresh?: { generation: number; promise: Promise<CodexTokens>; tracked: TrackedRenewal };
 };
 const codexLifecycles = new WeakMap<CredentialStore, CodexLifecycle>();
 function codexLifecycle(store: CredentialStore): CodexLifecycle {
@@ -288,6 +307,7 @@ export async function saveSubscriptionTokens(
   // invalidate a concurrent refresh, which would then misreport as revoked.
   await serializeCodexWrite(state, () => writeCodexTokens(store, tokens));
   state.generation++;
+  forgetUnsavedRenewals("codex");
 }
 
 /** Persist a completed sign-in, reporting the write-start boundary and successful secure-store commit. */
@@ -311,8 +331,14 @@ export async function clearSubscriptionTokens(
     try { return await store.delete(codexSubscriptionIdentity()); }
     catch (error) { throw preserveRefusal("delete", error); }
   });
-  state.generation++;
+  recordSubscriptionSignOut(store);
   return existed;
+}
+
+/** After the subscription identity was deleted, fence off renewals still in flight and clear the route's unnamed failure. */
+export function recordSubscriptionSignOut(store: CredentialStore): void {
+  codexLifecycle(store).generation++;
+  forgetUnsavedRenewals("codex");
 }
 
 /** Parse stored subscription tokens, rejecting malformed or secretless payloads. */
@@ -443,16 +469,20 @@ export async function refreshSubscriptionTokens(input: {
     client_id: CODEX_CLIENT_ID,
     refresh_token: input.refreshToken,
   });
+  const sent = Promise.resolve((input.fetch ?? fetch)(CODEX_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+    // Never resend the refresh token to a redirect target; one call is exactly one renewal request.
+    redirect: "error",
+    signal: input.signal,
+  }));
+  // A response that lands after the ceiling is never read: release its body.
+  sent.then(late => { if (input.signal?.aborted) void late.body?.cancel().catch(() => {}); }, () => {});
   let response: Response;
   try {
-    response = await (input.fetch ?? fetch)(CODEX_TOKEN_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-      // Never resend the refresh token to a redirect target; one call is exactly one renewal request.
-      redirect: "error",
-      signal: input.signal,
-    });
+    // Raced against the signal, so a transport that ignores cancellation cannot outlast the refresh ceiling.
+    response = await raceWithAbort(sent, input.signal);
   } catch (error) {
     throwIfAborted(input.signal);
     // The endpoint answered; report that without the transport's raw text or the token URL.
@@ -460,27 +490,62 @@ export async function refreshSubscriptionTokens(input: {
     throw new Error(codexRefreshFailedError(messageOf(error)));
   }
   throwIfAborted(input.signal);
-  const payload = await readTokenPayload(response, input.signal);
-  if (!response.ok) {
-    if (response.status === 400 || response.status === 401) {
-      throw new Error(codexRevokedSessionError());
-    }
-    throw new Error(codexRefreshFailedError(`HTTP ${response.status}`));
-  }
+  // Read under the refresh ceiling, so a stalled body is cancelled when the ceiling ends it.
+  const payload = await readRefreshBody(response, input.signal ?? AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS));
+  if (!response.ok) throw new Error(refreshFailure(response.status, payload));
+  if (!payload) throw new Error("The sign-in endpoint returned an unreadable response. Retry sign-in.");
   return toCodexTokens(payload);
+}
+
+/** The token endpoint's JSON object, or undefined when the body is empty, not a JSON object or over 1 MiB; an abort rejects. */
+async function readRefreshBody(response: Response, signal: AbortSignal): Promise<Record<string, unknown> | undefined> {
+  if (!response.body) return undefined;
+  let bytes: Uint8Array;
+  try { bytes = await readModelCatalogBody(response, signal, "ChatGPT subscription"); }
+  catch { signal.throwIfAborted(); return undefined; }
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+  } catch { return undefined; }
+}
+
+/** Failure text for a refused refresh. A JSON 400 or 401 revokes the session and a JSON 403 refuses this account; a
+ * 400, 401 or 403 without a JSON body, such as a gateway or challenge page, says nothing about the credential. */
+function refreshFailure(status: number, payload: Record<string, unknown> | undefined): string {
+  if (payload && (status === 400 || status === 401)) return codexRevokedSessionError();
+  if (payload && status === 403) return codexRefreshForbiddenError();
+  if (!payload && (status === 400 || status === 401 || status === 403)) return codexRefreshFailedError(`status ${status} with no readable error`);
+  return codexRefreshFailedError(`HTTP ${status}`);
+}
+
+/** The login another writer stored while a renewal was in flight: the same rotated pair is that renewal's result, a
+ * different unexpired login is used instead, and anything else fails as a missing or revoked login. */
+async function loginStoredMeanwhile(store: CredentialStore, renewed: CodexTokens): Promise<CodexTokens> {
+  let current: CodexTokens | null;
+  try { current = (await readSubscriptionLogin(store)).tokens; }
+  catch { throw new Error(codexRevokedSessionError()); }
+  if (!current) throw new Error(codexMissingLoginError());
+  if (current.accessToken === renewed.accessToken && current.refreshToken === renewed.refreshToken) return renewed;
+  if (!subscriptionAccessExpired(current)) return current;
+  throw new Error(codexRevokedSessionError());
 }
 
 /** Create a serialized single-flight refresher so racing turns share one renewal. */
 export function createSubscriptionTokenRefresher(input: {
   store: CredentialStore;
   fetch?: CodexFetchLike;
+  /** Ceiling for one shared refresh, its request and body included; defaults to `CODEX_REFRESH_TIMEOUT_MS`. */
+  timeoutMs?: number;
+  /** Receive each credential this caller is given, renewed or stored, as its stored JSON; used for output redaction. */
+  onCredential?: (raw: string) => void;
 }): {
   /** Return a valid access token, refreshing once before expiry with racing callers sharing the renewal.
-   * `onRenewal` fires once per physical refresh request this caller starts; joiners never see it. */
-  getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }>;
+   * `onRenewal` fires once per physical refresh request this caller starts, in the step that sends it, with a promise
+   * that settles once that renewal and its credential write have settled; joiners never see it. */
+  getValidAccessToken(signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void): Promise<{ accessToken: string; accountId?: string }>;
 } {
   return {
-    async getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> {
+    async getValidAccessToken(signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void): Promise<{ accessToken: string; accountId?: string }> {
       throwIfAborted(signal);
       const state = codexLifecycle(input.store);
       const pendingWrites = state.writes;
@@ -490,9 +555,9 @@ export function createSubscriptionTokenRefresher(input: {
         return createSubscriptionTokenRefresher(input).getValidAccessToken(signal, onRenewal);
       }
       const generation = state.generation;
-      let stored: CodexTokens | null;
+      let stored: CodexTokens | null, storedRaw: string | null;
       try {
-        stored = await loadSubscriptionTokens(input.store);
+        ({ tokens: stored, raw: storedRaw } = await readSubscriptionLogin(input.store));
       } catch {
         throw new Error(codexRevokedSessionError());
       }
@@ -504,6 +569,7 @@ export function createSubscriptionTokenRefresher(input: {
         throw new Error(codexMissingLoginError());
       }
       if (!subscriptionAccessExpired(stored)) {
+        input.onCredential?.(JSON.stringify(serializeSubscriptionTokens(stored)));
         return { accessToken: stored.accessToken, accountId: stored.accountId ?? accountIdFromAccessToken(stored.accessToken) };
       }
       if (!stored.refreshToken) {
@@ -511,13 +577,14 @@ export function createSubscriptionTokenRefresher(input: {
       }
       let refresh = state.refresh;
       if (!refresh || refresh.generation !== generation) {
-        const refreshToken = stored.refreshToken;
-        const refreshSignal = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS);
-        const promise = refreshSubscriptionTokens({ refreshToken, fetch: countingRenewalFetch(input.fetch, onRenewal), signal: refreshSignal })
+        const refreshToken = stored.refreshToken, startedFrom = storedRaw!;
+        const timeoutMs = input.timeoutMs ?? CODEX_REFRESH_TIMEOUT_MS;
+        const refreshSignal = AbortSignal.timeout(timeoutMs);
+        const promise = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal: refreshSignal })
           .catch((error: unknown) => {
             if (refreshSignal.aborted) {
               throw new Error(
-                codexRefreshFailedError(`timed out after ${Math.round(CODEX_REFRESH_TIMEOUT_MS / 1000)}s`),
+                codexRefreshFailedError(`timed out after ${Math.round(timeoutMs / 1000)}s`),
                 { cause: refreshSignal.reason ?? error },
               );
             }
@@ -528,50 +595,72 @@ export function createSubscriptionTokenRefresher(input: {
               ...renewed,
               refreshToken: renewed.refreshToken ?? refreshToken,
             };
-            await serializeCodexWrite(state, async () => {
+            return serializeCodexWrite(state, async () => {
               refreshSignal.throwIfAborted();
               if (state.generation !== generation) throw new Error(codexRevokedSessionError());
-              await writeCodexTokens(input.store, merged);
+              // Written only over the login this renewal started from, in the store's critical section where it has
+              // one, so a sign-in or another process's write that landed meanwhile wins.
+              let wrote: boolean;
+              try { wrote = await replaceCredential(input.store, codexSubscriptionIdentity(), startedFrom, JSON.stringify(serializeSubscriptionTokens(merged))); }
+              catch (error) { throw preserveRefusal("save", error); }
+              if (!wrote) return loginStoredMeanwhile(input.store, merged);
               if (state.generation !== generation) throw new Error(codexRevokedSessionError());
               state.generation++;
+              return merged;
             });
-            return merged;
           })
           .finally(() => {
             if (state.refresh?.promise === promise) state.refresh = undefined;
           });
         // Cancellation can happen before a caller begins awaiting this shared promise.
         void promise.catch(() => {});
-        refresh = { generation, promise };
+        // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
+        // the process from exiting before a rotated token is stored.
+        // A renewal that a sign-in or sign-out replaced leaves the sign-in the user chose, so it needs no warning.
+        refresh = { generation, promise, tracked: trackSentRenewal("codex", promise.then(() => true, () => state.generation !== generation)) };
         state.refresh = refresh;
+        onRenewal?.(promise.then(() => {}, () => {}));
       }
-      const renewed = await raceWithAbort(refresh.promise, signal);
+      let renewed: CodexTokens;
+      try { renewed = await raceWithAbort(refresh.promise, signal); }
+      catch (error) {
+        // A caller still waiting reports the failure itself; a stopped one leaves it for the exit notice.
+        if (!signal?.aborted) refresh.tracked.shown();
+        throw error;
+      }
+      input.onCredential?.(JSON.stringify(serializeSubscriptionTokens(renewed)));
       return { accessToken: renewed.accessToken, accountId: renewed.accountId ?? accountIdFromAccessToken(renewed.accessToken) };
     },
   };
 }
 
-/** Discover with a caller-owned refresh lifetime; no credential write starts after cancellation. */
+/** List the subscription catalog under the caller's deadline; a renewal it already sent still completes and stores its token. */
 export async function fetchDiscoveryCatalog(input: {
   store: CredentialStore; fetch?: CodexFetchLike; signal: AbortSignal;
+  /** Original identity owner when reads are memoized for route selection; renewal and its write use it. */
+  lifecycleStore?: CredentialStore;
+  /** Register every credential this discovery uses, a renewed one included. */
+  onCredential?: (raw: string) => void;
 }): Promise<ModelListResult> {
   input.signal.throwIfAborted();
-  let tokens = await abortableCatalogOperation(loadSubscriptionTokens(input.store), input.signal);
+  // Read through the caller's deadline-bound store, so a hung read ends with the deadline and a missing or
+  // unrenewable login never reaches the refresher.
+  const tokens = await abortableCatalogOperation(loadSubscriptionTokens(input.store), input.signal);
   if (!tokens) throw new Error(codexMissingLoginError());
+  let credential: { accessToken: string; accountId?: string } = { accessToken: tokens.accessToken, accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken) };
   if (subscriptionAccessExpired(tokens)) {
     if (!tokens.refreshToken) throw new Error(codexExpiredSessionError());
-    const refreshed = await abortableCatalogOperation(refreshSubscriptionTokens({
-      refreshToken: tokens.refreshToken, signal: input.signal,
-      fetch: boundedCatalogFetch({ ...input, label: "ChatGPT subscription" }),
-    }), input.signal);
-    input.signal.throwIfAborted();
-    tokens = { ...refreshed, refreshToken: refreshed.refreshToken ?? tokens.refreshToken };
-    await abortableCatalogOperation(saveSubscriptionTokens(input.store, tokens), input.signal);
+    // The shared refresher owns renewal: once its request has left, it completes and stores the rotated token even
+    // after discovery's deadline or cancellation, and a later command joins it instead of resending the old token.
+    const refresher = createSubscriptionTokenRefresher({ store: input.lifecycleStore ?? input.store, fetch: input.fetch,
+      ...(input.onCredential ? { onCredential: input.onCredential } : {}) });
+    try { credential = await abortableCatalogOperation(refresher.getValidAccessToken(input.signal), input.signal); }
+    catch (error) { throw forListing(error); }
   }
   input.signal.throwIfAborted();
   return fetchProviderModelListResult({
     url: `${CODEX_MODELS_URL}?client_version=${encodeURIComponent(CODEX_CATALOG_CLIENT_VERSION)}`,
-    headers: codexRequestHeaders(tokens.accessToken, tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken)),
+    headers: codexRequestHeaders(credential.accessToken, credential.accountId),
     fetch: input.fetch, signal: input.signal, label: "ChatGPT subscription", parseOptions: { maxModels: 256, codex: true },
   });
 }
@@ -1122,7 +1211,7 @@ export function createCodexSubscriptionModel(options: {
   /** Verified capabilities for this exact account and model. */
   modelCapability?: ModelCapability;
   tokens?: CodexTokens;
-  refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> };
+  refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void): Promise<{ accessToken: string; accountId?: string }> };
   store?: CredentialStore;
   fetch?: CodexFetchLike;
   secrets?: string[];
@@ -1152,7 +1241,7 @@ export function createCodexSubscriptionModel(options: {
         { tokens: options.tokens, refresher },
         request.signal,
         secrets,
-        dispatch?.renewal,
+        dispatch ? settled => dispatch.renewal(settled) : undefined,
       );
       const body = toCodexResponsesBody(
         { ...request, thinking: request.thinking ?? options.thinking },
@@ -1530,11 +1619,11 @@ function parseCodexToolArguments(json: string): unknown {
 async function resolveStreamCredential(
   input: {
     tokens?: CodexTokens;
-    refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> };
+    refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void): Promise<{ accessToken: string; accountId?: string }> };
   },
   signal: AbortSignal | undefined,
   secrets: string[],
-  onRenewal?: () => void,
+  onRenewal?: (settled: Promise<void>) => void,
 ): Promise<{ accessToken: string; accountId?: string }> {
   throwIfAborted(signal, secrets);
   if (input.refresher) {
@@ -1690,7 +1779,7 @@ function toCodexTokens(payload: Record<string, unknown>, now = Date.now()): Code
 async function readTokenPayload(response: Response, signal?: AbortSignal): Promise<Record<string, unknown>> {
   throwIfAborted(signal);
   try {
-    const payload = (await response.json()) as unknown;
+    const payload = (await raceWithAbort(response.json(), signal)) as unknown;
     if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
       throw new Error("unreadable");
     }

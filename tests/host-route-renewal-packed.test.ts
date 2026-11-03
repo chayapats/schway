@@ -1,8 +1,7 @@
 import { afterAll, expect, test } from "bun:test";
-import { lstat, mkdir, mkdtemp, readlink, realpath, rm } from "node:fs/promises";
+import { lstat, mkdir, readlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { buildIsolatedCliEnv } from "./helpers.ts";
+import { buildIsolatedCliEnv, makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const root = resolve(import.meta.dir, "..");
 let packed: Promise<{ dir: string; consumer: string }> | undefined;
@@ -10,7 +9,7 @@ let packed: Promise<{ dir: string; consumer: string }> | undefined;
 /** Pack the current checkout once and install the tarball into an isolated consumer, as the release test does. */
 function packedInstall(): Promise<{ dir: string; consumer: string }> {
   packed ??= (async () => {
-    const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-renewal-")));
+    const dir = await makeTempRoot("schway-renewal-");
     const packDir = join(dir, "pack");
     await mkdir(packDir, { recursive: true });
     const pack = Bun.spawn(["bun", "pm", "pack", "--destination", packDir], { cwd: root, stdout: "pipe", stderr: "pipe" });
@@ -37,7 +36,7 @@ function packedInstall(): Promise<{ dir: string; consumer: string }> {
 }
 
 afterAll(async () => {
-  if (packed) await rm((await packed).dir, { recursive: true, force: true });
+  if (packed) await removeTempRoot((await packed).dir);
 });
 
 /** Run the packed consumer under an import guard with an isolated HOME. */

@@ -826,7 +826,11 @@ export abstract class CredentialsLayer extends ControllerCore {
       const wasActiveCodex = this.model?.provider === "codex-subscription" || this.openaiAuth === "codex";
       let deleted: boolean;
       try {
+        // Deleted directly, so a renewal write that hangs holds sign-out no longer than the credential-lock wait; the
+        // renewals still in flight are then fenced off, and their failure is not named at exit.
+        const { recordSubscriptionSignOut } = await import("../model/providers/codex-subscription.ts");
         deleted = await this.credentials!.store.delete(codexSubscriptionIdentity());
+        recordSubscriptionSignOut(this.credentials!.store);
       } catch (error) {
         this.fail(credentialStoreFailure("delete", error));
         return false;

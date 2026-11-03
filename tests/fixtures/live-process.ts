@@ -1,5 +1,5 @@
 import { writeSync } from "node:fs";
-import { access, writeFile } from "node:fs/promises";
+import { access, rename, writeFile } from "node:fs/promises";
 import type { FetchLike } from "../../src/model/loader.ts";
 import type { CredentialStore } from "../../src/auth/store.ts";
 import { runWorker } from "../../src/live/worker.ts";
@@ -64,14 +64,26 @@ export function smokeProtocolFixture(options: { catalogMode?: string; catalogByt
 // A real OS process that deliberately ignores abort, and optionally leaves a child in its process group.
 if (import.meta.main) {
   const path = process.env.SCHWAY_FIXTURE_PID_FILE;
+  // Rename publishes a complete PID: a reader, or a kill between create and write, never leaves an empty file.
+  const publishPid = async (target: string) => {
+    await writeFile(`${target}.tmp`, String(process.pid));
+    await rename(`${target}.tmp`, target);
+  };
+  // Reply only once the descendant exists, so the supervisor's group kill cannot race its start.
+  // The 10 s cap only ends a stuck fixture, before the tests' 15 s lane backstop and 30 s test timeout.
+  const descendantPublished = async () => {
+    for (const end = Date.now() + 10_000; path && Date.now() < end;) {
+      try { await access(`${path}.descendant`); return; } catch { await Bun.sleep(5); }
+    }
+  };
   if (process.argv.includes("grandchild")) {
-    if (path) await writeFile(`${path}.descendant`, String(process.pid));
+    if (path) await publishPid(`${path}.descendant`);
     setInterval(() => {}, 10_000);
   } else {
     let raw = "";
     for await (const chunk of Bun.stdin.stream()) raw += new TextDecoder().decode(chunk);
     const instruction = JSON.parse(raw) as { provider: string; model: string; workspaceRoot: string; thinking?: string };
-    if (path) await writeFile(path, String(process.pid));
+    if (path) await publishPid(path);
     const mode = process.env.SCHWAY_FIXTURE_MODE;
     if (mode === "protocol") {
       const fixture = smokeProtocolFixture({ catalogMode: process.env.SCHWAY_FIXTURE_CATALOG_MODE, catalogBytes: Number(process.env.SCHWAY_FIXTURE_CATALOG_BYTES) || undefined });
@@ -88,9 +100,7 @@ if (import.meta.main) {
       setInterval(() => {}, 10_000);
     } else if (mode === "deferred-output") {
       Bun.spawn([process.execPath, import.meta.path, "grandchild"], { stdout: "ignore", stderr: "ignore" });
-      for (let i = 0; i < 100; i++) {
-        try { await access(`${path}.descendant`); break; } catch { await Bun.sleep(5); }
-      }
+      await descendantPublished();
       writeSync(1, `${JSON.stringify({ provider: instruction.provider, model: instruction.model, thinking: instruction.thinking, authSource: "env",
         status: "failed_provider", reason: "output_limit", durationMs: 1, toolRoundTrip: false, cleanup: "deferred" })}\n`);
       setInterval(() => {}, 10_000);
@@ -98,9 +108,7 @@ if (import.meta.main) {
       process.stdout.write("PRIVATE_SECRET".repeat(1000));
     } else if (mode === "orphan") {
       Bun.spawn([process.execPath, import.meta.path, "grandchild"], { stdout: "ignore", stderr: "ignore" });
-      for (let i = 0; i < 100; i++) {
-        try { await access(`${path}.descendant`); break; } catch { await Bun.sleep(5); }
-      }
+      await descendantPublished();
       writeSync(1, JSON.stringify({ provider: instruction.provider, model: instruction.model, thinking: instruction.thinking,
         authSource: "env", status: "passed", reason: "verified", durationMs: 1, toolRoundTrip: true }));
       process.exit(0);

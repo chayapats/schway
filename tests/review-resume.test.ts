@@ -2,8 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { ScrollBoxRenderable, TextareaRenderable } from "@opentui/core";
 import { join } from "node:path";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { createConversationView } from "../src/tui/view.ts";
 import { TuiController, type TuiControllerOptions } from "../src/tui/controller.ts";
 import { dispatchEditorInput } from "../src/tui/commands.ts";
@@ -18,6 +17,7 @@ import { writeTool } from "../src/tools/write.ts";
 import { restoreWorkspace, type Workspace } from "../src/workspace/workspace.ts";
 import { openDraftStore } from "../src/drafts/store.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const env = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" };
 async function git(dir: string, ...args: string[]) {
@@ -37,8 +37,8 @@ async function repo(dir: string, files: Record<string, string> = { "tracked.txt"
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function temp() {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-review-resume-")));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const dir = await makeTempRoot("schway-review-resume-");
+  cleanups.push(() => removeTempRoot(dir));
   return dir;
 }
 

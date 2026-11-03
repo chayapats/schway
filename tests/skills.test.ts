@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { runCli } from "../src/cli/main.ts";
@@ -37,7 +36,7 @@ import {
 } from "../src/tui/commands.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { invokeSkillTurn } from "../src/tui/app.ts";
-import { withTempDir } from "./helpers.ts";
+import { makeTempRoot, removeOwnedTree, removeTempRoot, withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
 /** Write a SKILL.md fixture; frontmatter is inserted verbatim between fences. */
@@ -102,7 +101,7 @@ test("discovery exposes metadata only and lists model-eligible skills in context
 
 test("project definitions override global definitions of the same name", async () => {
   await withTempDir(async (dir) => {
-    const home = await mkdtemp(join(tmpdir(), "schway-home-"));
+    const home = await makeTempRoot("schway-home-");
     try {
       const project = await projectSkillsDir(dir);
       await writeSkill(project, "greet", GREET_FRONTMATTER, "PROJECT_GREET_BODY_MARKER wins.");
@@ -124,7 +123,7 @@ test("project definitions override global definitions of the same name", async (
       expect(invocation.body.includes("PROJECT_GREET_BODY_MARKER")).toBe(true);
       expect(invocation.body.includes("GLOBAL_GREET_BODY_MARKER")).toBe(false);
     } finally {
-      await rm(home, { recursive: true, force: true });
+      await removeTempRoot(home);
     }
   });
 });
@@ -298,7 +297,7 @@ test("a body deleted after discovery fails activation without a model turn", asy
     await writeSkill(skills, "review", REVIEW_FRONTMATTER, REVIEW_BODY);
     const discovery = await discoverSkills({ workspaceRoot: dir });
     const skill = discovery.skills[0]!;
-    await rm(skill.dir, { recursive: true, force: true });
+    await removeOwnedTree(dir, skill.dir);
     const loaded = await loadSkillBody(skill);
     expect(loaded.ok).toBe(false);
     if (loaded.ok) {

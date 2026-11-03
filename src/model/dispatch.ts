@@ -12,8 +12,8 @@ export type ProviderSendKind = "initial" | "auth-retry";
 export interface ProviderDispatch {
   /** Authorize and record one inference send with the exact controls its body carries; throws a refusal when it must not leave. */
   send(kind: ProviderSendKind, body: unknown, controls: ProviderSendControls): void;
-  /** Record one credential renewal request this stream's caller started. */
-  renewal(): void;
+  /** Record one credential renewal request this stream's caller started; `settled` settles once that renewal and its write have. */
+  renewal(settled?: Promise<void>): void;
   /** Record the effort a terminal provider response states it applied; null when the response names none. */
   reported(applied: { readonly effort: string | null }): void;
 }
@@ -68,15 +68,6 @@ export function providerDispatch(call: ModelCallOptions | undefined): ProviderDi
 /** Copy call options with this stream's dispatch hooks attached; the original object is unchanged. @internal */
 export function withProviderDispatch(call: ModelCallOptions | undefined, dispatch: ProviderDispatch): ModelCallOptions {
   return { ...call, [PROVIDER_DISPATCH]: dispatch } as DispatchCall;
-}
-
-/** Wrap a renewal transport so each physical request it starts is recorded first. @internal */
-export function countingRenewalFetch<F extends (input: string | URL | Request, init?: RequestInit) => Promise<Response>>(fetchFn: F | undefined, onRenewal: (() => void) | undefined): F | undefined {
-  if (!onRenewal) return fetchFn;
-  return (async (input: string | URL | Request, init?: RequestInit) => {
-    onRenewal();
-    return (fetchFn ?? fetch)(input, init);
-  }) as F;
 }
 
 /** Stable, credential-free text of a dispatch refusal; it describes only the refused request. */

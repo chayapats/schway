@@ -2,8 +2,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextareaRenderable, TextRenderable } from "@opentui/core";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { createToolRegistry } from "../src/tools/registry.ts";
@@ -17,6 +16,7 @@ import { createReaderDocument, readerEnd, readerLayout, revealMatch, scrollReade
 import { keyboardGuideAvailability, nothingToInspectReason } from "../src/tui/palette.ts";
 import { getGitDiffPreview, inspectGitStatus } from "../src/workspace/git.ts";
 import { SESSION_BLOCKED_HINT } from "../src/tui/running-hints.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 type Outcome = { text: string } | { error: string; status: number } | { toolCalls: { id: string; name: string; arguments: unknown }[] };
 
@@ -57,8 +57,8 @@ const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
 async function repository(initGit = true) {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "schway-241-")));
-  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const root = await makeTempRoot("schway-241-");
+  cleanups.push(() => removeTempRoot(root));
   const home = join(root, "home"), work = join(root, "work");
   await mkdir(work, { recursive: true });
   await writeFile(join(work, "note.txt"), "before\n");

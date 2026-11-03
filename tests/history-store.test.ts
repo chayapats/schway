@@ -1,20 +1,20 @@
 import { afterEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { appendFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { openDraftStore } from "../src/drafts/store.ts";
 import { openUndoStore } from "../src/undo/store.ts";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createJsonlSession, deleteJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { historyDirectory, historyFilePath, openHistoryStore, HISTORY_STORE_BUSY } from "../src/history/store.ts";
 import { MAX_HISTORY_RECORD_BYTES, parseHistoryLine, serializeHistoryFinalize, serializeHistoryRecord, type HistoryFile, type HistoryTurnFinalize, type HistoryTurnStart } from "../src/history/records.ts";
 import { historyCommandSummary, historyExcerpt, historyPath } from "../src/history/sanitize.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function temp() {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-history-store-")));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const dir = await makeTempRoot("schway-history-store-");
+  cleanups.push(() => removeTempRoot(dir));
   return dir;
 }
 async function savedSession(home: string) {

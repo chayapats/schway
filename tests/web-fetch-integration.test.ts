@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { ASK_HEADLESS_DENIAL, READ_ONLY_DENIAL, READ_ONLY_HEADLESS_DENIAL, type ApprovalPolicy } from "../src/agent/approval.ts";
 import type { RuntimeEvent } from "../src/agent/events.ts";
@@ -22,7 +21,7 @@ import { createWebFetchTool as createGuardedWebFetchTool, type WebFetchDetails, 
 import { buildTranscriptFromSession, formatToolFinishedText, summarizeToolResult, webFetchDisplayText } from "../src/tui/transcript-format.ts";
 import { branchTreePreviewForRecord, buildBranchTreeSnapshot } from "../src/tui/branch-tree.ts";
 import { resolveWorkspace } from "../src/workspace/workspace.ts";
-import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
+import { buildIsolatedCliEnv, makeTempRoot, removeTempRoot, withTempDir } from "./helpers.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
@@ -67,8 +66,8 @@ async function round(options: { tools: ToolRegistry; calls: Array<{ id: string; 
 const neverAsk: ApprovalPolicy["ask"] = async request => { throw new Error(`Unexpected approval request for ${request.toolName}`); };
 
 test("web_fetch runs without an approval request in auto, interactive ask and read-only while bash keeps its approval", async () => {
-  const root = await mkdtemp(join(tmpdir(), "schway-fetch-"));
-  cleanups.push(() => rm(root, { recursive: true, force: true }));
+  const root = await makeTempRoot("schway-fetch-");
+  cleanups.push(() => removeTempRoot(root));
   const fixture = pageServer();
   const tools = createToolRegistry([bashTool, webFetchTool]);
   const asked: string[] = [];
@@ -139,8 +138,8 @@ test("an extension tool named web_fetch fails to load with the collision error",
     expect(tools.definitions().map(tool => tool.name)).toEqual(["web_fetch"]);
 
     // The headless entry point registers web_fetch, so the same extension stops startup there too.
-    const home = await mkdtemp(join(tmpdir(), "schway-home-"));
-    cleanups.push(() => rm(home, { recursive: true, force: true }));
+    const home = await makeTempRoot("schway-home-");
+    cleanups.push(() => removeTempRoot(home));
     const stdout = capture(), stderr = capture();
     const exit = await runCli(["-p", "go", "--extension", path], { cwd: dir, env: { HOME: home, OPENAI_API_KEY: "sk-test" }, stdout, stderr,
       credentialStore: fakeCredentialStore(), model: createScriptedModel({ text: "unused" }) });
@@ -155,8 +154,8 @@ test("headless runs offer guarded web_fetch in every approval mode, deny bash, a
     const secret = "sk-headless-secret-1234";
     for (const mode of ["auto", "ask", "read-only"] as const) {
       const requests: ModelRequest[] = [];
-      const home = await mkdtemp(join(tmpdir(), "schway-home-"));
-      cleanups.push(() => rm(home, { recursive: true, force: true }));
+      const home = await makeTempRoot("schway-home-");
+      cleanups.push(() => removeTempRoot(home));
       const stdout = capture(), stderr = capture();
       const exit = await runCli(["-p", "Check the forecast", "--approval", mode, "--json"], {
         cwd: dir, env: { HOME: home, OPENAI_API_KEY: secret }, stdout, stderr, credentialStore: fakeCredentialStore(),

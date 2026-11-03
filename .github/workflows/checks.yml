@@ -3,16 +3,28 @@ name: checks
 # public repository, so long suites don't load a developer machine. Every push to a branch
 # of this repository runs once, including main after a merge, and its PR shows those
 # checks. Fork branches don't run here: push the branch to this repository or use
-# workflow_dispatch. A newer push to the same ref cancels the older run.
+# workflow_dispatch. A newer run of the same event on the same ref cancels the older one.
 # Tests run on x64 and on ARM64, which matches the Raspberry Pi hosts that embed Schway.
+# Shards are balanced by the per-file timings in scripts/ci/test-timings.json; each shard uploads
+# a junit-<arch>-<shard> report, and scripts/ci/README.md shows how to refresh the table from them.
+# x64 shards run from a copy of the checkout without .git and fail if the tests removed anything
+# they didn't create (#450). Pushes to main, manual runs and a weekly run also repeat the #450
+# report's container run. Pushes to main and manual runs pack the tested commit as a workflow
+# artifact for Jit to vendor (docs/host-s14-conformance.md).
 on:
   push:
   workflow_dispatch:
+  schedule:
+    - cron: "23 4 * * 1"
 concurrency:
-  group: checks-${{ github.ref }}
+  group: checks-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 permissions:
   contents: read
+defaults:
+  run:
+    # GitHub's bash shell adds pipefail, so a failing command before a pipe fails its step.
+    shell: bash
 jobs:
   typecheck:
     runs-on: ubuntu-latest
@@ -36,7 +48,8 @@ jobs:
       fail-fast: false
       matrix:
         arch: [x64, arm64]
-        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+        # One entry per shard, 0 to SHARD_COUNT - 1 in scripts/ci/test-shard.ts; tests/ci-test-shard.test.ts checks it.
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -50,12 +63,126 @@ jobs:
       # The search tool prefers ripgrep; tests that drive Git need a committer identity.
       - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ripgrep
       - run: git config --global user.name "schway-ci" && git config --global user.email "schway-ci@users.noreply.github.com"
+      # An empty list would make bun test run the whole suite, so it fails the step instead.
+      - name: List the shard's files
+        run: |
+          bun scripts/ci/test-shard.ts ${{ matrix.shard }} | tee "$RUNNER_TEMP/shard-files.txt"
+          test -s "$RUNNER_TEMP/shard-files.txt"
+      - name: Copy the checkout without .git
+        if: matrix.arch == 'x64'
+        run: bash scripts/ci/no-git-copy.sh prepare /tmp/schway-no-git
       # Shared runners can exceed Bun's default 5 s per test under parallel load.
-      - run: bun test --timeout 30000 $(bun scripts/ci/test-shard.ts ${{ matrix.shard }} 8)
+      - name: Run the shard
+        working-directory: ${{ matrix.arch == 'x64' && '/tmp/schway-no-git' || github.workspace }}
+        run: bun test --timeout 30000 --reporter=junit --reporter-outfile="$RUNNER_TEMP/junit.xml" $(cat "$RUNNER_TEMP/shard-files.txt")
+      - name: Check that the tests removed nothing they didn't create
+        if: always() && matrix.arch == 'x64'
+        run: bash scripts/ci/no-git-copy.sh verify /tmp/schway-no-git
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: junit-${{ matrix.arch }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/junit.xml
+          if-no-files-found: ignore
+          # A re-run attempt replaces its earlier report instead of adding a second one with the same name.
+          overwrite: true
+          retention-days: 30
+  no-git-container:
+    name: tests (no-git container)
+    # The #450 report's conditions: oven/bun:1.4.2 as uid 1000, no git and no network, a copy without .git
+    # mounted at /tmp/rv428, and the whole suite in one `bun test -t ""` process. Many tests fail without git
+    # or network, so the job ignores test results. It fails if the run removed something it didn't create,
+    # or if the run didn't finish every test file. It runs on main pushes, manual runs and weekly, so branch
+    # checks stay short.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: docker pull oven/bun:1.4.2
+      # The container records what exists after this chown, as uid 1000 sees it.
+      # bun test skips dot-directories, so tracked tests under .agents/ don't count toward the expected files.
+      - name: Copy the checkout without .git to /tmp/rv428 for uid 1000
+        run: |
+          expected=$(git ls-files -- '*.test.ts' '*.test.tsx' | grep -cvE '(^|/)[.]')
+          echo "SCHWAY_EXPECTED_TEST_FILES=$expected" >> "$GITHUB_ENV"
+          bash scripts/ci/no-git-copy.sh copy /tmp/rv428
+          mkdir "$RUNNER_TEMP/no-git-state"
+          sudo chown -R 1000:1000 /tmp/rv428 "$RUNNER_TEMP/no-git-state"
+      - name: Run the suite as uid 1000 without git or network, then check for removals
+        run: >-
+          docker run --rm --user 1000:1000 --network none
+          --volume /tmp/rv428:/tmp/rv428
+          --volume "$GITHUB_WORKSPACE/scripts/ci:/schway-ci:ro"
+          --volume "$RUNNER_TEMP/no-git-state:/schway-state"
+          --env NO_GIT_COPY_STATE=/schway-state --env SCHWAY_EXPECTED_TEST_FILES
+          oven/bun:1.4.2 bash /schway-ci/no-git-container.sh /tmp/rv428
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: no-git-container-log
+          path: ${{ runner.temp }}/no-git-state/bun-test.log
+          if-no-files-found: ignore
+          overwrite: true
+          retention-days: 30
+  package:
+    # Jit vendors this tarball. It is packed only from a commit whose typecheck and tests passed,
+    # kept as a workflow artifact with its SHA-256 file, and never sent to a registry.
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    needs: [typecheck, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ripgrep
+      - name: Pack, checksum and install in the packed-consumer test
+        id: pack
+        run: bash scripts/ci/pack-artifact.sh "$RUNNER_TEMP/pack"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pack.outputs.name }}
+          path: |
+            ${{ steps.pack.outputs.dir }}/${{ steps.pack.outputs.name }}.tgz
+            ${{ steps.pack.outputs.dir }}/${{ steps.pack.outputs.name }}.tgz.sha256
+          if-no-files-found: error
+          compression-level: 0
+          overwrite: true
+          retention-days: 90
   checks:
     if: always()
-    needs: [typecheck, tests]
+    needs: [typecheck, tests, no-git-container, package]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - run: test "${{ needs.typecheck.result }}" = success && test "${{ needs.tests.result }}" = success
+      # The container and package jobs must pass where they run (the same conditions as their `if`) and be
+      # skipped elsewhere.
+      - env:
+          TYPECHECK: ${{ needs.typecheck.result }}
+          TESTS: ${{ needs.tests.result }}
+          CONTAINER: ${{ needs.no-git-container.result }}
+          CONTAINER_RUNS: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+          PACKAGE: ${{ needs.package.result }}
+          PACKAGE_RUNS: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
+        run: |
+          echo "typecheck=$TYPECHECK tests=$TESTS no-git-container=$CONTAINER (runs: $CONTAINER_RUNS) package=$PACKAGE (runs: $PACKAGE_RUNS)"
+          expected() { if [ "$1" = true ]; then echo success; else echo skipped; fi; }
+          test "$TYPECHECK" = success
+          test "$TESTS" = success
+          test "$CONTAINER" = "$(expected "$CONTAINER_RUNS")"
+          test "$PACKAGE" = "$(expected "$PACKAGE_RUNS")"

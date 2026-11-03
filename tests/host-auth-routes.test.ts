@@ -220,7 +220,10 @@ for (const route of ["codex", "grok"] as const) {
     await withTempDir(async dir => {
       const store = fakeCredentialStore();
       await store.set(identity, JSON.stringify({ accessToken: "rejected-token-sentinel", refreshToken: "r", expiresAt: Date.now() + 3_600_000, obtainedAt: Date.now() }));
-      const fetch = (async (_url?: unknown, _init?: unknown) => new Response("rejected-token-sentinel detail", { status: 401 })) as never;
+      // Inference rejects the token; Grok's renewal is then refused with the token endpoint's JSON OAuth error.
+      const fetch = (async (url?: unknown, _init?: unknown) => String(url).includes("auth.x.ai") || String(url).includes("/oauth/token")
+        ? Response.json({ error: "invalid_grant", error_description: "rejected-token-sentinel detail" }, { status: 401 })
+        : new Response("rejected-token-sentinel detail", { status: 401 })) as never;
       const host = await createHost(await options(dir, { route, model, store, fetch }));
       const session = await host.createSession();
       const run = await session.submitWithRoute({ text: "rejected" });

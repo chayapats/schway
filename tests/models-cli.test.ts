@@ -316,18 +316,18 @@ for (const route of ["codex", "grok"] as const) {
     expect(result.catalog).toMatchObject({ route, status: "error", models: [] });
     expect(result.error).toContain("timed out after 5 seconds");
     expect(calls).toBe(2);
-    // Grok renewal has a shared lifetime; this caller's original deadline still owns the catalog body.
+    // Renewal has a shared lifetime on both routes; this caller's original deadline still owns the catalog body.
     expect(signals[1]).toBe(clock.controller.signal); expect(signals[1]!.aborted).toBe(true);
-    if (route === "codex") expect(signals[0]).toBe(signals[1]);
+    expect(signals[0]).not.toBe(signals[1]); expect(signals[0]!.aborted).toBe(false);
     expect(bodyCancelled).toBe(true); expect(fixture.writes).toEqual([identity.account]);
     expect(clock.inspect()).toEqual({ elapsed: 5_000, budget: 5_000, started: 1, cleared: 1 });
   });
 
-  for (const cancel of ["deadline", "parent"] as const) test(`${route} ${cancel} abort reaches a late refresh and prevents token writes`, async () => {
+  for (const cancel of ["deadline", "parent"] as const) test(`${route} ${cancel} abort after the token request left still stores the rotated token`, async () => {
     const fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
     const clock = controlledDeadline(), parent = new AbortController();
     const started = deferred<void>(), response = deferred<Response>();
-    let requestSignal: AbortSignal | undefined, bodyCancelled = false;
+    let requestSignal: AbortSignal | undefined;
     const pending = discoverModels({ provider, ...auth, env: {}, signal: parent.signal }, {
       ...clock, store: fixture.credentials, fetch: async (_url, init) => { requestSignal = init!.signal!; started.resolve(); return response.promise; },
     });
@@ -336,10 +336,49 @@ for (const route of ["codex", "grok"] as const) {
     const result = await pending;
     expect(result.catalog).toMatchObject({ route, status: "error", models: [] });
     expect(result.error).toContain(cancel === "deadline" ? "timed out" : "cancelled");
-    expect(requestSignal?.aborted).toBe(true);
-    response.resolve(new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"access_token":"too-late","expires_in":3600}')); }, cancel() { bodyCancelled = true; } })));
-    await Bun.sleep(0);
-    expect(fixture.writes).toEqual([]); expect(bodyCancelled).toBe(true);
+    // The provider may already have rotated the refresh token, so the renewal outlives discovery and stores it.
+    expect(requestSignal?.aborted).toBe(false);
+    response.resolve(Response.json({ access_token: "too-late", refresh_token: "rotated-private", expires_in: 3600 }));
+    for (let wait = 0; wait < 200 && !fixture.writes.length; wait++) await Bun.sleep(1);
+    expect(fixture.writes).toEqual([identity.account]);
+    expect(JSON.parse((await fixture.credentials.get(identity))!).refreshToken).toBe("rotated-private");
+    expect(JSON.stringify(result)).not.toContain("rotated-private");
+    // The next command uses the stored token: it lists models without another token request.
+    let tokenRequests = 0;
+    const next = await discoverModels({ provider, ...auth, env: {} }, { store: fixture.credentials, fetch: async url => {
+      if (String(url).includes("/token")) { tokenRequests++; return Response.json({ error: "invalid_grant" }, { status: 400 }); }
+      return Response.json(route === "codex" ? { models: [{ slug: "gpt-5.4", visibility: "list" }] } : { data: [{ id: "grok-4.7" }] });
+    } });
+    expect(next.catalog).toMatchObject({ route, status: "complete" });
+    expect(tokenRequests).toBe(0);
+  });
+
+  test(`${route} a token refresh failure tells the user to retry the listing, not a turn`, async () => {
+    const fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
+    const result = await discoverModels({ provider, ...auth, env: {} }, { store: fixture.credentials, fetch: async () => new Response("<html>busy</html>", { status: 503 }) });
+    expect(result.catalog).toMatchObject({ route, status: "error", models: [] });
+    expect(result.error).toContain("(HTTP 503). Retry schway models list;");
+    expect(result.error).not.toContain("Retry the turn");
+    expect(fixture.writes).toEqual([]);
+  });
+
+  for (const cancel of ["deadline", "parent"] as const) test(`${route} ${cancel} abort before the token request leaves never sends it`, async () => {
+    const expired = JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 });
+    const fixture = store({ [identity.account]: expired });
+    const reading = deferred<void>(), answer = deferred<void>();
+    const read = fixture.credentials.get;
+    fixture.credentials.get = async selected => { reading.resolve(); await answer.promise; return read(selected); };
+    const clock = controlledDeadline(), parent = new AbortController();
+    let requests = 0;
+    const pending = discoverModels({ provider, ...auth, env: {}, signal: parent.signal }, {
+      ...clock, store: fixture.credentials, fetch: async () => { requests++; return Response.json({}); },
+    });
+    await reading.promise;
+    if (cancel === "deadline") clock.advance(5_000); else parent.abort();
+    expect((await pending).error).toContain(cancel === "deadline" ? "timed out" : "cancelled");
+    answer.resolve();
+    await Bun.sleep(20);
+    expect(requests).toBe(0); expect(fixture.writes).toEqual([]);
   });
 }
 
@@ -629,17 +668,22 @@ for (const first of ["ordinary", "discovery"] as const) for (const ending of ["c
   });
 }
 
-test("Grok shared renewal cancels a stalled token body only after its last interested caller leaves", async () => {
+test("Grok shared renewal keeps reading a stalled token body after every caller leaves, then stores it", async () => {
   const { createSubscriptionTokenRefresher, GROK_TOKEN_URL } = await import("../src/model/providers/grok-subscription.ts");
   const identity = grokSubscriptionIdentity(), fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
   const bodyStarted = deferred<void>(), joined = deferred<void>(), bodyCancelled = deferred<void>();
+  let finishBody: (() => void) | undefined, cancelled = false;
   const read = fixture.credentials.get;
   fixture.credentials.get = async selected => { const value = await read(selected); if (fixture.reads.length === 2) joined.resolve(); return value; };
   const clock = controlledDeadline(), ordinaryAbort = new AbortController();
   let refreshes = 0, signal: AbortSignal | undefined;
   const fetch = async (url: string | URL | Request, init?: RequestInit) => {
     expect(String(url)).toBe(GROK_TOKEN_URL); refreshes++; signal = init!.signal!;
-    return new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"access_token":"never-completed"')); bodyStarted.resolve(); }, cancel() { bodyCancelled.resolve(); } }));
+    return new Response(new ReadableStream({ start(controller) {
+      controller.enqueue(new TextEncoder().encode('{"access_token":"completed-late"'));
+      finishBody = () => { controller.enqueue(new TextEncoder().encode(',"refresh_token":"rotated-late","expires_in":3600}')); controller.close(); };
+      bodyStarted.resolve();
+    }, cancel() { cancelled = true; bodyCancelled.resolve(); } }));
   };
   let expired = false;
   const watchdog = setTimeout(() => { expired = true; ordinaryAbort.abort(); clock.advance(5000); bodyStarted.resolve(); bodyCancelled.resolve(); joined.resolve(); }, 1500);
@@ -651,11 +695,16 @@ test("Grok shared renewal cancels a stalled token body only after its last inter
     await joined.promise; clock.advance(5000);
     expect((await listing).error).toContain("timed out"); expect(signal?.aborted).toBe(false);
     ordinaryAbort.abort(); expect(await execution).toMatchObject({ name: "AbortError" });
-    await bodyCancelled.promise; expect(expired).toBe(false); expect(signal?.aborted).toBe(true); expect(refreshes).toBe(1); expect(fixture.writes).toEqual([]);
+    // Every caller has left, but the provider may already have rotated the token: the renewal keeps reading.
+    await Bun.sleep(5); expect(cancelled).toBe(false); expect(signal?.aborted).toBe(false);
+    finishBody!();
+    for (let wait = 0; wait < 200 && !fixture.writes.length; wait++) await Bun.sleep(1);
+    expect(expired).toBe(false); expect(refreshes).toBe(1); expect(fixture.writes).toEqual([identity.account]);
+    expect(JSON.parse((await fixture.credentials.get(identity))!).refreshToken).toBe("rotated-late");
   } finally { clearTimeout(watchdog); ordinaryAbort.abort(); clock.advance(5000); await Promise.allSettled([listing, execution]); }
 });
 
-test("Grok failed credential readers detach and cannot keep an abandoned discovery renewal alive", async () => {
+test("Grok discovery renewal outlives a failed reader and discovery's deadline, then stores the rotated token", async () => {
   const { createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
   const identity = grokSubscriptionIdentity(), fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
   const read = fixture.credentials.get;
@@ -671,16 +720,17 @@ test("Grok failed credential readers detach and cannot keep an abandoned discove
     await started.promise;
     execution = createSubscriptionTokenRefresher({ store: fixture.credentials, fetch }).getValidAccessToken(ordinaryAbort.signal);
     await expect(execution).rejects.toThrow("credential store");
-    clock.advance(5000); expect((await listing).error).toContain("timed out"); expect(requestSignal?.aborted).toBe(true);
-    response.resolve(new Response(new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode('{"access_token":"too-late"}')); }, cancel() { cancelledBody.resolve(); } })));
-    await cancelledBody.promise; expect(expired).toBe(false); expect(fixture.writes).toEqual([]);
+    clock.advance(5000); expect((await listing).error).toContain("timed out"); expect(requestSignal?.aborted).toBe(false);
+    response.resolve(Response.json({ access_token: "too-late", refresh_token: "rotated-late", expires_in: 3600 }));
+    for (let wait = 0; wait < 200 && !fixture.writes.length; wait++) await Bun.sleep(1);
+    expect(expired).toBe(false); expect(fixture.writes).toEqual([identity.account]);
   } finally {
     clearTimeout(watchdog); ordinaryAbort.abort(); clock.advance(5000); response.resolve(Response.json({ access_token: "discarded" }));
     await Promise.allSettled([listing, execution]);
   }
 });
 
-test("Grok shared renewal cannot begin saving after every caller cancels at the pre-write boundary", async () => {
+test("Grok shared renewal still saves after every caller cancels at the pre-write boundary", async () => {
   const { createSubscriptionTokenRefresher, fetchDiscoveryCatalog } = await import("../src/model/providers/grok-subscription.ts");
   const identity = grokSubscriptionIdentity(), fixture = store({ [identity.account]: JSON.stringify({ accessToken: "expired", refreshToken: "private-refresh", expiresAt: 0, obtainedAt: 0 }) });
   const first = new AbortController(), second = new AbortController(), started = deferred<void>(), joined = deferred<void>(), release = deferred<void>();
@@ -700,7 +750,9 @@ test("Grok shared renewal cannot begin saving after every caller cancels at the 
     await joined.promise; release.resolve();
     const outcomes = await Promise.all([listing, execution]);
     expect(expired).toBe(false); expect(reachedBoundary).toBe(true); expect(outcomes).toEqual([expect.objectContaining({ name: "AbortError" }), expect.objectContaining({ name: "AbortError" })]);
-    expect(renewals).toBe(1); expect(fixture.writes).toEqual([]);
+    // Cancelling every caller stops only their waits; the rotated token is still stored.
+    for (let wait = 0; wait < 200 && !fixture.writes.length; wait++) await Bun.sleep(1);
+    expect(renewals).toBe(1); expect(fixture.writes).toEqual([identity.account]);
   } finally { clearTimeout(watchdog); first.abort(); second.abort(); release.resolve(); await Promise.allSettled([listing, execution]); }
 });
 

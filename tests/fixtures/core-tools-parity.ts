@@ -1,6 +1,7 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { makeTempRoot, removeTempRoot } from "../helpers.ts";
 
 /** One normalized tool outcome: model-facing content, error flag and structured details. */
 interface Outcome { tool: string; input: unknown; content: string; isError: boolean; details: unknown; spill?: string }
@@ -14,7 +15,7 @@ type Execute = (input: unknown, ctx: { workspace: { root: string; launchCwd: str
  * The committed golden was recorded from the CLI definitions before the execution-backend refactor.
  */
 export async function runParityFixtures(mode: "cli" | "host"): Promise<Outcome[]> {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "schway-parity-")));
+  const root = await makeTempRoot("schway-parity-");
   try {
     await seed(root);
     const tools = await load(mode, root);
@@ -42,7 +43,7 @@ export async function runParityFixtures(mode: "cli" | "host"): Promise<Outcome[]
     }
     return outcomes;
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeTempRoot(root);
   }
 }
 

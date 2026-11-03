@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 /** Keep Markdown outside fenced examples for link and heading checks. */
 function prose(markdown: string): string {
@@ -94,7 +94,7 @@ test("relative Markdown links in docs resolve to files and headings", async () =
 });
 
 test("link checking catches missing files and anchors while respecting Markdown examples", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "schway-doc-links-"));
+  const directory = await makeTempRoot("schway-doc-links-");
   try {
     const source = join(directory, "guide.md");
     await writeFile(join(directory, "other guide.md"), "# Choose a model (API key)\n## ภาษาไทย\n## Repeat\n## Repeat\n");
@@ -118,6 +118,6 @@ test("link checking catches missing files and anchors while respecting Markdown 
       `${source}: absent-reference.md (missing file)`,
     ]);
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await removeTempRoot(directory);
   }
 });

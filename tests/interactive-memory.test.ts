@@ -12,6 +12,12 @@ import { resolveWorkspace } from "../src/workspace/workspace.ts";
 import { withTempDir, buildIsolatedCliEnv } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
+// Each fixture process these tests spawn is killed at this bound (an interactive process's exit draft
+// save has a 4 s budget inside it). A test's timeout covers all of its processes at this bound.
+const FIXTURE_PROCESS_BOUND_MS = 8000;
+/** Test timeout for `processes` sequential fixture processes, each at its kill bound, plus in-process work. */
+const fixtureProcessesTimeout = (processes: number) => processes * FIXTURE_PROCESS_BOUND_MS + 5_000;
+
 async function launch(home: string, cwd: string, cli = {}, stage?: () => Promise<void>) {
   const workspace = await resolveWorkspace(cwd);
   const editor = await loadConfigEditor({ home, workspaceRoot: workspace.root, cli, interactiveMemory: true });
@@ -180,7 +186,7 @@ test("fresh interactive processes restore the tuple through real picker keyboard
       const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interactive-memory-process.ts"), mode, project], {
         cwd: join(import.meta.dir, ".."), env: buildIsolatedCliEnv(home), stdout: "pipe", stderr: "pipe",
       });
-      const timer = setTimeout(() => child.kill(), 8000);
+      const timer = setTimeout(() => child.kill(), FIXTURE_PROCESS_BOUND_MS);
       try {
         const [stdout, stderr, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
         expect(stderr).toMatch(/^(?:Draft saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/); expect(exit).toBe(0);
@@ -201,7 +207,7 @@ test("fresh interactive processes restore the tuple through real picker keyboard
     expect(await readFile(join(stateDirectory, stateFile), "utf8")).toBe(saved);
     expect(await readdir(project)).toEqual([]);
   });
-}, 15000);
+}, fixtureProcessesTimeout(3));
 
 test("fresh headless dispatcher ignores memory and retains runtime credential precedence and lazy loading", async () => {
   await withTempDir(async root => {
@@ -231,7 +237,7 @@ test("fresh startup explains removed credentials and subscription models without
       const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interactive-memory-process.ts"), mode, root], {
         cwd: join(import.meta.dir, ".."), env: buildIsolatedCliEnv(home), stdout: "pipe", stderr: "pipe",
       });
-      const timer = setTimeout(() => child.kill(), 8000);
+      const timer = setTimeout(() => child.kill(), FIXTURE_PROCESS_BOUND_MS);
       try {
         const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
         expect(code).toBe(0); expect(err).toMatch(/^(?:Draft saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
@@ -246,7 +252,7 @@ test("fresh startup explains removed credentials and subscription models without
     const removed = await run("missing-model"); expect(removed.requests).toEqual([]); expect(removed.screen.replace(/\s+/g, " ")).toContain("no longer available");
     const intact = await launch(home, root); expect(intact.editor.settings).toMatchObject({ openaiAuth: "codex", model: "account-model", thinking: "max" }); intact.controller.dispose();
   });
-}, 15000);
+}, fixtureProcessesTimeout(6));
 
 test("individual explicit model, reasoning and profile fields resolve at every higher layer without rewriting memory", async () => {
   await withTempDir(async root => {
@@ -341,7 +347,7 @@ test("a live preference writer excludes contenders and SIGKILL releases ownershi
     const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interactive-memory-lock-owner.ts"), root], {
       cwd: join(import.meta.dir, ".."), env: buildIsolatedCliEnv(home), stdout: "pipe", stderr: "pipe",
     });
-    const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+    const timer = setTimeout(() => child.kill("SIGKILL"), FIXTURE_PROCESS_BOUND_MS);
     try {
       const reader = child.stdout.getReader();
       expect(new TextDecoder().decode((await reader.read()).value)).toContain("LOCKED");
@@ -363,7 +369,7 @@ test("a live preference writer excludes contenders and SIGKILL releases ownershi
       const forgotten = await launch(home, root); expect(forgotten.editor.settings.model).toBe(""); forgotten.controller.dispose();
     } finally { clearTimeout(timer); if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }
   });
-}, 10000);
+}, fixtureProcessesTimeout(1));
 
 test("corrupt memory cannot choose a fallback route but complete explicit CLI settings remain authoritative", async () => {
   await withTempDir(async root => {
@@ -375,7 +381,7 @@ test("corrupt memory cannot choose a fallback route but complete explicit CLI se
       const child = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/interactive-memory-process.ts"), mode, root], {
         cwd: join(import.meta.dir, ".."), env: buildIsolatedCliEnv(home), stdout: "pipe", stderr: "pipe",
       });
-      const timer = setTimeout(() => child.kill("SIGKILL"), 8000);
+      const timer = setTimeout(() => child.kill("SIGKILL"), FIXTURE_PROCESS_BOUND_MS);
       try {
         const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
         expect(code).toBe(0); expect(err).toMatch(/^(?:Draft saved\.\n)?(?:Resume: schway --resume [a-f0-9-]+\n)?$/);
@@ -392,7 +398,7 @@ test("corrupt memory cannot choose a fallback route but complete explicit CLI se
     expect(explicit.screen.replace(/\s+/g, " ")).toContain("Explicit settings fully select");
     expect(await readFile(path, "utf8")).toBe(corrupt);
   });
-}, 15000);
+}, fixtureProcessesTimeout(3));
 
 test("resume past corrupt memory requires a complete explicit connection and explains the preserved state", async () => {
   await withTempDir(async root => {

@@ -12,8 +12,7 @@ import { handleSlashCommand } from "../../src/tui/app.ts";
 import { openRouterModelCapabilities, parseModelList } from "../../src/model/model-list.ts";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { ScrollBoxRenderable, TextareaRenderable } from "@opentui/core";
-import { mkdtemp, mkdir, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { TuiController, type TuiSnapshot, type TuiControllerOptions } from "../../src/tui/controller.ts";
 import { createConversationView, PANEL_MODES, type PanelMode } from "../../src/tui/view.ts";
@@ -31,6 +30,7 @@ import { createScriptedModel, type ScriptedTurn } from "../helpers/scripted-mode
 import { MARKDOWN_ANSWER } from "../helpers/markdown-answer.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity } from "../../src/auth/store.ts";
 import { fakeCredentialStore } from "../helpers/credential-store.ts";
+import { makeTempRoot, removeTempRoot } from "../helpers.ts";
 import type { Screen, Variant } from "./screens.ts";
 import { serializeScreen } from "./format.ts";
 import type { BoxRenderable, TextRenderable } from "@opentui/core";
@@ -182,7 +182,7 @@ export async function buildScreen(screen: Screen, variant: Variant, harnessOptio
   const askEdit = screen.id === "approval-edit" || screen.id === "approval-deny-reason" || screen.id === "approval-diff-overflow";
   const disk = commandFiles || askEdit || screen.id === "details-recovery" || draft || palette || (screen.id.startsWith("model-picker") || screen.id === "details-model") || ["approval-command", "completed-turn", "stopped-tool", "large-edit", "review-panel", "details-review", "undo-preview", "undo-preview-no-git", "delete-session-busy", "recent-work-resume", "narrow-layout", "reasoning-chip-explicit"].includes(screen.id) || reviewScope || undoLimit || resumedReview || historyScreen;
   if (disk) {
-    temp = await realpath(await mkdtemp(join(tmpdir(), "catalog-")));
+    temp = await makeTempRoot("catalog-");
     home = join(temp, "home"); root = join(home, "demo"); await mkdir(root, { recursive: true });
     if (screen.id === "narrow-layout") {
       root = join(home, "Projects", "very-long-directory-name", "schway");
@@ -499,7 +499,7 @@ export async function buildScreen(screen: Screen, variant: Variant, harnessOptio
   await settle();
   return { ...terminal, controller, view, session, sessionDirectory, secrets, draftStore, root, editor: terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable, loginCalled: () => loginCalled, settle, waitFor,
     advance: () => { activityTime += screen.elapsed ?? 0; },
-    dispose: async () => { releaseReviewStatus?.(); releaseReviewStatus = undefined; view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); undoLock?.close(); if (temp) await rm(temp, { recursive: true, force: true }); },
+    dispose: async () => { releaseReviewStatus?.(); releaseReviewStatus = undefined; view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); undoLock?.close(); if (temp) await removeTempRoot(temp); },
   };
 }
 /** Reach the named state, capture all spans and dispose every owned resource. */

@@ -190,7 +190,7 @@ export async function discoverModels(input: CatalogConnection & {
     if (catalog.route === "codex") {
       const provider = await import("./providers/codex-subscription.ts");
       signal.throwIfAborted();
-      result = await provider.fetchDiscoveryCatalog({ store, fetch: deps.fetch, signal });
+      result = await provider.fetchDiscoveryCatalog({ store, lifecycleStore: originalStore, onCredential: rememberCredential, fetch: deps.fetch, signal });
     } else if (catalog.route === "grok") {
       const provider = await import("./providers/grok-subscription.ts");
       signal.throwIfAborted();

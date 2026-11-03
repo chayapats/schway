@@ -191,11 +191,14 @@ and a shared request is counted once. Failures keep the route-run status
 categories, with retry guidance worded for a renewal. A stopped renewal settles
 promptly; a token request that already left still completes and its rotated
 credential is stored unless a logout or fence refuses it. Listing guidance for
-an expired login now names this renewal instead of a route-bound request. Run,
-listing and readiness behavior and request bytes are otherwise unchanged, and
-the CLI/TUI path is unchanged. This is a minor, additive host API change.
+an expired login now names this renewal instead of a route-bound request.
+Request bytes are unchanged. Runs, catalog discovery and the CLI also keep a
+renewal that already left until it settles, and the CLI waits a bounded time for
+it before exiting (#456, #458). This is a minor, additive host API change.
 Consumers that construct structural `HostAuthBinding` or `HostCapabilities`
-values must add the new members. See
+values must add the new members. `HostCredentialStore` gains an optional
+`compareAndSet`; a store without it keeps working through a read-then-set
+fallback. See
 [host contracts](host.md#explicit-route-renewal).
 
 ## Core tool semantics

@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { parseArgs } from "../src/cli/args.ts";
 import { createDiagnosticSink, diagnosticPath } from "../src/diagnostics/sink.ts";
 import { createContextManager } from "../src/context/manager.ts";
@@ -12,9 +11,10 @@ import { readTool } from "../src/tools/read.ts";
 import type { Model } from "../src/model/model.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { runInteractiveTui } from "../src/tui/app.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 test("interactive startup diagnostics are opt-in and never require OpenTUI for pre-render failures", async () => {
-  const home = await mkdtemp(join(tmpdir(), "schway-tui-debug-"));
+  const home = await makeTempRoot("schway-tui-debug-");
   try {
     for (const enabled of [false, true]) {
       const parsed = parseArgs(["--resume", "missing-session", ...(enabled ? ["--debug"] : [])]);
@@ -32,12 +32,12 @@ test("interactive startup diagnostics are opt-in and never require OpenTUI for p
     expect(await runInteractiveTui({ args: configArgs.args, env: { HOME: home, SCHWAY_MOTION: "off" }, cwd: home,
       stdout: { write() {} }, stderr: { write() {} } })).toBe(1);
     expect(await readFile(diagnosticPath(home), "utf8")).toContain('"event":"invalid_configuration"');
-  } finally { await rm(home, { recursive: true, force: true }); }
+  } finally { await removeTempRoot(home); }
 });
 
 async function inHome(run: (home: string) => Promise<void>) {
-  const home = await mkdtemp(join(tmpdir(), "schway-tui-events-"));
-  try { await run(home); } finally { await rm(home, { recursive: true, force: true }); }
+  const home = await makeTempRoot("schway-tui-events-");
+  try { await run(home); } finally { await removeTempRoot(home); }
 }
 
 function makeController(home: string, session: Session, model: Model, onRuntimeEvent?: (event: import("../src/agent/events.ts").RuntimeEvent) => void, contextWindow?: number) {

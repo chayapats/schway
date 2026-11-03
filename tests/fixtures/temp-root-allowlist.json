@@ -1,0 +1,6 @@
+{
+  "tests/screen-catalog.test.ts": {
+    "recursiveRemoval": 1,
+    "reason": "Under SCHWAY_UPDATE_SCREENS=1, prune() deletes stale golden directories in the checkout's tests/screen-catalog/goldens, which is not a temp root."
+  }
+}

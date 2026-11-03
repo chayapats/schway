@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { runCli } from "../src/cli/main.ts";
 import { parseArgs } from "../src/cli/args.ts";
@@ -11,12 +10,13 @@ import { LEGACY_ANTHROPIC_ACCOUNT, type CredentialIdentity, type CredentialStore
 import { createOpenAIModel } from "../src/model/providers/openai.ts";
 import { listCatalog } from "../src/model/catalog.ts";
 import { collect } from "./helpers/scripted-model.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 import { encodeSse, sampleRequest, TEXT_STREAM_EVENTS } from "./fixtures/openai.ts";
 
 const dirs: string[] = [];
-afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
+afterEach(async () => { for (const dir of dirs.splice(0)) await removeTempRoot(dir); });
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "schway-anthropic-removed-")); dirs.push(root);
+  const root = await makeTempRoot("schway-anthropic-removed-"); dirs.push(root);
   const workspace = join(root, "work"); const home = join(root, "home");
   await mkdir(join(workspace, ".git"), { recursive: true }); await mkdir(join(home, ".schway"), { recursive: true });
   return { workspace, home };

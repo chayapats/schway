@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { appendFile, chmod, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "../src/cli/args.ts";
 import { runCli } from "../src/cli/main.ts";
@@ -19,7 +19,7 @@ import { dispatchEditorInput, parseSlashCommand } from "../src/tui/commands.ts";
 import { invokeSkillTurn } from "../src/tui/app.ts";
 import { loadExtensions } from "../src/extensions/loader.ts";
 import { addWorkspaceRoots, restoreWorkspace, type Workspace } from "../src/workspace/workspace.ts";
-import { withTempDir as withRawTempDir, makeDir, makeSymlink } from "./helpers.ts";
+import { withTempDir as withRawTempDir, makeDir, makeSymlink, removeOwnedTree } from "./helpers.ts";
 import { createScriptedModel, type ScriptedTurnFactory } from "./helpers/scripted-model.ts";
 import type { ModelRequest } from "../src/model/model.ts";
 
@@ -286,7 +286,7 @@ test("unavailable saved roots stay durable while usable primary and newly attach
     const valid = await makeDir(join(dir, "valid"));
     const directory = join(dir, "sessions");
     const session = await createJsonlSession({ directory, workspace: { root, launchCwd: root, extraRoots: [missing] } });
-    await rm(missing, { recursive: true });
+    await removeOwnedTree(dir, missing, { force: false });
     const resumed = await loadJsonlSession({ directory, id: session.header.id });
     const restored = await restoreWorkspace({ root, launchCwd: root, extraRoots: [...resumed.metadata.extraRoots] });
     expect(restored.diagnostics.join()).toContain("Saved attachment unavailable");
@@ -374,7 +374,7 @@ test("headless CLI validates attachment batches before model calls and preserves
     expect(captured?.context.find(section => section.name === "active-skill")?.content).toContain("ATTACHED_SKILL_BODY");
     expect(captured?.context[0]?.content).toContain(`Workspace root: ${root}`);
     expect((await loadJsonlSession({ directory, id: session.header.id })).metadata.extraRoots).toEqual([extra]);
-    await rm(extra, { recursive: true });
+    await removeOwnedTree(dir, extra, { force: false });
     io.model = createScriptedModel({ text: "still usable" });
     expect(await runCli(["--resume", session.header.id, "-p", "continue"], io)).toBe(0);
     expect(outputs.join()).toContain("Saved attachment unavailable");

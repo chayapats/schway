@@ -16,7 +16,7 @@ import { SessionResumeError } from "../src/tui/controller-sessions.ts";
 import { historyTimeLabel } from "../src/tui/controller-history.ts";
 import { daysAgoLabel, fitSessionPickerHint, relativeActivityLabel, sessionPanelLines, sessionPickerHint, utcMinuteLabel } from "../src/tui/session-picker-view.ts";
 import { SessionLoadError } from "../src/session/jsonl.ts";
-import { withTempDir } from "./helpers.ts";
+import { removeOwnedTree, withTempDir } from "./helpers.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 
 const user = (text: string) => ({ type: "user" as const, id: crypto.randomUUID(), content: [{ type: "text" as const, text }] });
@@ -418,7 +418,7 @@ test("picker resume of a missing workspace names the reason, shows details on F2
     const f = await fixture(home);
     const gone = join(home, "gone"); await mkdir(gone);
     const saved = await createJsonlSession({ directory: f.directory, workspace: { root: gone, launchCwd: gone, extraRoots: [] } }); saved.append(user("task in a removed folder"));
-    await rm(gone, { recursive: true });
+    await removeOwnedTree(home, gone, { force: false });
     const ui = await pickerView(f, home, 80, 24);
     try {
       await ui.terminal.mockInput.pasteBracketedText("unsent draft"); await ui.settle();

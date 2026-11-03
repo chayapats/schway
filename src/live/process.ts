@@ -17,10 +17,22 @@ const reasons = new Set(["verified", "missing_credentials", "credential_store_un
   "invalid_settings", "cancelled", "cleanup_failed", "disallowed_tool", "unsupported_thinking", "thinking_capability_unavailable"]);
 const statuses = new Set(["passed", "skipped", "pending", "failed_provider", "failed_runner"]);
 
-/** Private fixture seam; installed execution uses the production worker and inherited environment. */
+/** Private fixture seam; installed execution uses the production worker, inherited environment and real time. */
 export interface LiveProcessOptions {
   workerFile?: string;
   onWorkspace?: (path: string) => void;
+  /** Monotonic milliseconds for each lane's deadline; reaping a stopped worker always uses real time. */
+  now?: () => number;
+  /** Resolve once a lane deadline elapses, or reject when `signal` aborts because the lane settled first. */
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+}
+
+/** Real-time lane deadline whose timer is released as soon as the lane settles. */
+function sleepUntilSettled(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+  });
 }
 
 function scenario(provider: SmokeProvider, model: string, status: SmokeScenario["status"], reason: string, durationMs = 0): SmokeScenario {
@@ -118,6 +130,8 @@ async function stopChild(child: ReturnType<typeof Bun.spawn>, force: boolean): P
 
 /** Run selected lanes one at a time in isolated OS workers, refusing another launch without proven stop. */
 export async function runLiveProcesses(selection: SmokeSelection, options: LiveProcessOptions = {}): Promise<SmokeReport> {
+  const now = options.now ?? (() => performance.now());
+  const sleep = options.sleep ?? sleepUntilSettled;
   const scenarios: SmokeScenario[] = [];
   let stopped = true;
   let timedOut = false;
@@ -133,16 +147,16 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
     if (!stopped) { scenarios.push(laneScenario("pending", "prior_run_unsettled")); continue; }
     if (timedOut) { scenarios.push(laneScenario("pending", "prior_run_timeout")); continue; }
     if (selection.signal?.aborted) { scenarios.push(laneScenario("pending", "cancelled")); continue; }
-    const start = performance.now();
+    const start = now();
     let workspace: string | undefined;
     let result = laneScenario("failed_runner", "runner_error");
     let child: ReturnType<typeof Bun.spawn> | undefined;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let deadlineStop: AbortController | undefined;
     let abort: (() => void) | undefined;
     let reason: "timeout" | "cancelled" | undefined;
     let hardDeadline = false;
     const guardSetup = () => {
-      const stop = selection.signal?.aborted ? "cancelled" : performance.now() - start >= selection.timeoutMs ? "timeout" : undefined;
+      const stop = selection.signal?.aborted ? "cancelled" : now() - start >= selection.timeoutMs ? "timeout" : undefined;
       if (stop) { reason = stop; if (stop === "timeout") timedOut = true; throw Error("setup stopped"); }
     };
     try {
@@ -167,8 +181,9 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         child.stdin.end();
         const output = boundedOutput(child.stdout);
         const deadline = new Promise<{ reason: "timeout" | "cancelled" }>(resolve => {
-          const remaining = Math.max(0, selection.timeoutMs - (performance.now() - start));
-          timer = setTimeout(() => resolve({ reason: "timeout" }), remaining);
+          const remaining = Math.max(0, selection.timeoutMs - (now() - start));
+          deadlineStop = new AbortController();
+          sleep(remaining, deadlineStop.signal).then(() => resolve({ reason: "timeout" }), () => {});
           abort = () => resolve({ reason: "cancelled" });
           selection.signal?.addEventListener("abort", abort, { once: true });
           if (selection.signal?.aborted) resolve({ reason: "cancelled" });
@@ -187,7 +202,7 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
             reason = exit.reason;
             if (reason === "timeout") { timedOut = true; hardDeadline = true; }
             result = laneScenario(reason === "cancelled" ? "pending" : "failed_runner", reason);
-          } else if (performance.now() - start >= selection.timeoutMs) {
+          } else if (now() - start >= selection.timeoutMs) {
             timedOut = true;
             hardDeadline = true;
             result = laneScenario("failed_runner", "timeout");
@@ -199,7 +214,7 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         : laneScenario("failed_runner", "runner_error");
     }
     finally {
-      if (timer) clearTimeout(timer);
+      deadlineStop?.abort();
       if (result.reason === "timeout" || result.reason === "timeout_unsettled") timedOut = true;
       if (abort) selection.signal?.removeEventListener("abort", abort);
       if (child) {
@@ -228,7 +243,7 @@ export async function runLiveProcesses(selection: SmokeSelection, options: LiveP
         try { await rm(workspace, { recursive: true, force: true }); delete result.cleanup; }
         catch { result = laneScenario("failed_runner", "cleanup_failed"); result.cleanup = "deferred"; }
       }
-      result.durationMs = Math.round(performance.now() - start);
+      result.durationMs = Math.round(now() - start);
       scenarios.push(result);
     }
   }

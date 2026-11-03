@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deleteHistorySession, HISTORY_STORE_BUSY } from "../src/history/store.ts";
 import { openUndoStore, UNDO_STORE_BUSY } from "../src/undo/store.ts";
 import { InteractiveMemory } from "../src/config/interactive-memory.ts";
 import { ModelPreferences } from "../src/config/model-preferences.ts";
 import { proveWritable } from "../src/storage/sqlite-file-lock.ts";
+import { makeTempRootSync, removeOwnedTreeSync, removeTempRootSync } from "./helpers.ts";
 
 const SITE = join(import.meta.dir, "fixtures/sqlite-file-lock/site.ts");
 /** Root bypasses permission bits, so permission-denied cases cannot be staged as root. */
@@ -25,7 +25,7 @@ let home: string;
 let workspace: string;
 
 beforeEach(() => {
-  root = realpathSync(mkdtempSync(join(tmpdir(), "schway-sqlite-locks-")));
+  root = makeTempRootSync("schway-sqlite-locks-");
   home = join(root, "home");
   workspace = join(root, "workspace");
   mkdirSync(home);
@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  rmSync(root, { recursive: true, force: true });
+  removeTempRootSync(root);
 });
 
 const choice = { provider: "openai" as const, model: "gpt-5.4", openaiAuth: "api-key" as const };
@@ -158,7 +158,7 @@ test("a read-only connection is refused at every lock site, beside a holder and 
     }
     if (site !== "preferences" && site !== "preferences-read") expect(statSync(path).size).toBe(0);
     if (record) expect(readFileSync(record, "utf8")).toBe(recordBefore);
-    rmSync(schway(), { recursive: true, force: true });
+    removeOwnedTreeSync(root, schway());
   }
 }, TEST_TIMEOUT_MS);
 
@@ -178,7 +178,7 @@ test.skipIf(RUNS_AS_ROOT)("a lock file or database this user cannot write is ref
       expect(result.failure?.message).toMatch(/^Schway cannot write its lock file at .+\. Make that location writable for this user, then retry\.$/);
       expect({ site, fast: result.elapsedMs < 1000 }).toEqual({ site, fast: true });
     }
-    rmSync(schway(), { recursive: true, force: true });
+    removeOwnedTreeSync(root, schway());
   }
 }, TEST_TIMEOUT_MS);
 
@@ -199,7 +199,7 @@ test.skipIf(RUNS_AS_ROOT)("a lock folder this user cannot write keeps its errno 
     expect(result.failure?.message).toMatch(/^Schway cannot write its lock file at .+\.lock\. Make that location writable for this user, then retry\.$/);
     expect({ site, fast: result.elapsedMs < 1000 }).toEqual({ site, fast: true });
     expect(readdirSync(folder).filter(entry => entry.endsWith(".lock") || entry.startsWith(".cl"))).toEqual([]);
-    rmSync(schway(), { recursive: true, force: true });
+    removeOwnedTreeSync(root, schway());
   }
 });
 
@@ -217,7 +217,7 @@ test("a holder parked on an unreferenced promise keeps each lock through garbage
     expect({ site, ok: run.ok }).toEqual({ site, ok: false });
     if (expected[site].code) expect({ site, code: run.code }).toEqual({ site, code: expected[site].code });
     if (expected[site].message) expect({ site, message: run.message }).toEqual({ site, message: expected[site].message });
-    rmSync(schway(), { recursive: true, force: true });
+    removeOwnedTreeSync(root, schway());
   }
 }, TEST_TIMEOUT_MS);
 
@@ -237,7 +237,7 @@ test("lock files and the preferences database are created and locked without any
       const directory = site === "memory" ? memoryDirectory() : schway();
       expect(readdirSync(directory).filter(entry => entry.endsWith("-journal") || entry.startsWith(".cl"))).toEqual([]);
     }
-    rmSync(schway(), { recursive: true, force: true });
+    removeOwnedTreeSync(root, schway());
   }
 }, TEST_TIMEOUT_MS);
 
@@ -251,7 +251,7 @@ test("a lock file with content is refused untouched rather than opened", async (
     expect(result.failure?.message).toMatch(/^The file at .+ is not a Schway lock file\. With no Schway running, delete it, then retry\.$/);
     expect({ site, fast: result.elapsedMs < 1000 }).toEqual({ site, fast: true });
     expect(readFileSync(path, "utf8")).toBe("not a lock");
-    rmSync(schway(), { recursive: true, force: true });
+    removeOwnedTreeSync(root, schway());
   }
 });
 
@@ -267,7 +267,7 @@ test("a folder at a lock path is refused untouched and named as a folder", async
     } });
     expect({ site, fast: result.elapsedMs < 1000 }).toEqual({ site, fast: true });
     expect(readdirSync(path)).toEqual(["kept"]);
-    rmSync(schway(), { recursive: true, force: true });
+    removeOwnedTreeSync(root, schway());
   }
 });
 
@@ -317,7 +317,7 @@ test("each site keeps its contention behavior: history waits its bound, the othe
     }
     // Released, the same operation succeeds.
     expect({ site, failure: (await attempt(site)).failure }).toEqual({ site, failure: null });
-    rmSync(schway(), { recursive: true, force: true });
+    removeOwnedTreeSync(root, schway());
   }
 });
 

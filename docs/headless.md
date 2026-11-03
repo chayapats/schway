@@ -327,7 +327,11 @@ Online listing makes the selected route's catalog request. Explicit
 `auto` uses the existing credential precedence. A selected subscription may
 refresh its token. One five-second remote-operation deadline covers route
 credential reads, token refresh, catalog request and response-body consumption.
-Failure never switches billing routes or substitutes a built-in result.
+That deadline ends the listing, not a token refresh whose request already left:
+the provider may already have rotated the refresh token, so the refresh finishes
+and its new sign-in is stored before the command exits (see
+[Cancellation](#cancellation)). Failure never switches billing routes or
+substitutes a built-in result.
 
 `--offline` reads local settings and explicit env files, without credential-store
 access, refresh or network. An explicit route is labelled with built-in metadata
@@ -371,5 +375,6 @@ subscription's required token refresh is its only permitted credential write.
 Cancellation is orderly and never corrupts session state.
 
 - Headless: one `AbortSignal` flows from SIGINT/SIGTERM through model streaming, tools, and provider requests. Cancelling exits non-zero and still leaves a resumable session; cancelled streams are not written as durable assistant messages.
+- Renewed sign-ins: a subscription token refresh whose request already left is not abandoned when a run or `schway models list` stops, because the provider may already have rotated the refresh token. Before exiting, the CLI waits for that refresh to finish and store the new sign-in, and writes `Saving the renewed sign-in…` to stderr, followed by ` · Ctrl+C quit without saving` when stdin is a terminal. The wait lasts at most 35 seconds: the refresh's 30-second timeout, the credential-lock wait, and the store read and write. It also ends at most 5 seconds after a SIGTERM arrives, counted from the signal, with exit code 143. Another Ctrl+C quits at once with code 130, and a second SIGTERM with code 143. When the wait ends without a saved sign-in, stderr names the sign-in command for each route whose renewal did not store it, for example `Renewed sign-in not saved · /login chatgpt sign in again if rejected` or `Renewed sign-in not saved · /login grok sign in again if rejected`, and the exit code stays the command's own unless a signal ended the wait. A renewal that already failed without its error reaching you, for example in a stopped turn or a compaction summary, is named the same way once at exit, unless a later renewal, sign-in or sign-out on that route replaced it.
 - Interactive: press Esc to stop the running turn and return to the input editor; Ctrl+C cancels when running and quits when idle. Quitting restores the terminal and releases resources.
 - Provider retries cover transient failures only (network resets, 429, 5xx) up to three total attempts with exponential backoff and `Retry-After`. Authentication errors, malformed requests, and ordinary tool failures are not retried.

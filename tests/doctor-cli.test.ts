@@ -1,10 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { buildIsolatedCliEnv } from "./helpers.ts";
+import { buildIsolatedCliEnv, makeTempRoot, removeTempRoot } from "./helpers.ts";
 const dirs: string[] = [];
-afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
+afterEach(async () => { for (const dir of dirs.splice(0)) await removeTempRoot(dir); });
 const entry = resolve(import.meta.dir, "../src/cli/main.ts");
 const installedBin = resolve(import.meta.dir, "../bin/schway");
 const bun = process.execPath;
@@ -28,7 +27,7 @@ async function run(flags: string[], env: Record<string, string>) {
   return invoke([bun, "--no-env-file", "--preload", resolve(import.meta.dir, "fixtures/credential-store-preload.ts"), entry, "doctor", ...flags], env.WORK!, buildIsolatedCliEnv(env.HOME!, env));
 }
 test("installed entry diagnoses missing backend and unusable storage without TUI or model calls", async () => {
-  const root = await mkdtemp(join(tmpdir(), "schway-cli-doctor-")); dirs.push(root);
+  const root = await makeTempRoot("schway-cli-doctor-"); dirs.push(root);
   const work = join(root, "work"), home = join(root, "home"), emptyPath = join(root, "empty-path");
   await mkdir(work); await mkdir(join(home, ".schway"), { recursive: true }); await mkdir(emptyPath);
   await writeFile(join(home, ".schway", "sessions"), "not a directory");
@@ -43,7 +42,7 @@ test("installed entry diagnoses missing backend and unusable storage without TUI
 });
 
 test("shipped bin dispatches doctor as a standalone command", async () => {
-  const root = await mkdtemp(join(tmpdir(), "schway-bin-doctor-")); dirs.push(root);
+  const root = await makeTempRoot("schway-bin-doctor-"); dirs.push(root);
   const work = join(root, "work"), home = join(root, "home"); await mkdir(work); await mkdir(home);
   const { stdout, stderr, exit } = await invoke([installedBin, "doctor", "--json", "--provider", "openai-compatible", "--base-url", "http://localhost:11434/v1", "--auth", "none", "--model", "local-custom"], work,
     buildIsolatedCliEnv(home, { BUN_OPTIONS: `--preload ${resolve(import.meta.dir, "fixtures/credential-store-preload.ts")}` }));
@@ -55,7 +54,7 @@ test("shipped bin dispatches doctor as a standalone command", async () => {
 });
 
 test("real CLI reports both config causes once, keeps streams and help, and never leaks invalid input", async () => {
-  const root = await mkdtemp(join(tmpdir(), "schway-config-cli-")); dirs.push(root);
+  const root = await makeTempRoot("schway-config-cli-"); dirs.push(root);
   const work = join(root, "work"), home = join(root, "home");
   await mkdir(join(work, ".schway"), { recursive: true }); await mkdir(join(home, ".schway"), { recursive: true });
   await writeFile(join(home, ".schway/config.json"), '{"approval":{"mode":"readonly"}}');
@@ -79,7 +78,7 @@ test("real CLI reports both config causes once, keeps streams and help, and neve
 });
 
 test("real doctor model readiness matches text, JSON and invocation exit statuses", async () => {
-  const root = await mkdtemp(join(tmpdir(), "schway-model-doctor-cli-")); dirs.push(root);
+  const root = await makeTempRoot("schway-model-doctor-cli-"); dirs.push(root);
   const work = join(root, "work"), home = join(root, "home"); await mkdir(work); await mkdir(home);
   const env = { WORK: work, HOME: home };
   const route = ["--provider", "openai-compatible", "--base-url", "http://127.0.0.1:9/v1", "--auth", "none"];
@@ -104,7 +103,7 @@ test("real doctor model readiness matches text, JSON and invocation exit statuse
 });
 
 test("all doctor auth routes check models without importing providers or memory, refreshing tokens, or writing files", async () => {
-  const root = await mkdtemp(join(tmpdir(), "schway-model-doctor-effects-")); dirs.push(root);
+  const root = await makeTempRoot("schway-model-doctor-effects-"); dirs.push(root);
   const work = join(root, "work"), home = join(root, "home");
   await mkdir(work); await mkdir(join(home, ".schway/interactive/global"), { recursive: true });
   await writeFile(join(home, ".schway/interactive/global/latest.json"), JSON.stringify({ version: 1, revision: "remembered", choice: { provider: "openai", openaiAuth: "api-key", model: "remembered-model" } }));

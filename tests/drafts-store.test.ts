@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { isOrdinaryDraft, openDraftStore } from "../src/drafts/store.ts";
+import { makeTempRootSync, removeTempRootSync } from "./helpers.ts";
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(() => { for (const root of roots.splice(0)) removeTempRootSync(root); });
 function fixture() {
-  const home = mkdtempSync(join(tmpdir(), "schway-drafts-")); roots.push(home);
+  const home = makeTempRootSync("schway-drafts-"); roots.push(home);
   const workspaceRoot = join(home, "workspace"); mkdirSync(workspaceRoot);
   const options = { home, workspaceRoot, sessionId: "session-a" };
   return { options, store: openDraftStore(options) };

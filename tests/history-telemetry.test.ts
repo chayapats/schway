@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { RuntimeEvent } from "../src/agent/events.ts";
 import { streamModelTurn, type AgentClock } from "../src/agent/retry.ts";
@@ -18,12 +17,13 @@ import { writeTool } from "../src/tools/write.ts";
 import { TuiController } from "../src/tui/controller.ts";
 import { historyCacheLabel, historyCommandLine, historyDetailsText, historyTimingLine, historyTimingSegments } from "../src/tui/controller-history.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function temp() {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-history-telemetry-")));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const dir = await makeTempRoot("schway-history-telemetry-");
+  cleanups.push(() => removeTempRoot(dir));
   return dir;
 }
 

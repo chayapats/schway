@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, readdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 import { createDiagnosticSink, diagnosticPath } from "../src/diagnostics/sink.ts";
 import { configDiagnosticSecrets, type ConfigDiagnosticContext } from "../src/config/diagnostics.ts";
 
@@ -27,8 +27,8 @@ test("diagnostic env observations remain opt-in and do not promote invalid or in
 });
 
 async function temporary(run: (dir: string) => Promise<void>) {
-  const dir = await mkdtemp(join(tmpdir(), "schway-debug-"));
-  try { await run(dir); } finally { await rm(dir, { recursive: true, force: true }); }
+  const dir = await makeTempRoot("schway-debug-");
+  try { await run(dir); } finally { await removeTempRoot(dir); }
 }
 
 test("disabled sink never creates files or inspects input", async () => temporary(async home => {
@@ -173,11 +173,11 @@ test("opened handle is checked after preflight against swapped hardlinks, insecu
   const script = String.raw`
     import { mock } from "bun:test";
     import * as fs from "node:fs/promises";
-    import { tmpdir } from "node:os";
     import { join } from "node:path";
     import { pathToFileURL } from "node:url";
+    const { makeTempRoot, removeTempRoot } = await import(pathToFileURL(join(process.cwd(), "tests/helpers.ts")).href);
     const realOpen = fs.open;
-    const home = await fs.mkdtemp(join(tmpdir(), "schway-fd-swap-"));
+    const home = await makeTempRoot("schway-fd-swap-");
     let current;
     let appendCount = 0;
     let closeCount = 0;
@@ -216,7 +216,7 @@ test("opened handle is checked after preflight against swapped hardlinks, insecu
           destinationText: kind === "nonregular" ? await fs.readFile(destination, "utf8") : undefined });
       }
       console.log(JSON.stringify(results));
-    } finally { await fs.rm(home, { recursive: true, force: true }); }
+    } finally { await removeTempRoot(home); }
   `;
   const child = Bun.spawn([process.execPath, "-e", script], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" });
   let timer: ReturnType<typeof setTimeout> | undefined;

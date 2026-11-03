@@ -416,6 +416,7 @@ export interface HostCredentialReference {
 // @public
 export interface HostCredentialStore {
     compareAndDelete?(identity: HostCredentialReference, expectedValue: string): Promise<boolean>;
+    compareAndSet?(identity: HostCredentialReference, expectedValue: string, value: string): Promise<boolean>;
     delete(identity: HostCredentialReference): Promise<boolean>;
     get(identity: HostCredentialReference): Promise<string | null>;
     set(identity: HostCredentialReference, value: string): Promise<void>;

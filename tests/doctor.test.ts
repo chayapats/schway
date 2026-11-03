@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile, readdir, stat, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile, readdir, stat, symlink } from "node:fs/promises";
 import { join } from "node:path";
 import { diagnose, doctorExitCode, formatDoctor } from "../src/doctor/doctor.ts";
 import { runCli } from "../src/cli/main.ts";
@@ -10,11 +9,12 @@ import { loadConfigEditor } from "../src/config/editing.ts";
 import { ANTHROPIC_REMOVED_MESSAGE } from "../src/config/removed-provider.ts";
 import { readFile } from "node:fs/promises";
 import type { CredentialStore } from "../src/auth/store.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const dirs: string[] = [];
-afterEach(async () => { for (const dir of dirs.splice(0)) await rm(dir, { recursive: true, force: true }); });
+afterEach(async () => { for (const dir of dirs.splice(0)) await removeTempRoot(dir); });
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "schway-doctor-")); dirs.push(root);
+  const root = await makeTempRoot("schway-doctor-"); dirs.push(root);
   const workspace = join(root, "work"); const home = join(root, "home");
   await mkdir(join(workspace, ".git"), { recursive: true }); await mkdir(home);
   return { root, workspace, home };
@@ -672,11 +672,11 @@ test("doctor reports Grok subscription states without contacting auth or consult
     const report = await diagnose({ cwd: workspace, env: { HOME: home, XAI_API_KEY: "billing" }, args: { ...args, provider: "xai", xaiAuth: "grok" }, store: { ...store(null), get: async identity => {
       if (identity.account === "api-key:anthropic") return null;
       expect(identity.account).toBe("grok-subscription:xai");
-      return state === "missing" ? null : state === "invalid" ? "malformed" : JSON.stringify({ accessToken: "private", obtainedAt: 0, ...(state !== "present" ? { expiresAt: Date.now() + 90_000 } : {}), ...(state === "refresh" ? { refreshToken: "refresh" } : {}) });
+      return state === "missing" ? null : state === "invalid" ? "malformed" : JSON.stringify({ accessToken: "grok-access-secret-sentinel", obtainedAt: 0, ...(state !== "present" ? { expiresAt: Date.now() + 90_000 } : {}), ...(state === "refresh" ? { refreshToken: "refresh" } : {}) });
     } } });
     expect(report.authSource).toBe("subscription");
     expect(check(report, "auth")?.status).toBe(state === "present" ? "ok" : state === "refresh" ? "warning" : "error");
-    expect(JSON.stringify(report)).not.toContain("private");
+    expect(JSON.stringify(report)).not.toContain("grok-access-secret-sentinel");
   }
 });
 

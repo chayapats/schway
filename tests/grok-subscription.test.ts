@@ -220,7 +220,9 @@ test("aborting a Grok turn stops waiting for shared refresh while another turn c
     expect(refreshes).toBe(1); expect(sends).toBe(0);
   } finally { release.resolve(); await cancelled; await continuing; }
   expect(refreshes).toBe(1); expect(sends).toBe(1);
-  expect(reads).toBe(2); // Each turn resolves credentials once; the SDK never asks again.
+  // Each turn resolves credentials once and the SDK never asks again; the renewal re-reads once to confirm, before it
+  // writes, that no sign-in replaced the login it started from.
+  expect(reads).toBe(3);
 });
 
 test("late Grok refresh cannot recreate a logged-out login or overwrite a replacement account", async () => {
@@ -338,3 +340,153 @@ for (const phase of ["read rejects during abort", "read resolves before continua
     }
   });
 }
+
+test("an error body delivered in one large chunk keeps only the 64 KiB prefix", async () => {
+  const { readErrorPrefix } = await import("../src/model/providers/grok-subscription.ts");
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new Uint8Array(1_048_576).fill(0x7b)); },
+    cancel() { cancelled = true; },
+  });
+  const bytes = await readErrorPrefix(new Response(body, { status: 401 }));
+  expect(bytes.byteLength).toBe(65_536);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(cancelled).toBe(true);
+});
+
+test("a failed renewal is left for the exit notice only when no waiting caller received it", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const { saveSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const store = fakeCredentialStore();
+  await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 });
+  let release!: () => void;
+  const fetch: GrokFetch = async () => { await new Promise<void>(resolve => { release = resolve; }); return json({ error: "invalid_grant" }, 400); };
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+
+  // A caller that is still waiting receives the failure and reports it, so exit stays quiet.
+  const waiting = refresher.getValidAccessToken();
+  while (!release) await flush();
+  release();
+  await expect(waiting).rejects.toThrow();
+  await flush();
+  expect(takeUnsavedRenewals()).toEqual([]);
+
+  // A stopped caller never sees the failure, so exit names it once.
+  release = undefined!;
+  const stop = new AbortController();
+  const stopped = refresher.getValidAccessToken(stop.signal);
+  while (!release) await flush();
+  stop.abort();
+  await expect(stopped).rejects.toThrow();
+  release();
+  for (let i = 0; i < 5; i++) await flush();
+  expect(takeUnsavedRenewals()).toEqual(["grok"]);
+  expect(takeUnsavedRenewals()).toEqual([]);
+});
+
+test("a renewal that a sign-in or sign-out replaced leaves nothing for the exit notice", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const { saveSubscriptionTokens, deleteSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const store = fakeCredentialStore();
+  const expired = { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 };
+  let release!: () => void, fail = false;
+  const fetch: GrokFetch = async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return fail ? json({ error: "invalid_grant" }, 400) : json({ access_token: "renewed", refresh_token: "rotated", expires_in: 3600 });
+  };
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+  const stoppedRenewal = async (during: () => Promise<unknown>) => {
+    release = undefined!;
+    const stop = new AbortController();
+    const stopped = refresher.getValidAccessToken(stop.signal);
+    while (!release) await flush();
+    stop.abort();
+    await expect(stopped).rejects.toThrow();
+    await during();
+    release();
+    for (let i = 0; i < 5; i++) await flush();
+  };
+
+  // Signing out while the stopped turn's renewal is in flight fences its write; that is the user's choice, not a loss.
+  await saveSubscriptionTokens(store, expired);
+  await stoppedRenewal(() => deleteSubscriptionTokens(store));
+  expect(takeUnsavedRenewals()).toEqual([]);
+
+  // A failure recorded earlier stops mattering once the user signs in again.
+  await saveSubscriptionTokens(store, expired);
+  fail = true;
+  await stoppedRenewal(async () => {});
+  await saveSubscriptionTokens(store, { ...expired, accessToken: "fresh", expiresAt: 10_000 });
+  expect(takeUnsavedRenewals()).toEqual([]);
+});
+
+test("a Grok sign-in whose write fails still leaves the replaced renewal for the exit notice", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const { saveSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const saved = fakeCredentialStore();
+  let refuseWrites = false;
+  const store = { ...saved, set: async (...args: Parameters<typeof saved.set>) => {
+    if (refuseWrites) throw new Error("secure store unavailable");
+    return saved.set(...args);
+  } };
+  await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 });
+  let release!: () => void;
+  const fetch: GrokFetch = async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return json({ access_token: "renewed", refresh_token: "rotated", expires_in: 3600 });
+  };
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+  const stop = new AbortController();
+  const stopped = refresher.getValidAccessToken(stop.signal);
+  while (!release) await flush();
+  stop.abort();
+  await expect(stopped).rejects.toThrow();
+  // The sign-in fences the renewal off, then fails to store its own login, so the rotated pair is lost after all.
+  refuseWrites = true;
+  await expect(saveSubscriptionTokens(store, { accessToken: "fresh", refreshToken: "fresh-refresh", expiresAt: 10_000, obtainedAt: 0 })).rejects.toThrow();
+  release();
+  for (let i = 0; i < 5; i++) await flush();
+  expect(takeUnsavedRenewals()).toEqual(["grok"]);
+});
+
+test("a Grok renewal whose own write landed is not named, even when a failed sign-in fences it right after", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const { saveSubscriptionTokens, loadSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const saved = fakeCredentialStore();
+  let signIn: Promise<unknown> | undefined;
+  const store: typeof saved = { ...saved, async set(identity, value) {
+    if (value.includes("signed-in-access")) throw new Error("secure store unavailable");
+    await saved.set(identity, value);
+    // The renewal's write has landed; a sign-in starts before the renewal's own fence check, then fails to store.
+    if (value.includes("rotated") && !signIn) signIn = saveSubscriptionTokens(store, { accessToken: "signed-in-access", obtainedAt: 0 }).catch(() => {});
+  } };
+  await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 });
+  let release!: () => void;
+  const fetch: GrokFetch = async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return json({ access_token: "renewed", refresh_token: "rotated", expires_in: 3600 });
+  };
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+  const stop = new AbortController();
+  const stopped = refresher.getValidAccessToken(stop.signal);
+  while (!release) await flush();
+  stop.abort();
+  await expect(stopped).rejects.toThrow();
+  release();
+  for (let i = 0; i < 10; i++) await flush();
+  await signIn;
+  expect((await loadSubscriptionTokens(saved))?.refreshToken).toBe("rotated");
+  expect(takeUnsavedRenewals()).toEqual([]);
+});

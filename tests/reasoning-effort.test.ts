@@ -1,8 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { TextRenderable } from "@opentui/core";
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { grokSubscriptionIdentity } from "../src/auth/store.ts";
@@ -30,12 +29,13 @@ import { encodeChatCompletionsSse, TEXT_STREAM_CHUNKS } from "./fixtures/openai-
 import { encodeXaiSse, XAI_MODELS_PAYLOAD, XAI_TEXT_EVENTS } from "./fixtures/xai.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { collect, createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
+import { makeTempRoot, removeTempRoot } from "./helpers.ts";
 
 const cleanups: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 async function temp() {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-reasoning-effort-")));
-  cleanups.push(() => rm(dir, { recursive: true, force: true }));
+  const dir = await makeTempRoot("schway-reasoning-effort-");
+  cleanups.push(() => removeTempRoot(dir));
   return dir;
 }
 

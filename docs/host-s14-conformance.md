@@ -70,18 +70,45 @@ Regenerate an intentional API change with
 `bun scripts/extension-api-report.ts --host --update` before final validation.
 Any eventual npm RC publication remains a separate release-owner step.
 
-Pack the reviewed/merged Schway revision into a fresh directory, name it by that
-revision, and record its full Git SHA and SHA-256 digest alongside Jit's bump:
+CI packs the tarball, so Jit vendors bytes that the tested commit produced, not a
+local pack. On every push to `main`, and on a manual `workflow_dispatch` run, the
+`checks` workflow's `package` job runs after typecheck and the full test suite pass
+on that commit. It runs `bun pm pack` and names the tarball
+`schway-<version>-<short-sha>.tgz`. It writes a matching `.sha256` file and installs
+that exact tarball in the packed-consumer test (`tests/host-release.test.ts`). Then
+it uploads both files as a workflow artifact with the same name, minus `.tgz`.
+Artifacts expire after 90 days. To pack an older commit, push a branch at that
+commit and start a manual run on the branch.
+The job uses no secrets and pushes nothing to a registry.
+
+Download the artifact for the reviewed/merged revision, verify it, and record its
+full Git SHA and SHA-256 digest alongside Jit's bump:
 
 ```sh
-# In the Schway checkout at the exact tested revision:
+# Anywhere with gh signed in; pick the revision Jit should pin.
+revision=$(git -C <schway-checkout> rev-parse origin/main)
+run=$(gh run list --repo chayapats/schway --workflow checks.yml --branch main --commit "$revision" \
+  --status success --limit 1 --json databaseId --jq '.[0].databaseId')
+artifact_dir=$(mktemp -d)
+gh run download "$run" --repo chayapats/schway --pattern 'schway-*' --dir "$artifact_dir"
+cd "$artifact_dir"/schway-*/
+shasum -a 256 -c schway-*.tgz.sha256   # Prints "<file>: OK"; sha256sum -c also works.
+# Copy the verified .tgz into Jit's vendor directory, then in Jit:
+# bun add ./vendor/schway-1.0.0-rc.2-<revision>.tgz
+```
+
+If no successful run on `main` exists for that revision, start one with
+`gh workflow run checks.yml --repo chayapats/schway --ref <branch>`. It packs the
+branch head; look the run up with `--branch <branch>` instead of `--branch main`.
+Without network access to GitHub, pack locally from a clean checkout at the exact
+tested revision instead:
+
+```sh
 artifact_dir=$(mktemp -d)
 bun pm pack --destination "$artifact_dir"
 schway_revision=$(git rev-parse --short=7 HEAD)
 mv "$artifact_dir/schway-1.0.0-rc.2.tgz" "$artifact_dir/schway-1.0.0-rc.2-$schway_revision.tgz"
 shasum -a 256 "$artifact_dir/schway-1.0.0-rc.2-$schway_revision.tgz"
-# Copy that exact artifact into Jit's vendor directory, then in Jit:
-# bun add ./vendor/schway-1.0.0-rc.2-<revision>.tgz
 ```
 
 Keep Jit's dependency in its existing `file:vendor/schway-1.0.0-rc.2-<revision>.tgz`

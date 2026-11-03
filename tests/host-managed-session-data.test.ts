@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createHost, hostCapabilities, type HostOptions, type HostSessionReference } from "schway/host";
 import { isManagedRetired, isManagedRetiredSync, markManagedRetired } from "../src/host/managed-data.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
-import { withTempDir } from "./helpers.ts";
+import { removeOwnedTree, withTempDir } from "./helpers.ts";
 
 async function options(dir: string): Promise<HostOptions> {
   const workspaceRoot = join(dir, "work"), homeDirectory = join(dir, "home");
@@ -426,7 +426,7 @@ test("unreadable session store surfaces storage instead of honest-status lies", 
     const session = await host.createSession();
     const reference = session.reference;
     await session.close();
-    await rm(config.sessionDirectory, { recursive: true, force: true });
+    await removeOwnedTree(dir, config.sessionDirectory);
     await Bun.write(config.sessionDirectory, "not a directory");
     await expect(host.deleteSession(reference)).rejects.toMatchObject({ code: "storage" });
     await rm(config.sessionDirectory, { force: true });
@@ -439,7 +439,7 @@ test("missing session with an unreadable home surfaces storage instead of alread
     const config = await options(dir);
     const host = await createHost(config);
     const missing = { id: crypto.randomUUID(), branchId: "main" };
-    await rm(config.homeDirectory, { recursive: true, force: true });
+    await removeOwnedTree(dir, config.homeDirectory);
     await Bun.write(config.homeDirectory, "not a directory");
     await expect(host.deleteSession(missing)).rejects.toMatchObject({ code: "storage" });
     await rm(config.homeDirectory, { force: true });
@@ -454,7 +454,7 @@ test("fenced handle surfaces store faults instead of proceeding past retirement"
     const session = await host.createSession();
     const completed = await session.submit({ text: "fenced" }, createScriptedModel({ text: "ok" }));
     expect(completed.outcome).toBe("completed");
-    await rm(config.sessionDirectory, { recursive: true, force: true });
+    await removeOwnedTree(dir, config.sessionDirectory);
     await Bun.write(config.sessionDirectory, "not a directory");
     let code: string | undefined;
     try {
@@ -555,7 +555,7 @@ test("close with a failing lease still disposes the handle", async () => {
     const config = await options(dir);
     const host = await createHost(config);
     const session = await host.createSession();
-    await rm(config.sessionDirectory, { recursive: true, force: true });
+    await removeOwnedTree(dir, config.sessionDirectory);
     await Bun.write(config.sessionDirectory, "not a directory");
     await expect(session.close()).rejects.toMatchObject({ code: "storage" });
     await session.close();

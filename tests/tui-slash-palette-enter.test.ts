@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { createTestRenderer } from "@opentui/core/testing";
 import type { BoxRenderable, TextRenderable, TextareaRenderable } from "@opentui/core";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createConversationView } from "../src/tui/view.ts";
 import { TuiController } from "../src/tui/controller.ts";
@@ -13,7 +13,7 @@ import { slashPaletteHint } from "../src/tui/palette.ts";
 import { openDraftStore } from "../src/drafts/store.ts";
 import { createScriptedModel, type ScriptedTurn } from "./helpers/scripted-model.ts";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
-import { withTempDir } from "./helpers.ts";
+import { removeOwnedTree, withTempDir } from "./helpers.ts";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
@@ -264,7 +264,7 @@ test("after discovery removes the highlighted choice, Enter sends and the hint s
   await ui.type("/deploy");
   expect(ui.selected()).toContain("/deploy-alpha");
   expect(ui.hints.plainText).toContain("Enter insert");
-  await rm(join(root, ".agents/skills/deploy-alpha"), { recursive: true });
+  await removeOwnedTree(root, join(root, ".agents/skills/deploy-alpha"), { force: false });
   await ui.controller.refreshCommands(); await ui.settle();
   expect(ui.selected()).toBeUndefined();
   expect(ui.hints.plainText).toBe("↑↓ select · Enter send · Esc keep editing");

@@ -13,8 +13,8 @@ export interface ExitDraftCheckpoint {
 /** Result distinguishes confirmed checkpoints from timeout or failed writes without exposing input. */
 export interface ExitDraftResult { saved: boolean; failed: boolean; persisted?: boolean; timedOut?: boolean }
 
-/** Flush in an isolated process for at most 500 ms, killing slow writes without delaying terminal cleanup. */
-export async function flushDraftOnExit(input: ExitDraftCheckpoint, workerPath = join(import.meta.dir, "exit-worker.ts")): Promise<ExitDraftResult> {
+/** Flush in an isolated process for at most `budgetMs` (500 ms by default), killing slow writes without delaying terminal cleanup. */
+export async function flushDraftOnExit(input: ExitDraftCheckpoint, workerPath = join(import.meta.dir, "exit-worker.ts"), budgetMs = 500): Promise<ExitDraftResult> {
   let child: ReturnType<typeof Bun.spawn<"pipe", "pipe", "ignore">> | undefined;
   let cancelRead: (() => Promise<void>) | undefined;
   const stopWorker = () => {
@@ -42,7 +42,7 @@ export async function flushDraftOnExit(input: ExitDraftCheckpoint, workerPath = 
       return code === 0 && output.trim() === '{"saved":true,"persisted":true}' ? { saved: !!input.text, failed: false, persisted: true } : { saved: false, failed: true };
     })().catch(() => ({ saved: false, failed: true }));
     return await Promise.race([result, new Promise<ExitDraftResult>(resolve => {
-      deadline = setTimeout(() => { stopWorker(); resolve({ saved: false, failed: true, timedOut: true }); }, 500);
+      deadline = setTimeout(() => { stopWorker(); resolve({ saved: false, failed: true, timedOut: true }); }, budgetMs);
     })]);
   } catch { return { saved: false, failed: true }; }
   finally {

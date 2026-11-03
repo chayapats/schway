@@ -39,6 +39,7 @@ import type {
   ConversationItem,
   SessionRecord,
 } from "../conversation/types.ts";
+import { withoutShowingRenewalFailures } from "../auth/renewals.ts";
 import { lookupModel } from "../model/catalog.ts";
 import type { Model, ModelUsage } from "../model/model.ts";
 import type { Session } from "../session/session.ts";
@@ -382,10 +383,11 @@ export function createContextManager(
         systemPrompt: options.systemPrompt ? `${options.systemPrompt}\n\n${SUMMARY_SYSTEM_PROMPT}` : SUMMARY_SYSTEM_PROMPT,
         context: await baseSections(session),
       } : undefined;
-      const summary = await summarizeWithModel(model, inputText, compactOptions.signal, (usage, complete) => {
+      // A failed summary is reported only as a failed compaction, so a renewal failure inside it is still named at exit.
+      const summary = await withoutShowingRenewalFailures(() => summarizeWithModel(model, inputText, compactOptions.signal, (usage, complete) => {
         summaryUsage.push({ usage, complete });
         if (!complete) outcome = "failed";
-      }, managedContext);
+      }, managedContext));
       if (!summary || compactOptions.signal?.aborted) {
         if (managed && !summary && !compactOptions.signal?.aborted) outcome = "failed";
         return null;

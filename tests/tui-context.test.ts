@@ -4,11 +4,10 @@ import { TuiController } from "../src/tui/controller.ts";
 import { createSession } from "../src/session/session.ts";
 import type { ConversationItem } from "../src/conversation/types.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
-import { withTempDir } from "./helpers.ts";
+import { makeTempRoot, removeOwnedTree, removeTempRoot, withTempDir } from "./helpers.ts";
 import { createJsonlSession, loadJsonlSession } from "../src/session/jsonl.ts";
 import { join } from "node:path";
-import { mkdir, mkdtemp, readFile, realpath, rename, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rename } from "node:fs/promises";
 import { createTestRenderer } from "@opentui/core/testing";
 import { createConversationView } from "../src/tui/view.ts";
 import type { Model } from "../src/model/model.ts";
@@ -65,7 +64,7 @@ test("persisted summary write failure requires explicit resume before compaction
     expect(controller.inspectNoticeDetails()).toBe(true);
     expect(controller.snapshot().transcript.at(-1)?.text).toContain(`/resume ${session.header.id}`);
     expect(session.items).toEqual(history(12));
-    await rm(path, { recursive: true });
+    await removeOwnedTree(home, path, { force: false });
     await rename(saved, path);
     expect(await controller.compact()).toBe(false); // Restoring storage does not un-fence the old handle.
     expect(await readFile(path, "utf8")).toBe(durable);
@@ -296,7 +295,7 @@ test("manual summary persistence failure settles controller and preserves durabl
 
 /** A controller painted by the real view, so assertions see the same frame a user sees. */
 async function renderedCompaction(options: { session: ReturnType<typeof createSession>; model: Model; contextWindow?: number }) {
-  const home = await realpath(await mkdtemp(join(tmpdir(), "compaction-end-")));
+  const home = await makeTempRoot("compaction-end-");
   const workspace = { root: home, launchCwd: home, extraRoots: [] };
   const controller = new TuiController({ session: options.session, workspace, sessionId: "end-state", provider: "scripted", modelId: "scripted", model: options.model,
     contextManager: createContextManager(workspace, { home, keepTurns: 2, ...(options.contextWindow ? { contextWindow: options.contextWindow } : {}) }) });
@@ -326,7 +325,7 @@ async function renderedCompaction(options: { session: ReturnType<typeof createSe
       expect(screenInvariantFailures(golden, { panel: "", idle: true }).map(formatInvariantFailure)).toEqual([]);
       return frame;
     },
-    dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); await rm(home, { recursive: true, force: true }); },
+    dispose: async () => { view.destroy(); controller.dispose(); terminal.renderer.destroy(); await controller.waitForIdle(); await removeTempRoot(home); },
   };
 }
 const occurrences = (frame: string, text: string) => frame.split(text).length - 1;
