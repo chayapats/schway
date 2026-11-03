@@ -1,9 +1,9 @@
-import { Database } from "bun:sqlite";
-import { openSync, closeSync } from "node:fs";
+import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseConfigObject, type ResolvedSettings } from "./config.ts";
+import { holdLockFile, releaseConnection } from "../storage/sqlite-file-lock.ts";
 import { resolveWorkspace } from "../workspace/workspace.ts";
 
 /** A secret-free, indivisible interactive selection; endpoint details remain in explicit configuration. */
@@ -53,7 +53,7 @@ export class InteractiveMemory {
     signal?.throwIfAborted();
     if (choice) choice = validateChoice(choice);
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    const lock = acquireLock(this.path);
+    const lock = await acquireLock(this.path);
     const temporary = `${this.path}.${crypto.randomUUID()}.tmp`;
     const globalTemporary = `${this.globalPath}.${crypto.randomUUID()}.tmp`;
     let global: Database | undefined;
@@ -63,7 +63,7 @@ export class InteractiveMemory {
       const text = JSON.stringify(record) + "\n";
       if (share && choice && isPortableChoice(choice)) {
         await mkdir(dirname(this.globalPath), { recursive: true, mode: 0o700 });
-        global = acquireLock(this.globalPath);
+        global = await acquireLock(this.globalPath);
         await stageRecord(globalTemporary, text);
       }
       await stageRecord(temporary, text);
@@ -79,7 +79,7 @@ export class InteractiveMemory {
       }
     } finally {
       try { await Promise.all([rm(temporary, { force: true }), ...(global ? [rm(globalTemporary, { force: true })] : [])]); }
-      finally { global?.close(); lock.close(); }
+      finally { if (global) releaseConnection(global); releaseConnection(lock); }
     }
   }
 }
@@ -91,17 +91,14 @@ function readChoice(text: string): InteractiveChoice | undefined {
   return record.choice === undefined ? undefined : validateChoice(record.choice);
 }
 
-/** Acquire exclusive writer ownership until the returned database closes or the process exits. */
-function acquireLock(path: string): Database {
-  const lockPath = `${path}.lock`;
-  // Keep the inode, and never open/close an existing lock outside SQLite: POSIX can drop our locks.
+/**
+ * Acquire exclusive writer ownership of a record until `releaseConnection` or process exit, rejecting contention at once.
+ * The lock file is shared with earlier builds; one this process cannot write or that is not empty is refused, never shared.
+ */
+function acquireLock(path: string): Promise<Database> {
+  // Keep the inode, and never open/close the lock outside SQLite: POSIX can drop our locks.
   // The OS releases ownership on process exit, including SIGKILL.
-  try { closeSync(openSync(lockPath, "wx", 0o600)); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  const lock = new Database(lockPath);
-  try { lock.exec("PRAGMA busy_timeout = 0; BEGIN IMMEDIATE"); }
-  catch { lock.close(); throw new Error("Workspace choice is updating · Retry when finished"); }
-  return lock;
+  return holdLockFile(`${path}.lock`, { waitMs: 0, busy: () => new Error("Workspace choice is updating · Retry when finished") });
 }
 
 /** Create and sync a private temporary record before its atomic rename. */
