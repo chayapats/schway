@@ -1,14 +1,59 @@
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+/** Live roots from `makeTempRoot`, each mapped to the canonical temp directory it was created in. */
+const ownedTempRoots = new Map<string, string>();
+
+/** Create a canonical `mkdtemp` root directly under the OS temp directory; only `removeTempRoot` deletes it. */
+export async function makeTempRoot(prefix = "schway-"): Promise<string> {
+  const parent = await realpath(tmpdir());
+  const dir = await realpath(await mkdtemp(join(tmpdir(), prefix)));
+  if (dirname(dir) !== parent) throw new Error(`Temporary root ${dir} is not directly inside ${parent}`);
+  ownedTempRoots.set(dir, parent);
+  return dir;
+}
+
+/** True when `path` is `ancestor` or lies inside it. */
+function within(ancestor: string, path: string): boolean {
+  const rel = relative(ancestor, path);
+  return rel === "" || (!isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${sep}`));
+}
+
+/** Canonical form of `path` when it exists, else the path itself. */
+function canonical(path: string): string {
+  try { return realpathSync(path); } catch { return path; }
+}
+
+/**
+ * Throw unless `dir` is a live root from `makeTempRoot` that contains neither the checkout, the working
+ * directory, HOME nor the temp directory itself. Recursive fixture cleanup goes through this check.
+ */
+export function assertRemovableTempRoot(dir: string): void {
+  const parent = ownedTempRoots.get(dir);
+  if (parent === undefined || dirname(dir) !== parent) {
+    throw new Error(`Refusing to remove ${JSON.stringify(dir)}: not a temporary root this test process created`);
+  }
+  for (const kept of [process.cwd(), homedir(), resolve(import.meta.dir, ".."), parent].map(canonical)) {
+    if (within(dir, kept)) throw new Error(`Refusing to remove ${JSON.stringify(dir)}: it contains ${kept}`);
+  }
+}
+
+/** Recursively remove a root that `makeTempRoot` created; refuses any other path (see `assertRemovableTempRoot`). */
+export async function removeTempRoot(dir: string): Promise<void> {
+  assertRemovableTempRoot(dir);
+  ownedTempRoots.delete(dir);
+  await rm(dir, { recursive: true, force: true });
+}
 
 /** Allocate and remove a canonical fixture root so runtime identity checks agree across OS temp aliases. */
 export async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
-  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-")));
+  const dir = await makeTempRoot();
   try {
     await fn(dir);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await removeTempRoot(dir);
   }
 }
 
@@ -52,7 +97,7 @@ export interface IsolatedCliDirs {
 export async function withIsolatedCliDirs(
   fn: (dirs: IsolatedCliDirs) => Promise<void>,
 ): Promise<void> {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "schway-cli-")));
+  const root = await makeTempRoot("schway-cli-");
   try {
     const home = join(root, "home");
     const work = join(root, "work");
@@ -63,7 +108,7 @@ export async function withIsolatedCliDirs(
     await writeFile(sentinelPath, sentinelContent, "utf8");
     await fn({ root, home, work, sentinelPath, sentinelContent });
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeTempRoot(root);
   }
 }
 
