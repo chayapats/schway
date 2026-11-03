@@ -22,6 +22,10 @@
 
 ### Security
 
+- Codex and Grok subscription token refreshes no longer follow HTTP redirects,
+  so a refresh token is never resent to a redirect target. A redirected
+  refresh fails with a fixed message on every path, the CLI included, and host
+  route requests refuse inference redirects without retrying (#444).
 - Block nonpublic and metadata destinations in `web_fetch` by default, including
   every redirect's resolved DNS answers. Pin connections to checked addresses to
   prevent DNS rebinding; refused calls return `blocked-address` without resolved
@@ -43,6 +47,11 @@
   with a specific next action. `SCHWAY_CREDENTIAL_LOCK_FILE` moves the lock to
   an absolute path. A lock-directory build's lock is honored but never removed;
   see the upgrade note (#428).
+- Route results and device sign-in now report a credential-lock refusal
+  honestly. `classifyAuthError` keeps `store-unavailable` but uses the lock's
+  own next action instead of keychain or libsecret guidance, and device sign-in
+  no longer attempts cleanup or reports a credential that "may have landed",
+  because a refused lock means nothing was written (#428).
 - Classify Grok subscription spending-limit denials as `quota-exceeded`, with
   a subscription usage link and no API-key billing fallback. Catalog, inference
   and host status agree; plan rejection remains distinct from transient
@@ -50,6 +59,34 @@
 
 ### Added
 
+- Add an optional synchronous dispatch authorizer for host route models,
+  advertised by `dispatchAuthorizationContract:
+  "schway.host.dispatch-authorization/v1"`. `createModel({ authorizeDispatch })`,
+  `createAuthRouteModel(selection, options)` and `submitWithRoute(input,
+  { authorizeDispatch })` call it immediately before every physical inference
+  request, including the xAI 401 refresh resend, with a frozen credential-free
+  `HostDispatch` (route, provider, model, kind, sequence, body SHA-256 and byte
+  length). A throw refuses that send: nothing leaves, the loop never retries it,
+  `isDispatchRefused` and the `dispatch-refused` status identify it, and no
+  route, model or billing fallback happens (#444).
+- Report exact provider requests per run as `HostRunUsage.providerRequests`
+  (`initialSends`, `authRetrySends`, `renewalRequests`), advertised by
+  `providerRequestsContract: "schway.host.provider-requests/v1"`. A renewal
+  shared across hosts is counted once, for the run that started it. Readiness
+  accepts `{ signal, deadlineMs }`, and `submitWithRoute` readiness reads honor
+  the run's signal, `cancel()` and deadline (#415).
+- Report exact reasoning-effort support per listed model and in the static
+  route description, built by the adapter's own policy, advertised by
+  `effortContract: "schway.host.effort/v1"`. `createModel({ catalogModel,
+  effort: { level, mode: "exact" } })` pins an effort, refused before any
+  request when the adapter would drop or change it. `HostDispatch.effort` and
+  per-attempt usage record the effort requested, sent and reported. Listed
+  evidence is bound to the credential owner that listed it (#445).
+- Declare whether each route enforces an output-token cap, advertised by
+  `outputCapContract: "schway.host.output-cap/v1"`. Grok accepts
+  `maxOutputTokens` and `requireOutputCap`; Codex, whose endpoint rejects caps,
+  refuses them before any request. `HostDispatch.outputCap` and per-attempt
+  usage record the cap sent. Token caps are not monetary bounds (#446).
 - Export `SearchProvider`, `createWebSearchTool(provider, options?)` and
   `createWebFetchTool(options?)` through `schway/host`, advertised by
   `webToolsContract: "schway.host.web-tools/v1"`. Explicit read-only tools keep

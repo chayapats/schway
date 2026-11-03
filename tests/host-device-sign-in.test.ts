@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { beginDeviceSignIn, checkAuthReadiness, containsNoSecrets, credentialReferenceForRoute, hostCapabilities,
   type HostAuthFetch, type HostAuthRoute, type HostClock, type HostCredentialStore, type HostDeviceSignIn, type HostDeviceSignInOptions } from "schway/host";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { credentialLockError } from "../src/auth/store.ts";
 import { manualClock } from "./helpers/manual-clock.ts";
 import { buildIsolatedCliEnv, withTempDir } from "./helpers.ts";
 import { join, resolve } from "node:path";
@@ -172,6 +173,19 @@ for (const route of ["codex", "grok"] as const) {
     }
   });
 }
+
+for (const route of ["codex", "grok"] as const) test(`${route} a credential-lock refusal is a clean store error with no cleanup attempt`, async () => {
+  const clock = manualClock(), base = fakeCredentialStore(), fixture = protocol(route, clock); let cleanups = 0;
+  const store: HostCredentialStore = { ...base,
+    set: async () => { throw credentialLockError("save", "Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry."); },
+    compareAndDelete: async () => { cleanups++; return false; }, delete: async () => { cleanups++; return false; } };
+  const flow = await start({ route, clock, fetch: fixture.fetch, store });
+  const work = flow.poll(new AbortController().signal); await clock.advance(2000);
+  // The lock refused before any write, so nothing may be reported as possibly landed.
+  expect(await work).toEqual({ kind: "store-error", route, containsNoSecrets: true, cleanupUncertain: false });
+  expect(cleanups).toBe(0);
+  expect(await base.get(credentialReferenceForRoute(route))).toBeNull();
+});
 
 test("start is cancellable and bounded even before authorization responds", async () => {
   for (const mode of ["cancel", "expiry"] as const) {

@@ -101,9 +101,11 @@ continuations until absent, preserve deleted tombstones as management metadata, 
 keep corrupt/busy recovery unresolved. Discovery's `main` reference is for
 id-wide management; it must not replace an app's saved execution branch.
 
-[#428](https://github.com/chayapats/schway/issues/428) remains the cross-process
-credential-lock follow-up, including lock-location override. This work shares
-the existing lock boundary without replacing it. Abortable local readiness and
+The cross-process credential lock is now an OS-released SQLite lock with a
+`SCHWAY_CREDENTIAL_LOCK_FILE` location override
+([#428](https://github.com/chayapats/schway/issues/428); see
+[the credentials guide](credentials.md#credential-store-lock)). This work shares
+that lock boundary; it does not add a second one. Abortable local readiness and
 exact provider-request accounting ([#415](https://github.com/chayapats/schway/issues/415))
 now ship in the S15 slice below. Do not add Jit-owned refresh or retry protocols.
 

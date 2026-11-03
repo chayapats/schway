@@ -866,10 +866,16 @@ admitted run keeps its original epoch even while waiting in readiness and cannot
 adopt a replacement sign-in after revocation. Sign-in itself is not a method on
 this owner.
 
-The OS-store mutation lock is unchanged. [#428](https://github.com/chayapats/schway/issues/428)
-still tracks its cross-process stale-breaker race and lock-location override.
-Readiness abort/deadline and provider-request accounting remain
-[#415](https://github.com/chayapats/schway/issues/415); this slice adds neither.
+Native OS-store saves and deletions serialize on an OS-released SQLite lock
+([#428](https://github.com/chayapats/schway/issues/428)); `SCHWAY_CREDENTIAL_LOCK_FILE`
+pins its location for isolated roots. See
+[the credentials guide](credentials.md#credential-store-lock) for crash behavior,
+upgrade limits and the rules for embedders. When the lock refuses a change that
+waiting can't fix, route results keep `store-unavailable` and use the lock's own
+next action, and device sign-in reports a store error without attempting
+cleanup, because nothing was written. Readiness abort/deadline and
+provider-request accounting ship in the S15 slices below
+([#415](https://github.com/chayapats/schway/issues/415)).
 
 ## Session metadata recovery
 

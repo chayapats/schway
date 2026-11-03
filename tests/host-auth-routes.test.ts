@@ -3,6 +3,7 @@ import { mkdir, symlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createHost, hostCapabilities, HostError, checkAuthReadiness, classifyAuthError, describeAuthRoute, type HostOptions } from "schway/host";
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
+import { credentialLockError, credentialStoreError } from "../src/auth/store.ts";
 import { withTempDir, buildIsolatedCliEnv } from "./helpers.ts";
 import { encodeXaiSse, XAI_TEXT_EVENTS } from "./fixtures/xai.ts";
 import { GROK_ERROR_FIXTURES, grokErrorResponse } from "./fixtures/grok-errors.ts";
@@ -809,4 +810,23 @@ for (const fixture of GROK_ERROR_FIXTURES) test(`route-bound Grok ${fixture.name
       expect(JSON.stringify(run)).not.toMatch(/untrusted-body-sentinel|route-access-sentinel|billing-bait/);
     } finally { await session.close(); await host.close(); }
   });
+});
+
+test("classifyAuthError keeps a credential-lock refusal's own next action instead of keychain guidance", () => {
+  const reason = "The symbolic link at ~/.schway is broken or loops. Fix that link, then retry.";
+  for (const route of ["codex", "grok"] as const) {
+    const selection = { route, model: route === "codex" ? "gpt-5.4" : "grok-4.7", store: fakeCredentialStore() };
+    const branded = credentialLockError("save", reason);
+    // The agent loop rebuilds failures from their message, so the bare text must classify the same way.
+    for (const error of [branded, new Error("wrapper", { cause: branded }), new Error(branded.message)]) {
+      const classified = classifyAuthError(error, selection);
+      expect(classified.status).toBe("store-unavailable");
+      expect(classified.nextAction).toBe(branded.message);
+      expect(classified.nextAction).not.toMatch(/libsecret|Unlock or allow access/);
+    }
+    // The generic store failure keeps its keychain guidance.
+    const generic = classifyAuthError(new Error(credentialStoreError("save")), selection);
+    expect(generic.status).toBe("store-unavailable");
+    expect(generic.nextAction).toMatch(/libsecret/);
+  }
 });
