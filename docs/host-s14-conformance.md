@@ -140,8 +140,9 @@ read. A wrapping model keeps counts only by passing `call` as-is or spread, and
 must rethrow a refusal or chain it as `cause`. `isDispatchRefused` checks only
 the object it is given, by identity per installed Schway copy and never by
 message; the loop and `classifyAuthError` also follow `cause`. Route sends refuse
-redirects and report `integration-unavailable` without retrying. A deadline with
-no observed provider failure reports the admission verdict.
+redirects and report `integration-unavailable` without retrying; Codex and Grok
+token refreshes never follow redirects. A deadline with no unrecovered provider
+failure reports the admission verdict.
 
 | Seam | Coverage |
 | --- | --- |

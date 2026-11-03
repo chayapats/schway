@@ -440,8 +440,10 @@ mentions a redirect keeps its status and normal handling. Request bytes are
 unchanged, and the CLI/TUI inference path is unchanged. Codex and Grok token
 refresh requests never follow redirects on any path, CLI included, so a refresh
 token is never resent and each renewal call is exactly one request; a redirected
-Codex refresh reports a fixed message that the endpoint answered with a redirect,
-and the same `integration-unavailable` guidance on route runs. Schway keeps credentials,
+Codex or Grok refresh reports a fixed message that the endpoint answered with a
+redirect, and the same `integration-unavailable` guidance on route runs. Schway
+recognizes its own redirect failures by identity, so a provider error that echoes
+the wording keeps its ordinary classification. Schway keeps credentials,
 protocol, renewal and retries. Renewal requests carry no conversation content, so
 they are counted but not authorized.
 
@@ -505,8 +507,9 @@ read settles as `cancelled` (or `limit_exceeded`) and also reports the admission
 verdict, because the run had not settled yet. A deadline is not evidence that the
 route is unreachable: a `limit_exceeded` run with no observed provider failure,
 such as a healthy stream still answering, reports the admission verdict as
-cancel does, while an observed failure (including a retried one) keeps its
-classification.
+cancel does. An observed failure keeps its classification, including a retried
+one, until a later attempt streams or completes and shows the route answering
+again.
 
 See `tests/host-dispatch-authorization.test.ts`,
 `tests/host-provider-requests.test.ts` and the packed consumer in
