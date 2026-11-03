@@ -949,6 +949,15 @@ sending its own request, a late write is removed by exact-value cleanup;
 uncertain cleanup blocks later reads until successful logout. No raw credential
 is returned in the handle, readiness, outcomes, progress or diagnostics.
 
+Use `credentialWriteGuard` to decide credential ownership, such as "this process
+may still write this login", never to cancel work or shut down. A guard that
+refuses around the write of a renewed credential whose token request already
+left discards the rotated token: the provider has already spent the stored
+refresh token, so the next renewal is `rejected` and needs a new sign-in. Fence
+work with `authorizeDispatch`, abort signals and run cancellation instead.
+During shutdown, keep the guard permissive until in-flight renewals settle; the
+lifecycle's `close()` reports `busy` until they have.
+
 The embedding application owns the lifecycle handle. Hosts borrow it; closing a
 host never disposes the owner or logs out. An admitted `submitWithRoute` pins
 its owner from readiness through terminal settlement, including tools and retry
