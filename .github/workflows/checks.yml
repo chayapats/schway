@@ -91,8 +91,9 @@ jobs:
     name: tests (no-git container)
     # The #450 report's conditions: oven/bun:1.4.2 as uid 1000, no git and no network, a copy without .git
     # mounted at /tmp/rv428, and the whole suite in one `bun test -t ""` process. Many tests fail without git
-    # or network, so the job ignores test results and fails only if the run removed something it didn't
-    # create. It runs on main pushes, manual runs and weekly, so branch checks stay short.
+    # or network, so the job ignores test results. It fails if the run removed something it didn't create,
+    # or if the run didn't finish every test file. It runs on main pushes, manual runs and weekly, so branch
+    # checks stay short.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -108,8 +109,11 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: docker pull oven/bun:1.4.2
       # The container records what exists after this chown, as uid 1000 sees it.
+      # bun test skips dot-directories, so tracked tests under .agents/ don't count toward the expected files.
       - name: Copy the checkout without .git to /tmp/rv428 for uid 1000
         run: |
+          expected=$(git ls-files -- '*.test.ts' '*.test.tsx' | grep -cvE '(^|/)[.]')
+          echo "SCHWAY_EXPECTED_TEST_FILES=$expected" >> "$GITHUB_ENV"
           bash scripts/ci/no-git-copy.sh copy /tmp/rv428
           mkdir "$RUNNER_TEMP/no-git-state"
           sudo chown -R 1000:1000 /tmp/rv428 "$RUNNER_TEMP/no-git-state"
@@ -119,7 +123,7 @@ jobs:
           --volume /tmp/rv428:/tmp/rv428
           --volume "$GITHUB_WORKSPACE/scripts/ci:/schway-ci:ro"
           --volume "$RUNNER_TEMP/no-git-state:/schway-state"
-          --env NO_GIT_COPY_STATE=/schway-state
+          --env NO_GIT_COPY_STATE=/schway-state --env SCHWAY_EXPECTED_TEST_FILES
           oven/bun:1.4.2 bash /schway-ci/no-git-container.sh /tmp/rv428
       - uses: actions/upload-artifact@v4
         if: always()

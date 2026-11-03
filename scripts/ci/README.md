@@ -48,16 +48,21 @@ see, such as removals below the top level of `node_modules`, `/tmp` and `$HOME`.
 The `tests (no-git container)` job repeats the #450 report's run: the whole suite in
 one `bun test -t ""` process in `oven/bun:1.4.2` as uid 1000, without git or network,
 from a copy without `.git` mounted at `/tmp/rv428`. `no-git-container.sh` records
-inside the container, after the host's `chown`, and the job fails only on removals;
-test failures from the missing git and network are expected. It runs on pushes to
-`main`, manual runs and weekly, so branch checks stay short.
+inside the container, after the host's `chown`. Test failures from the missing git
+and network are expected and ignored. The job fails on removals, and when the run
+doesn't print a final `Ran N tests across M files` summary with at least one test and
+every tracked test file outside dot-directories, so a crash or an early exit can't
+pass. It runs on pushes to `main`, manual runs and weekly, so branch checks stay short.
 
 Tests must remove only what they created, under their own `mkdtemp` roots. Use
 `withTempDir`, `makeTempRoot`, `removeTempRoot` and `removeOwnedTree` from
 `tests/helpers.ts`. `tests/temp-root-guard.test.ts` fails on any new direct
-recursive `rm` or `mkdtemp` under `tests/`; existing sites are listed with their
-counts in `tests/fixtures/temp-root-allowlist.json` until they move to the helpers.
-Lower or remove an entry when you migrate a site; never raise one.
+recursive removal (`rm`/`rmSync` and their aliases, `rm -r` in shell text or argv
+lists, `find … -delete`) or `mkdtemp` under `tests/`. Existing sites are listed with
+their exact counts in `tests/fixtures/temp-root-allowlist.json` until they move to
+the helpers. The counts must match: lower or remove an entry when you migrate a site,
+and never raise one. `tests/helpers/temp-root-sites.ts` lists what the scanner can't
+see, such as options held in a variable.
 
 ## Tarball for Jit
 

@@ -139,3 +139,24 @@ test("the CI matrix lists exactly SHARD_COUNT shards and every step fails on a b
   const table = await loadTimings();
   for (let index = 0; index < SHARD_COUNT; index++) expect(shardFiles(Object.keys(table), index, SHARD_COUNT, table).length).toBeGreaterThan(0);
 });
+
+test("the container job fails a run that crashed, exited early or skipped test files", async () => {
+  await withTempDir(async dir => {
+    const check = async (log: string, expected = "229") => {
+      await writeFile(join(dir, "bun-test.log"), log);
+      const result = Bun.spawnSync(["bash", join(import.meta.dir, "../scripts/ci/no-git-container.sh"), "--check-summary", join(dir, "bun-test.log"), expected],
+        { stdout: "pipe", stderr: "pipe" });
+      return { code: result.exitCode, output: result.stdout.toString() + result.stderr.toString() };
+    };
+    // A nested run's summary comes first; the last summary is the suite's.
+    const finished = await check("Ran 1 test across 1 file. [1ms]\n 5385 pass\n 642 fail\nRan 6027 tests across 229 files. [721.21s]\n");
+    expect(finished).toEqual({ code: 0, output: "bun test ran 6027 tests across 229 files (expected at least 229).\n" });
+    expect((await check(" 0 pass\nRan 0 tests across 0 files. [1ms]\n")).output).toContain("ran 0 tests across 0 files; expected at least 229 files");
+    expect((await check("Ran 5000 tests across 200 files. [1ms]\n")).code).toBe(1);
+    expect((await check("Ran 6027 tests across 229 files. [1s]\nRan 1 test across 1 file. [1ms]\n")).code).toBe(1);
+    const crashed = await check("tests/a.test.ts:\nSegmentation fault\n");
+    expect(crashed.code).toBe(1);
+    expect(crashed.output).toContain("printed no final summary");
+    expect((await check("Ran 1 test across 1 file.\n", "0")).code).toBe(2);
+  });
+});

@@ -115,11 +115,30 @@ function workflowCredentialProblems(text: string): string[] {
   for (const [job, body] of Object.entries(workflow.jobs ?? {})) {
     if (body.permissions !== undefined && !readOnly(body.permissions)) problems.push(`job ${job} permissions ${JSON.stringify(body.permissions)}`);
   }
-  // Parsed values only, so comments and step names can't trip the check.
-  const values = JSON.stringify(workflow).toLowerCase();
-  for (const pattern of [/\bsecrets\s*\./, /\bsecrets\s*\[/, /"secrets":/, /\bgithub\.token\b/, /npm_token|node_auth_token/]) {
-    if (pattern.test(values)) problems.push(`credential reference ${pattern}`);
+  // Expressions only: every `${{ … }}` in a parsed value, plus `if:` values, which are expressions without the
+  // braces. Comments and step names can't trip the check. Contexts are case-insensitive.
+  const expressions: string[] = [];
+  const visit = (value: unknown, key?: string): void => {
+    if (typeof value === "string") {
+      if (key === "if") expressions.push(value);
+      for (const [, expression] of value.matchAll(/\$\{\{([\s\S]*?)\}\}/g)) expressions.push(expression!);
+    } else if (Array.isArray(value)) value.forEach(item => visit(item));
+    else if (typeof value === "object" && value !== null) {
+      for (const [name, item] of Object.entries(value)) {
+        // A `secrets:` key passes secrets to a reusable workflow, including `secrets: inherit`.
+        if (name.toLowerCase() === "secrets") problems.push("secrets passed to a reusable workflow");
+        visit(item, name);
+      }
+    }
+  };
+  visit(workflow);
+  for (const expression of expressions) {
+    // Any use of the secrets context: secrets.x, secrets['x'], toJSON(secrets) and so on.
+    if (/(?<![\w.-])secrets(?![\w-])/i.test(expression)) problems.push(`secrets context in \${{${expression}}}`);
+    // The workflow token: github.token, github['token'], github["token"].
+    if (/(?<![\w.-])github\s*(?:\.\s*token(?![\w-])|\[\s*(['"])token\1\s*\])/i.test(expression)) problems.push(`github token in \${{${expression}}}`);
   }
+  if (/npm_token|node_auth_token/i.test(JSON.stringify(workflow))) problems.push("registry token variable");
   return problems;
 }
 
@@ -135,9 +154,18 @@ test("the workflow credential scan rejects tokens and secrets, not ordinary word
     base(job("    permissions:\n      contents: write\n")),
     base("  call:\n    uses: ./.github/workflows/other.yml\n    secrets: inherit\n"),
     base(job("    env:\n      TOKEN: ${{ github.token }}\n")),
+    base(job("    env:\n      TOKEN: ${{ github['token'] }}\n")),
+    base(job("    env:\n      TOKEN: ${{ github[\"token\"] }}\n")),
     base(job("    env:\n      TOKEN: ${{ secrets[\"npm\"] }}\n")),
     base(job("    env:\n      TOKEN: ${{ secrets.NPM }}\n")),
+    base(job("    env:\n      ALL: ${{ toJSON(secrets) }}\n")),
+    base(job("    env:\n      ALL: prefix-${{ toJSON( Secrets ) }}\n")),
+    base(job("    if: secrets.NPM != ''\n")),
+    base(job("    env:\n      NODE_AUTH_TOKEN: x\n")),
   ]) expect(workflowCredentialProblems(bad), bad).not.toEqual([]);
+  // Ordinary words and other contexts pass: a step about secrets, github.token_count-like names, env.secrets_dir.
+  expect(workflowCredentialProblems(base(job("    env:\n      A: ${{ github.event_name }}\n      B: ${{ env.secrets_dir }}\n      C: ${{ github.tokens }}\n") +
+    "      - name: Check that no secrets leak\n        run: echo github.token secrets.x\n"))).toEqual([]);
 });
 
 test("validating the release artifact does not publish it", async () => {
