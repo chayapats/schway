@@ -132,12 +132,15 @@ The additive `schway.host.dispatch-authorization/v1` and
 route models call immediately before each physical inference send, auth-retry
 resends included, with a frozen credential-free `HostDispatch`. A refusal never
 sends, is never retried, never switches route, model or billing, and adds the
-`dispatch-refused` member to `HostAuthStatusCode`. Without an authorizer,
+`dispatch-refused` member to `HostAuthStatusCode`. Route sends refuse HTTP
+redirects; CLI requests are unchanged. Without an authorizer,
 behavior and request bytes are unchanged. The second adds
 `HostRunUsage.providerRequests`: exact initial, auth-retry and renewal request
 counts when every model call is observable, and `null` otherwise; a shared
 renewal counts once, for the run that started it. Local readiness accepts an
-abort signal and deadline and rejects with `AbortError` or `TimeoutError`.
+abort signal and deadline and rejects with `AbortError` or `TimeoutError`;
+`submitWithRoute` readiness reads now honor the run's signal, `cancel()` and
+deadline.
 Existing call signatures gain only optional parameters, and retry policy,
 renewal single-flight and route/model/billing selection are unchanged. This is a
 minor, additive host API change. Consumers that construct structural

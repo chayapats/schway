@@ -392,7 +392,7 @@ Offline evidence is in `tests/host-route-models.test.ts` and the packed consumer
 
 ## Run control, progress and terminal outcomes
 
-`schway.host.run-control/v1` bounds every admitted run by finite `maxTurns`, `maxConcurrentTools`, `deadlineMs` and `maxAttempts`, with no unlimited or malformed values admitted. The deadline covers model rounds, transport retry backoff, overflow recovery and compaction waits. `submit`, `submitWithRoute` and `compact` accept `AbortSignal | HostRunOptions`; `HostRunOptions` carries an optional cooperative `signal`, an injectable `HostClock` for deterministic backoff/deadline waits and an optional transient `onProgress` observer. `submitWithRoute` also accepts `HostRouteRunOptions`, which adds a per-run `authorizeDispatch`.
+`schway.host.run-control/v1` bounds every admitted run by finite `maxTurns`, `maxConcurrentTools`, `deadlineMs` and `maxAttempts`, with no unlimited or malformed values admitted. The deadline covers model rounds, transport retry backoff, overflow recovery and compaction waits, plus `submitWithRoute`'s secure-store readiness reads. `submit`, `submitWithRoute` and `compact` accept `AbortSignal | HostRunOptions`; `HostRunOptions` carries an optional cooperative `signal`, an injectable `HostClock` for deterministic backoff/deadline waits and an optional transient `onProgress` observer. `submitWithRoute` also accepts `HostRouteRunOptions`, which adds a per-run `authorizeDispatch`.
 
 Accepted input is appended and flushed before the first model request; a failed append rejects `storage` without inference or an accepted reference. Cancellation precedence is explicit: a pre-acceptance abort rejects `invalid-input` without durable input, while a post-acceptance abort, session `cancel()` or deadline expiry settles as `cancelled` or `limit_exceeded` with the accepted input reference and no late result. `cancel()` aborts model/retry waits and settles admitted cooperative tools before the run settles; it is safe to repeat and safe when idle. `close()` stays idle-only, never aborts or settles an admitted run, and rejects `busy` while a run is admitted; call `cancel()` first, await settlement, then close releases the exclusive lease. Repeated close is safe.
 
@@ -431,18 +431,26 @@ frozen, credential-free `HostDispatch`: `route`, adapter `provider`
 (`codex-subscription` or `xai`), `model`, `kind` (`initial` or `auth-retry`), a
 1-based `sequence` within one model stream, and `bodySha256` plus `bodyBytes` of
 the exact body about to be sent. Bodies carry no credentials; tokens travel only
-in headers the authorizer never sees. Schway keeps credentials, protocol, renewal
-and retries. Renewal requests carry no conversation content, so they are counted
-but not authorized.
+in headers the authorizer never sees. Route sends refuse HTTP redirects, so a 3xx
+fails that request instead of resending the body somewhere the authorizer never
+judged; the CLI's own requests are unchanged. Schway keeps credentials, protocol,
+renewal and retries. Renewal requests carry no conversation content, so they are
+counted but not authorized.
 
 Throwing refuses that send, and so does returning a promise, which is never
-awaited. A refused send never leaves the process. The stream ends with a
-credential-free refusal that `isDispatchRefused(error)` recognizes; direct stream
+awaited. A refused send never leaves the process; earlier sends in the same run
+may already have, and the refusal text speaks only of the refused request. The
+stream ends with a credential-free refusal error. `isDispatchRefused(error)`
+recognizes that error object by identity only: a copied message, or a provider
+error that echoes the wording, is never treated as a refusal. Direct stream
 callers find the authorizer's own error as its `cause`. The loop never retries a
-refusal and never falls back to another route, model or API-key billing.
-`submitWithRoute` reports `auth.status: "dispatch-refused"`; `submit` reports the
-stable refusal message in `error.message`. Without an authorizer, behavior and
-request bytes are unchanged. `submit` and `compact` reject `authorizeDispatch` as
+refusal and never falls back to another route, model or API-key billing. When a
+run's last model call ended on a refusal, `submitWithRoute` reports
+`auth.status: "dispatch-refused"` and `submit` reports the stable refusal message
+in `error.message`, even if the loop then failed on a consequence such as
+overflow recovery that could not compact. A refusal in one model call, such as a
+pressure compaction the run survives, never hides a later call's own failure.
+Without an authorizer, behavior and request bytes are unchanged. `submit` and `compact` reject `authorizeDispatch` as
 `invalid-input`: Schway cannot see a host-supplied model's sends, so authorize
 them through a route model instead.
 
@@ -456,9 +464,10 @@ counted. Renewal is single-flight, including across runs that share a
 `HostCredentialLifecycle`: a shared refresh request counts once, for the run
 whose caller started it, and joiners count zero, so summing runs never
 double-counts. Counts are exact when every model call went through a Schway route
-model, directly or through a wrapper that forwards `call` unchanged. Otherwise,
-such as a host-supplied model or a wrapper that drops `call`, `providerRequests`
-is `null`, never a guessed zero. A run that made no model call reports zeros.
+model, directly or through a wrapper that passes `call` as-is or spreads it
+(`{ ...call }`). Otherwise, such as a host-supplied model or a wrapper that drops
+`call`, picks its fields or clones it, `providerRequests` is `null`, never a
+guessed zero. A run that made no model call reports zeros.
 
 **Readiness bounds.** `checkAuthReadiness(selection, { signal, deadlineMs })` and
 `HostAuthBinding.checkReadiness(options)` (`HostReadinessOptions`) settle
@@ -469,8 +478,15 @@ cancelled is ignored when it finally settles: readiness never writes, and after
 settling it never parses the value or loads an adapter. Rejection is used instead
 of a status so an abandoned check never reads as a credential verdict such as
 `needs-login` or `store-unavailable`. Malformed bounds reject `invalid-input`.
-`submitWithRoute` keeps its existing admission readiness read, which these bounds
-do not cover; run a bounded check first when the store may block.
+
+`submitWithRoute` runs its admission readiness read, and the settling read after
+a `cancelled` or `max_turns` loop, inside the run bound: the caller's signal,
+session `cancel()` and `deadlineMs` interrupt a blocked store read, and the lease
+is released when the run settles. An interrupted admission read settles as
+`cancelled` (or `limit_exceeded` at the deadline) with `auth.status:
+"store-unavailable"`, guidance that the store had not answered, and zero
+provider requests. An interrupted settling read settles the same way and reports
+the admission verdict, because the run had not settled yet.
 
 See `tests/host-dispatch-authorization.test.ts`,
 `tests/host-provider-requests.test.ts` and the packed consumer in

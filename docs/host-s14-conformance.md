@@ -134,11 +134,13 @@ counts once, for the run that started it, so totals across runs are exact.
 `null` means a model call was not observable (a host-supplied model or a wrapper
 that drops `call`); treat it as unknown, never zero. Bound local readiness with
 `checkReadiness({ signal, deadlineMs })`; it rejects `AbortError` or
-`TimeoutError` and never writes. `submitWithRoute`'s admission read is not
-bounded by these options.
+`TimeoutError` and never writes. `submitWithRoute` reads readiness inside its run
+bound, so the run's signal, `cancel()` and `deadlineMs` interrupt a blocked store
+read. A wrapping model keeps counts only by passing `call` as-is or spread.
+`isDispatchRefused` matches the thrown refusal by identity, never by message.
 
 | Seam | Coverage |
 | --- | --- |
-| `tests/host-dispatch-authorization.test.ts` | Fake fetch and stores with promise barriers: Grok 401 resend authorized twice and refusable on the second call with one request sent; revocation during a blocked credential read or renewal; Codex renewal before one authorized send; retries and compaction; exact body hashes; no-authorizer byte identity; secret sentinels; option validation. |
-| `tests/host-provider-requests.test.ts` | Exact counts per run, shared renewal attributed once across lifecycle-sharing hosts, bounded retries, `null` for unobservable models, readiness abort and deadline without writes. |
+| `tests/host-dispatch-authorization.test.ts` | Fake fetch and stores with promise barriers: Grok 401 resend authorized twice and refusable on the second call with one request sent; revocation during a blocked credential read or renewal; Codex renewal before one authorized send; retries, compaction and compaction inside a route run; refused redirects against a local server; a survived compaction refusal never masking a later failure; echoed refusal wording still retried; exact body hashes; no-authorizer byte identity; secret sentinels; option validation. |
+| `tests/host-provider-requests.test.ts` | Exact counts per run, shared renewal attributed once across lifecycle-sharing hosts, bounded retries, `null` for unobservable models, readiness abort and deadline that never use the late value, and route runs settled by cancel, signal or deadline during blocked admission and post-`max_turns` reads. |
 | `tests/host-release.test.ts` | The packed consumer advertises both capabilities, authorizes the Grok initial and auth-retry sends with matching hashes, refuses the resend, reads exact counts and bounds readiness, importing only `schway/host`. |
