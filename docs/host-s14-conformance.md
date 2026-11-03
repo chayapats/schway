@@ -103,6 +103,49 @@ id-wide management; it must not replace an app's saved execution branch.
 
 [#428](https://github.com/chayapats/schway/issues/428) remains the cross-process
 credential-lock follow-up, including lock-location override. This work shares
-the existing lock boundary without replacing it. [#415](https://github.com/chayapats/schway/issues/415)
-still owns abortable local readiness and exact provider-request accounting;
-neither is claimed here. Do not add Jit-owned refresh or retry protocols.
+the existing lock boundary without replacing it. Abortable local readiness and
+exact provider-request accounting ([#415](https://github.com/chayapats/schway/issues/415))
+now ship in the S15 slice below. Do not add Jit-owned refresh or retry protocols.
+
+## S15 dispatch authorization and provider requests
+
+Two more additive slices remain under `schway.host.release/v2`:
+
+| Capability property | Exact version |
+| --- | --- |
+| `dispatchAuthorizationContract` | `schway.host.dispatch-authorization/v1` |
+| `providerRequestsContract` | `schway.host.provider-requests/v1` |
+
+Require both before reporting governed model dispatch as guarded. Pass a
+synchronous `authorizeDispatch` to `submitWithRoute(input, { authorizeDispatch })`
+or to `host.auth.createModel({ authorizeDispatch })` for `submit` and `compact`.
+It runs once per physical inference send, immediately before the request starts,
+including transient retries, compaction and the Grok auth-retry resend; throw to
+refuse. Check each `HostDispatch` (`route`, `provider`, `model`, `kind`,
+`sequence`, `bodySha256`, `bodyBytes`) against the app's recipient, budget and
+revocation policy at that moment. A refusal sends nothing, is never retried, and
+reports `auth.status: "dispatch-refused"` on route runs; `isDispatchRefused`
+recognizes it on direct streams.
+
+Read `result.usage.providerRequests` to reconcile admitted work with physical
+requests: inference requests are `initialSends + authRetrySends`, and
+`renewalRequests` counts the token refreshes this run started. A shared renewal
+counts once, for the run that started it, so totals across runs are exact.
+`null` means a model call was not observable (a host-supplied model or a wrapper
+that drops `call`); treat it as unknown, never zero. Bound local readiness with
+`checkReadiness({ signal, deadlineMs })`; it rejects `AbortError` or
+`TimeoutError` and never writes. `submitWithRoute` reads readiness inside its run
+bound, so the run's signal, `cancel()` and `deadlineMs` interrupt a blocked store
+read. A wrapping model keeps counts only by passing `call` as-is or spread, and
+must rethrow a refusal or chain it as `cause`. `isDispatchRefused` checks only
+the object it is given, by identity per installed Schway copy and never by
+message; the loop and `classifyAuthError` also follow `cause`. Route sends refuse
+redirects and report `integration-unavailable` without retrying; Codex and Grok
+token refreshes never follow redirects. A deadline with no unrecovered provider
+failure reports the admission verdict.
+
+| Seam | Coverage |
+| --- | --- |
+| `tests/host-dispatch-authorization.test.ts` | Fake fetch and stores with promise barriers: Grok 401 resend authorized twice and refusable on the second call with one request sent; revocation during a blocked credential read or renewal; Codex renewal before one authorized send; retries, compaction and compaction inside a route run; refused redirects against a local server; a survived compaction refusal never masking a later failure; echoed refusal wording still retried; exact body hashes; no-authorizer byte identity; secret sentinels; option validation. |
+| `tests/host-provider-requests.test.ts` | Exact counts per run, shared renewal attributed once across lifecycle-sharing hosts, bounded retries, `null` for unobservable models, readiness abort and deadline that never use the late value, and route runs settled by cancel, signal or deadline during blocked admission and post-`max_turns` reads. |
+| `tests/host-release.test.ts` | The packed consumer advertises both capabilities, authorizes the Grok initial and auth-retry sends with matching hashes, refuses the resend, reads exact counts and bounds readiness, importing only `schway/host`. |

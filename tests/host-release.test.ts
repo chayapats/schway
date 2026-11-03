@@ -97,6 +97,8 @@ test("packed release artifact installs without private source access and adverti
       runContract: "schway.host.run-control/v1",
       dataContract: "schway.host.managed-session-data/v1",
       snapshotContract: "schway.host.session-snapshot/v1",
+      dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1",
+      providerRequestsContract: "schway.host.provider-requests/v1",
       observedInference: "not-checked",
     });
   } finally {
@@ -228,6 +230,33 @@ test("packed release consumer proves grok route isolation without fallback", asy
         builder.onLoad({filter:/@opentui/},()=>{throw new Error('renderer loaded');});
       }});`) as Record<string, unknown>;
     expect(result).toMatchObject({ outcome: "completed", observed: "observed" });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 120_000);
+
+test("packed release consumer authorizes each grok dispatch and reads exact provider requests", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  try {
+    const { consumer } = await packAndInstall(dir);
+    const workspaceRoot = join(consumer, "work-dispatch"), homeDirectory = join(consumer, "home-dispatch"), sessionDirectory = join(consumer, "sessions-dispatch");
+    await mkdir(workspaceRoot, { recursive: true }); await mkdir(homeDirectory, { recursive: true });
+    const result = await packedConsumer(consumer, { action: "dispatch", workspaceRoot, homeDirectory, sessionDirectory },
+      `await Bun.plugin({name:'release-dispatch-guard',setup(builder){
+        builder.onLoad({filter:/providers[/\\\\]codex-subscription/},()=>{throw new Error('unselected codex loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai\\.ts/},()=>{throw new Error('native openai loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai-compatible/},()=>{throw new Error('unselected compatible loaded');});
+        builder.onLoad({filter:/[/\\\\]tui[/\\\\]/},()=>{throw new Error('TUI loaded');});
+        builder.onLoad({filter:/@opentui/},()=>{throw new Error('renderer loaded');});
+      }});`);
+    expect(result).toEqual({
+      caps: { dispatch: "schway.host.dispatch-authorization/v1", providerRequests: "schway.host.provider-requests/v1" },
+      kinds: ["initial:1", "auth-retry:2"], hashesMatch: true,
+      completed: { initialSends: 1, authRetrySends: 1, renewalRequests: 1 },
+      refused: { status: "dispatch-refused", inferences: 1, providerRequests: { initialSends: 1, authRetrySends: 0, renewalRequests: 1 } },
+      directRefused: true, renewals: 2,
+      readiness: { aborted: "AbortError", timedOut: "TimeoutError" },
+    });
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

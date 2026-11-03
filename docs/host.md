@@ -226,7 +226,7 @@ adapter bodies, snapshot/restored bytes, compaction and deletion between tool ro
 
 `auth` binds one exact model with the `codex` (ChatGPT subscription) or `grok` (Grok subscription) route. The selection carries only the route, model, an opaque credential reference (`account`/`label`), an optional isolated store, an optional environment map and an optional protocol-fixture fetch. It never accepts raw tokens, API keys or stored credential bodies; extra construction fields fail as `invalid-options` and unknown routes fail as `unsupported-policy`. Environment API keys (`OPENAI_API_KEY`, `XAI_API_KEY`) are ignored for subscription routes and never switch billing, credential source or plaintext storage. Grok and Codex endpoint, credential-store and refresher identities stay isolated; auth, quota or model failures never change the selected provider, model or credential source.
 
-`hostCapabilities()` advertises `schway.host.auth-routes/v1` with `authRoutes: ["codex", "grok"]` and keeps `observedInference: "not-checked"`. `describeAuthRoute()` reports the static supported route and opaque credential without store, network or adapter loading. `checkAuthReadiness()` reads only the selected store identity locally and returns `configured-unverified` (static configuration without live proof), `needs-login`, `store-unavailable`, `invalid-store` or live failure categories with safe next-action guidance and `observedInference: "not-checked"`. `submitWithRoute()` appends input durably, reuses the existing route-scoped single-flight renewal and generation fencing, and returns `completed` with `observedInference: "observed"` only after a committed assistant entry. Auth, quota, model and integration failures return the same stable categories without native secret errors, token payloads/headers or stored credential bodies in returned metadata, prompts or diagnostics. Only the selected adapter loads dynamically when the route is actually used; import and capability enumeration never initialize Grok, Codex, native API adapters or the TUI. SDK automatic retries stay disabled; existing transport refresh and Schway's bounded core retry policy stay authoritative. Independent runs may deliberately choose different routes.
+`hostCapabilities()` advertises `schway.host.auth-routes/v1` with `authRoutes: ["codex", "grok"]` and keeps `observedInference: "not-checked"`. `describeAuthRoute()` reports the static supported route and opaque credential without store, network or adapter loading. `checkAuthReadiness()` reads only the selected store identity locally and returns `configured-unverified` (static configuration without live proof), `needs-login`, `store-unavailable`, `invalid-store` or live failure categories with safe next-action guidance and `observedInference: "not-checked"`. An optional `{ signal, deadlineMs }` bounds the read (see [dispatch authorization and provider requests](#dispatch-authorization-and-provider-requests)). `submitWithRoute()` appends input durably, reuses the existing route-scoped single-flight renewal and generation fencing, and returns `completed` with `observedInference: "observed"` only after a committed assistant entry. Auth, quota, model and integration failures return the same stable categories without native secret errors, token payloads/headers or stored credential bodies in returned metadata, prompts or diagnostics. Only the selected adapter loads dynamically when the route is actually used; import and capability enumeration never initialize Grok, Codex, native API adapters or the TUI. SDK automatic retries stay disabled; existing transport refresh and Schway's bounded core retry policy stay authoritative. Independent runs may deliberately choose different routes.
 
 Supported service-store expectations follow [credentials](credentials.md#platform-requirements-and-recovery): the OS secure store must be unlocked and, on Linux, a Secret Service such as GNOME Keyring or KWallet must be reachable in the desktop/D-Bus session. A locked or unavailable store reports `store-unavailable` with recovery guidance. This contract does not claim Linux unattended availability before S01 evidence and does not select a new secret backend, change billing or import foreign-CLI credentials. See ADR0013 and `tests/host-auth-routes.test.ts`.
 
@@ -392,11 +392,128 @@ Offline evidence is in `tests/host-route-models.test.ts` and the packed consumer
 
 ## Run control, progress and terminal outcomes
 
-`schway.host.run-control/v1` bounds every admitted run by finite `maxTurns`, `maxConcurrentTools`, `deadlineMs` and `maxAttempts`, with no unlimited or malformed values admitted. The deadline covers model rounds, transport retry backoff, overflow recovery and compaction waits. `submit`, `submitWithRoute` and `compact` accept `AbortSignal | HostRunOptions`; `HostRunOptions` carries an optional cooperative `signal`, an injectable `HostClock` for deterministic backoff/deadline waits and an optional transient `onProgress` observer.
+`schway.host.run-control/v1` bounds every admitted run by finite `maxTurns`, `maxConcurrentTools`, `deadlineMs` and `maxAttempts`, with no unlimited or malformed values admitted. The deadline covers model rounds, transport retry backoff, overflow recovery and compaction waits, plus `submitWithRoute`'s secure-store readiness reads. `submit`, `submitWithRoute` and `compact` accept `AbortSignal | HostRunOptions`; `HostRunOptions` carries an optional cooperative `signal`, an injectable `HostClock` for deterministic backoff/deadline waits and an optional transient `onProgress` observer. `submitWithRoute` also accepts `HostRouteRunOptions`, which adds a per-run `authorizeDispatch`.
 
 Accepted input is appended and flushed before the first model request; a failed append rejects `storage` without inference or an accepted reference. Cancellation precedence is explicit: a pre-acceptance abort rejects `invalid-input` without durable input, while a post-acceptance abort, session `cancel()` or deadline expiry settles as `cancelled` or `limit_exceeded` with the accepted input reference and no late result. `cancel()` aborts model/retry waits and settles admitted cooperative tools before the run settles; it is safe to repeat and safe when idle. `close()` stays idle-only, never aborts or settles an admitted run, and rejects `busy` while a run is admitted; call `cancel()` first, await settlement, then close releases the exclusive lease. Repeated close is safe.
 
 Terminal outcomes distinguish `completed`, `error`, `cancelled`, `max_turns` and `limit_exceeded`, carry the selected route/session/run references, the selected model identity and durable output references only when committed, plus honest `HostRunUsage` and sanitized `HostRunError` diagnostics preserving the effective context/tool policy. Route-bound runs add safe `auth` readiness and `observedInference: "observed"` only on committed completion. A late provider callback after cancellation or the deadline cannot flip the outcome to `completed` or append a late accepted answer; the loop checks cancellation before durable publication and the host trusts a loop-reported `completed` over a raced abort or deadline. Schway adds no competing durable job scheduler; Jit owns queue priority, attempt generations and task acceptance. See ADR0014 and `tests/host-run-control.test.ts`.
+
+## Dispatch authorization and provider requests
+
+`hostCapabilities()` advertises two additive slices under `release/v2`:
+`dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1"`
+([#444](https://github.com/chayapats/schway/issues/444)) and
+`providerRequestsContract: "schway.host.provider-requests/v1"`
+([#415](https://github.com/chayapats/schway/issues/415)). `RELEASE_CONTRACT` and
+`releaseContract` are unchanged; check both capability names before relying on
+these behaviors.
+
+```ts
+import { isDispatchRefused, type HostDispatch } from "schway/host";
+
+// Synchronous: decide recipients, budget and revocation for exactly these bytes.
+const authorizeDispatch = (dispatch: HostDispatch): void => {
+  if (!policy.allows(dispatch.route, dispatch.model, dispatch.bodySha256, dispatch.bodyBytes)) throw new Error("Not allowed");
+};
+const result = await session.submitWithRoute({ text }, { authorizeDispatch });
+const model = await host.auth!.createModel({ authorizeDispatch }); // For submit and compact.
+```
+
+**Authorization.** Pass `authorizeDispatch` to `HostAuthBinding.createModel(options)`,
+`createAuthRouteModel(selection, options)` (`HostRouteModelOptions`) or, per run,
+to `submitWithRoute(input, options)` (`HostRouteRunOptions`). Schway calls it
+synchronously immediately before each physical inference request a route adapter
+sends: after every credential read, renewal and SDK step that precedes the send,
+with no await before the request starts. That covers every agent turn, each
+transient retry within `maxAttempts`, compaction summaries and the adapter's own
+auth-retry resend (Grok's HTTP 401, renewal, then resend). Each call receives a
+frozen, credential-free `HostDispatch`: `route`, adapter `provider`
+(`codex-subscription` or `xai`), `model`, `kind` (`initial` or `auth-retry`), a
+1-based `sequence` within one model stream, and `bodySha256` plus `bodyBytes` of
+the exact body about to be sent. Bodies carry no credentials; tokens travel only
+in headers the authorizer never sees. Host route models refuse HTTP redirects,
+with or without an authorizer, so every physical send stays authorized and
+counted: a 3xx fails that request, is not retried, and reports
+`integration-unavailable` with guidance that the endpoint answered with a
+redirect. Only a status-less transport refusal counts; an HTTP answer whose body
+mentions a redirect keeps its status and normal handling. Request bytes are
+unchanged, and the CLI/TUI inference path is unchanged. Codex and Grok token
+refresh requests never follow redirects on any path, CLI included, so a refresh
+token is never resent and each renewal call is exactly one request; a redirected
+Codex or Grok refresh reports a fixed message that the endpoint answered with a
+redirect, and the same `integration-unavailable` guidance on route runs. Schway
+recognizes its own redirect failures by identity, so a provider error that echoes
+the wording keeps its ordinary classification. Schway keeps credentials,
+protocol, renewal and retries. Renewal requests carry no conversation content, so
+they are counted but not authorized.
+
+Throwing refuses that send, and so does returning a promise, which is never
+awaited. A refused send never leaves the process; earlier sends in the same run
+may already have, and the refusal text speaks only of the refused request. The
+stream ends with a credential-free refusal error. `isDispatchRefused(error)`
+checks only the object it is given, by identity: a copied message, a provider
+error that echoes the wording, or a wrapper error whose `cause` is the refusal
+all return `false`. The loop and `classifyAuthError` also follow `cause` links,
+so a wrapper must rethrow the original error or chain it as `cause`, never copy
+its message. Identity is per installed copy of Schway (a module-private set).
+Direct stream callers find the authorizer's own error as its `cause`. The loop
+never retries a refusal, even when a wrapper chains it as `cause` above an
+authorizer error that looks transient, and never falls back to another route,
+model or API-key billing. When a
+run's last model call ended on a refusal, `submitWithRoute` reports
+`auth.status: "dispatch-refused"` and `submit` reports the stable refusal message
+in `error.message`, even if the loop then failed on a consequence such as
+overflow recovery that could not compact. A refusal in one model call, such as a
+pressure compaction the run survives, never hides a later call's own failure.
+Without an authorizer, route request bytes are unchanged. `submit` and `compact` reject `authorizeDispatch` as
+`invalid-input`: Schway cannot see a host-supplied model's sends, so authorize
+them through a route model instead.
+
+**Accounting.** `HostRunUsage.providerRequests` reports the exact physical
+requests each `submit`, `submitWithRoute` and `compact` result started:
+`initialSends` (the first send of each model call, transient retries and
+compaction included), `authRetrySends` and `renewalRequests`. Inference requests
+total `initialSends + authRetrySends`. Each send is counted right after it is
+authorized, so counts match what the authorizer saw; refused sends are not
+counted. Renewal is single-flight, including across runs that share a
+`HostCredentialLifecycle`: a shared refresh request counts once, for the run
+whose caller started it, and joiners count zero, so summing runs never
+double-counts. Counts are exact when every model call went through a Schway route
+model, directly or through a wrapper that passes `call` as-is or spreads it
+(`{ ...call }`). Otherwise, such as a host-supplied model or a wrapper that drops
+`call`, picks its fields or clones it, `providerRequests` is `null`, never a
+guessed zero. A run that made no model call reports zeros.
+
+**Readiness bounds.** `checkAuthReadiness(selection, { signal, deadlineMs })` and
+`HostAuthBinding.checkReadiness(options)` (`HostReadinessOptions`) settle
+promptly. An abort rejects with a `DOMException` named `AbortError`; deadline
+expiry (whole milliseconds, 1–86,400,000) rejects with `TimeoutError`; an
+already-aborted signal never reads the store. A secure-store read that cannot be
+cancelled is ignored when it finally settles: readiness never writes, and after
+settling it never parses the value or loads an adapter. Rejection is used instead
+of a status so an abandoned check never reads as a credential verdict such as
+`needs-login` or `store-unavailable`. Malformed bounds reject `invalid-input`.
+
+`submitWithRoute` runs its admission readiness read, and any settling read,
+inside the run bound: the caller's signal, session `cancel()` and `deadlineMs`
+interrupt a blocked store read, and the lease is released when the run settles.
+An interrupted admission read settles as `cancelled` (or `limit_exceeded` at the
+deadline) with `auth.status: "store-unavailable"`, guidance that the store had
+not answered, and zero provider requests. A settling read runs only while the run
+signal is still live: after `max_turns`, or after a `cancelled` loop whose
+adapter or injected fetch threw an `AbortError` on its own. A caller-cancelled
+run never reads again and reports its admission verdict. An interrupted settling
+read settles as `cancelled` (or `limit_exceeded`) and also reports the admission
+verdict, because the run had not settled yet. A deadline is not evidence that the
+route is unreachable: a `limit_exceeded` run with no observed provider failure,
+such as a healthy stream still answering, reports the admission verdict as
+cancel does. An observed failure keeps its classification, including a retried
+one, until a later attempt streams or completes and shows the route answering
+again.
+
+See `tests/host-dispatch-authorization.test.ts`,
+`tests/host-provider-requests.test.ts` and the packed consumer in
+`tests/host-release.test.ts`.
 
 ## Managed session data: retire and delete owned native sessions
 
@@ -750,7 +867,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `AssistantMessage` | Assembled native assistant response. |
 | `AssistantTelemetry` | Harness timing and reported model usage. |
 | `beginDeviceSignIn` | Start bounded selected-route device approval without exposing tokens. |
-| `checkAuthReadiness` | Check selected-route store readiness without network or inference. |
+| `checkAuthReadiness` | Check selected-route store readiness without network or inference, optionally bounded. |
 | `listRouteModels` | List a bounded selected-account catalog without inference or credential writes. |
 | `HostModelChoice` | Selectable model with recommendation and observed context limit. |
 | `HostRouteModels` | Listed models or safe route failure with `containsNoSecrets`. |
@@ -763,7 +880,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `CORE_TOOLS_CONTRACT` | Core-tools contract version. |
 | `coreToolDefinitions` | Build the core tools over a backend, confined to its root. |
 | `CoreToolOptions` | Optional `bash` environment for host-built core tools. |
-| `createAuthRouteModel` | Create only the selected subscription adapter lazily. |
+| `createAuthRouteModel` | Create only the selected subscription adapter lazily, optionally authorizing each send. |
 | `createHost` | Validate and lazily compose an explicit host. |
 | `createWebFetchTool` | Build an explicitly admitted, pinned and framed read-only fetch tool. |
 | `createWebSearchTool` | Build an explicitly admitted, bounded search tool over an app-owned provider. |
@@ -797,7 +914,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostAuthRoute` | Selected subscription route (`codex` or `grok`). |
 | `HostAuthRunResult` | Route-bound terminal outcome with safe auth detail. |
 | `HostAuthSelection` | Explicit route/model binding without raw tokens. |
-| `HostAuthStatusCode` | Stable safe categories for readiness and failures. |
+| `HostAuthStatusCode` | Stable safe categories for readiness, failures and dispatch refusals. |
 | `HostCapabilities` | Static API features with no inference observation. |
 | `hostCapabilities` | Discover support and caller-supplied image probe admissions without accounts or inference. |
 | `HostClock` | Injectable wall clock for deterministic backoff/deadline waits. |
@@ -806,6 +923,8 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostCredentialStore` | Secure-store boundary for a selected route. |
 | `HostCredentialWriteGuard` | Embedding-application fence for credential-store writes. |
 | `HostDeletedArtifact` | Owned artifact inventory for deletion reporting. |
+| `HostDispatch` | Frozen credential-free record of one physical inference send. |
+| `HostDispatchAuthorizer` | Synchronous veto called immediately before each physical send. |
 | `HostedTool` | Native closed hosted-lookup union; host sends none. |
 | `HostDeviceSignIn` | Ephemeral approval handle with shared polling and cancellation. |
 | `HostDeviceSignInFailure` | Secret-free failure categories and cleanup uncertainty. |
@@ -819,12 +938,16 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostModelIdentity` | Selected model identity carried on terminal outcomes. |
 | `HostOptions` | Trusted paths, context, tool policy and limits. |
 | `HostProgressEvent` | Transient progress observation that never creates durable output. |
+| `HostProviderRequests` | Exact initial, auth-retry and renewal requests one run started. |
+| `HostReadinessOptions` | Abort signal and deadline for a local readiness check. |
+| `HostRouteModelOptions` | Optional dispatch authorizer for a route-bound model. |
+| `HostRouteRunOptions` | Run options plus a per-run dispatch authorizer for `submitWithRoute`. |
 | `HostRunAttemptUsage` | One reported usage sample with its completeness flag. |
 | `HostRunError` | Sanitized failure detail with effective policy and model. |
 | `HostRunOptions` | Cooperative signal, fake clock and transient progress observer. |
 | `HostRunResult` | Terminal outcome with a durable result only on completion. |
 | `HostRuntime` | Create, open, retire, delete, snapshot, validate, restore and close managed native handles. |
-| `HostRunUsage` | Honest run consumption with nulls preserved. |
+| `HostRunUsage` | Honest run consumption with nulls preserved and exact provider requests when observable. |
 | `HostSession` | Submit, compact, retire and inspect one exact native ancestry. |
 | `HostSessionDeletion` | Honest deletion outcome with retry guidance. |
 | `HostSessionReference` | Stable native session and branch identity. |
@@ -839,6 +962,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostSnapshotValidation` | Offline snapshot validation verdict. |
 | `isCleanupUncertain` | Test whether an error marks an unverified credential cleanup. |
 | `isCredentialWriteRefused` | Test whether an error is a fence refusal, not a store failure. |
+| `isDispatchRefused` | Test whether an error is a dispatch-authorizer refusal. |
 | `JsonSchema` | Provider-independent tool input schema. |
 | `localExecutionBackend` | Run core tools in this process with CLI behavior. |
 | `MAX_SNAPSHOT_ARTIFACT_BYTES` | Per-artifact byte bound for snapshots. |
@@ -880,6 +1004,8 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 `bun test tests/host-session-snapshot.test.ts` proves quiesced two-session snapshot, fresh-store restore and ancestry resume without tool replay, busy/conflict fencing for open writers and replaced aliases, retired ledger filtering on export and restore, quarantine for missing/corrupt/incompatible/incomplete sets, forward-only migration with lazy durable bytes, idempotent resume for identical targets and delete-first conflict for mismatched targets, workspace mismatch, and sanitized manifests.
 
 `bun test tests/host.test.ts` exercises a disposable external consumer that imports only `schway/host`, executes a scripted native tool round and reopens/continues in a fresh process. `bun test tests/host-tool-policy.test.ts` proves empty/narrow registries stay authoritative across retry/overflow/reopen, hook-mutated calls pass approval on effective arguments, and selected-provider bodies carry no hosted search even where an allowlist would admit it. `bun test tests/host-auth-routes.test.ts` proves explicit Grok/Codex route binding with opaque credential references, safe readiness and failure categories, shared single-flight renewal with cancellation/logout fencing, route isolation with API-key bait, lazy selected-adapter loading and disabled SDK retries, all with protocol fixtures and fake stores. `bun test tests/host-run-control.test.ts` proves finite deadline/retry bounds, transient progress, honest usage, terminal `completed`/`error`/`cancelled`/`max_turns`/`limit_exceeded` outcomes, cooperative cancel/settle, late-callback fencing and released ownership, all with scripted models and fake clocks. `bun test tests/host-managed-session-data.test.ts` proves retire blocks reopen, deletion removes only owned conversation, history, draft, undo, metadata and lease artifacts with honest `deleted`, `already-deleted`, `partial` and `blocked` status, busy and unknown writers delete nothing, symlink and traversal sentinels never escape, delayed completions never resurrect history, and CLI deletion, history and undo behavior is preserved. Preload sentinels reject provider/TUI initialization and runtime loading during static discovery, and only the selected adapter loads for route-bound runs. Other fixtures cover unsupported policies/options, durable input before inference, write failures, busy handles, cancellation, detached result reads and native terminal outcomes.
+
+`bun test tests/host-dispatch-authorization.test.ts` proves one synchronous authorization per physical send with fake fetch and fake stores: Grok 401, renewal and resend authorized as `initial` then `auth-retry`; refusing the resend leaves exactly one inference request; revocation during a blocked credential read or renewal refuses the send; Codex renews before its single authorized send; transient retries and compaction are authorized separately; body hashes match the transport's bytes; refusals are never retried and classify as `dispatch-refused`; unauthorized runs send identical bytes; and secret sentinels never appear in dispatch records, results, progress or errors. `bun test tests/host-provider-requests.test.ts` proves exact per-run request counts, shared renewal counted once for the run that started it, `null` for unobservable models, and readiness that rejects promptly on abort or deadline without writing.
 
 Run `bun run typecheck` and full `bun test`. The declaration builder emits both entries; `bun scripts/extension-api-report.ts` checks extension declarations and `bun scripts/extension-api-report.ts --host` checks the host report. Intentional host API changes use `--host --update`, followed by inventory/declaration tests. No live provider call or human credential setup belongs in these deterministic checks.
 

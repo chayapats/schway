@@ -13,11 +13,13 @@ import { THINKING_LEVELS } from "../model.ts";
 import { responsesUsage } from "./responses-stream.ts";
 import type {
   Model,
+  ModelCallOptions,
   ModelRequest,
   ModelStreamEvent,
   ModelTool,
   ThinkingLevel,
 } from "../model.ts";
+import { countingRenewalFetch, isRefusedRedirect, providerDispatch, redirectRefusal, redirectRefusedError } from "../dispatch.ts";
 import {
   CODEX_SUBSCRIPTION_LABEL,
   codexSubscriptionIdentity,
@@ -426,6 +428,9 @@ export async function exchangeCodeForTokens(input: {
   return toCodexTokens(payload, (input.now ?? Date.now)());
 }
 
+/** Sanitized refresh failure when the token endpoint answers with a redirect, which refresh never follows. */
+const CODEX_REFRESH_REDIRECT_ERROR = "The ChatGPT subscription refresh endpoint answered with an HTTP redirect. Session renewal never follows redirects, so the renewal request was not resent. Retry later; Schway never falls back to API-key billing after explicit chatgpt selection.";
+
 /** Renew short-lived access with the offline_access refresh token in one transport attempt. */
 export async function refreshSubscriptionTokens(input: {
   refreshToken: string;
@@ -444,10 +449,14 @@ export async function refreshSubscriptionTokens(input: {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: body.toString(),
+      // Never resend the refresh token to a redirect target; one call is exactly one renewal request.
+      redirect: "error",
       signal: input.signal,
     });
   } catch (error) {
     throwIfAborted(input.signal);
+    // The endpoint answered; report that without the transport's raw text or the token URL.
+    if (isRefusedRedirect(error)) throw redirectRefusal(CODEX_REFRESH_REDIRECT_ERROR);
     throw new Error(codexRefreshFailedError(messageOf(error)));
   }
   throwIfAborted(input.signal);
@@ -466,18 +475,19 @@ export function createSubscriptionTokenRefresher(input: {
   store: CredentialStore;
   fetch?: CodexFetchLike;
 }): {
-  /** Return a valid access token, refreshing once before expiry with racing callers sharing the renewal. */
-  getValidAccessToken(signal?: AbortSignal): Promise<{ accessToken: string; accountId?: string }>;
+  /** Return a valid access token, refreshing once before expiry with racing callers sharing the renewal.
+   * `onRenewal` fires once per physical refresh request this caller starts; joiners never see it. */
+  getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }>;
 } {
   return {
-    async getValidAccessToken(signal?: AbortSignal): Promise<{ accessToken: string; accountId?: string }> {
+    async getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> {
       throwIfAborted(signal);
       const state = codexLifecycle(input.store);
       const pendingWrites = state.writes;
       await pendingWrites;
       throwIfAborted(signal);
       if (pendingWrites !== state.writes) {
-        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal);
+        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal, onRenewal);
       }
       const generation = state.generation;
       let stored: CodexTokens | null;
@@ -488,7 +498,7 @@ export function createSubscriptionTokenRefresher(input: {
       }
       throwIfAborted(signal);
       if (generation !== state.generation) {
-        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal);
+        return createSubscriptionTokenRefresher(input).getValidAccessToken(signal, onRenewal);
       }
       if (!stored) {
         throw new Error(codexMissingLoginError());
@@ -503,7 +513,7 @@ export function createSubscriptionTokenRefresher(input: {
       if (!refresh || refresh.generation !== generation) {
         const refreshToken = stored.refreshToken;
         const refreshSignal = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS);
-        const promise = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal: refreshSignal })
+        const promise = refreshSubscriptionTokens({ refreshToken, fetch: countingRenewalFetch(input.fetch, onRenewal), signal: refreshSignal })
           .catch((error: unknown) => {
             if (refreshSignal.aborted) {
               throw new Error(
@@ -1106,7 +1116,7 @@ export function createCodexSubscriptionModel(options: {
   /** Verified capabilities for this exact account and model. */
   modelCapability?: ModelCapability;
   tokens?: CodexTokens;
-  refresher?: { getValidAccessToken(signal?: AbortSignal): Promise<{ accessToken: string; accountId?: string }> };
+  refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> };
   store?: CredentialStore;
   fetch?: CodexFetchLike;
   secrets?: string[];
@@ -1130,11 +1140,13 @@ export function createCodexSubscriptionModel(options: {
     provider: "codex-subscription",
     id: modelId,
     /** Stream normalized subscription deltas and a completed message, forwarding cancellation without retries. */
-    async *stream(request: ModelRequest): AsyncIterable<ModelStreamEvent> {
+    async *stream(request: ModelRequest, call?: ModelCallOptions): AsyncIterable<ModelStreamEvent> {
+      const dispatch = providerDispatch(call);
       const credential = await resolveStreamCredential(
         { tokens: options.tokens, refresher },
         request.signal,
         secrets,
+        dispatch?.renewal,
       );
       const body = toCodexResponsesBody(
         { ...request, thinking: request.thinking ?? options.thinking },
@@ -1147,16 +1159,27 @@ export function createCodexSubscriptionModel(options: {
         input: body["input"] as unknown[],
         tools: ((body["tools"] as Array<{ name: string; description: string }> | undefined) ?? []),
       });
+      const serialized = JSON.stringify(body);
+      if (dispatch) {
+        // Authorize after every await that precedes the send, on the exact body; nothing awaits before fetch starts.
+        throwIfAborted(request.signal, secrets);
+        dispatch.send("initial", serialized);
+      }
       let response: Response;
       try {
         response = await runFetch(CODEX_RESPONSES_URL, {
           method: "POST",
           headers: codexRequestHeaders(credential.accessToken, credential.accountId),
-          body: JSON.stringify(body),
+          body: serialized,
           signal: request.signal,
+          // Host route sends refuse redirects, authorizer or not, so a 3xx cannot resend the body uncounted.
+          // The CLI path keeps its existing fetch options.
+          ...(dispatch ? { redirect: "error" as const } : {}),
         });
       } catch (error) {
         throwIfAborted(request.signal, secrets);
+        // The server answered with a redirect; that is not an unreachable endpoint, and it is not retried.
+        if (dispatch && isRefusedRedirect(error)) throw redirectRefusedError("ChatGPT subscription");
         throw new Error(redact(`ChatGPT subscription request failed (${messageOf(error)}). Retry the turn; Schway owns retries.`, secrets));
       }
       if (!response.ok) {
@@ -1500,15 +1523,16 @@ function parseCodexToolArguments(json: string): unknown {
 async function resolveStreamCredential(
   input: {
     tokens?: CodexTokens;
-    refresher?: { getValidAccessToken(signal?: AbortSignal): Promise<{ accessToken: string; accountId?: string }> };
+    refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> };
   },
   signal: AbortSignal | undefined,
   secrets: string[],
+  onRenewal?: () => void,
 ): Promise<{ accessToken: string; accountId?: string }> {
   throwIfAborted(signal, secrets);
   if (input.refresher) {
     try {
-      return await input.refresher.getValidAccessToken(signal);
+      return await input.refresher.getValidAccessToken(signal, onRenewal);
     } catch (error) {
       throwIfAborted(signal, secrets);
       throw error instanceof Error ? error : new Error(messageOf(error));

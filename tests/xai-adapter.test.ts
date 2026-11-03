@@ -6,6 +6,7 @@ import { createContextManager } from "../src/context/manager.ts";
 import { createJsonlSession, loadJsonlSession, sessionsDirectory } from "../src/session/jsonl.ts";
 import { createSession } from "../src/session/session.ts";
 import { createXaiModel } from "../src/model/providers/xai.ts";
+import { withProviderDispatch } from "../src/model/dispatch.ts";
 import { loadProviderModel } from "../src/model/loader.ts";
 import { promptCacheKey } from "../src/model/prompt-cache-key.ts";
 import { GROK_TOKEN_URL, saveSubscriptionTokens } from "../src/model/providers/grok-subscription.ts";
@@ -345,4 +346,21 @@ test("empty and truncated 200 streams fail closed instead of completing", async 
       expect(error, label).toMatchObject({ message: expect.stringContaining("ended before completion") });
     } finally { server.stop(true); }
   }
+});
+
+test("route 401 whose body echoes redirect wording still refreshes and resends", async () => {
+  // Response text is an answer to classify, never a refused redirect; only a status-less transport code is.
+  let calls = 0, refreshCalls = 0;
+  const sends: string[] = [];
+  const model = createXaiModel({
+    apiKey: async () => "old-token", authRoute: "grok", model: "grok-4.7",
+    refreshCredential: async () => { refreshCalls++; return "new-token"; },
+    fetch: async () => ++calls === 1
+      ? Response.json({ error: { message: "edge proxy: unexpected redirect from origin" } }, { status: 401 })
+      : new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } }),
+  });
+  const events = await collect(model.stream(sampleRequest(), withProviderDispatch(undefined, { send: kind => { sends.push(kind); }, renewal: () => {} })));
+  expect(events.some(event => event.type === "message_complete")).toBe(true);
+  expect(refreshCalls).toBe(1);
+  expect(sends).toEqual(["initial", "auth-retry"]);
 });

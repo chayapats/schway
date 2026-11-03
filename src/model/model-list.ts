@@ -173,7 +173,7 @@ export async function fetchModelCatalogResponse(input: { url: string | URL | Req
     return response;
   });
   try { return await abortableCatalogOperation(request, input.signal); }
-  catch { input.signal.throwIfAborted(); throw new Error(`Could not reach the ${input.label} model list.`); }
+  catch (error) { input.signal.throwIfAborted(); throw new Error(`Could not reach the ${input.label} model list.`, { cause: error }); }
 }
 
 /** Fetch a catalog under an existing total-operation deadline; no phase restarts the budget. */

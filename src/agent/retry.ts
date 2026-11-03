@@ -1,6 +1,7 @@
 import type { AssistantMessage, AssistantTelemetry } from "../conversation/types.ts";
 import type { Model, ModelCallOptions, ModelRequest, ModelUsage } from "../model/model.ts";
 import type { ModelRetryCause, RuntimeEvent } from "./events.ts";
+import { hasDispatchRefusal } from "../model/dispatch.ts";
 
 /** Total provider stream attempts allowed for one model turn, including the first. */
 export const MAX_TRANSIENT_ATTEMPTS = 3;
@@ -238,6 +239,8 @@ export async function* streamModelTurn(options: {
 
 /** Classify a provider failure from structured status before its diagnostic text is displayed. */
 function providerFailureCategory(error: unknown): "auth" | "credential-store" | "model" | "offline" | "rate-limit" | "provider" {
+  // The authorizer's own error never categorizes a refusal as auth, rate-limit or offline.
+  if (hasDispatchRefusal(error)) return "provider";
   for (const item of errorChain(error)) {
     const status = httpStatus(item);
     const message = item instanceof Error ? item.message : String(item ?? "");
@@ -258,7 +261,9 @@ function providerFailureCategory(error: unknown): "auth" | "credential-store" | 
  * The first HTTP status in the error chain decides; a network failure counts only when no status does.
  */
 function transientFailureCause(error: unknown): ModelRetryCause | undefined {
-  if (isAbortError(error)) {
+  // An embedding-application refusal is a policy verdict: retrying would send what it vetoed,
+  // even when a wrapper chains it as `cause` above an authorizer error that looks transient.
+  if (isAbortError(error) || hasDispatchRefusal(error)) {
     return undefined;
   }
   let sawNetwork = false;
@@ -298,7 +303,7 @@ const OVERFLOW_MESSAGE =
 
 /** Recognize provider context-overflow codes or message patterns, excluding aborts and rate-limit entries. */
 export function isContextOverflowError(error: unknown): boolean {
-  if (isAbortError(error)) {
+  if (isAbortError(error) || hasDispatchRefusal(error)) {
     return false;
   }
   for (const item of errorChain(error)) {

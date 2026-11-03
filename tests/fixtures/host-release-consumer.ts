@@ -7,6 +7,7 @@ import {
   createWebSearchTool,
   type SearchProvider,
   hostCapabilities,
+  isDispatchRefused,
   listRouteModels,
   credentialReferenceForRoute,
   validateSnapshotShape,
@@ -14,6 +15,7 @@ import {
   RELEASE_CONTRACT,
   SNAPSHOT_CONTRACT,
   type ExecutionBackend,
+  type HostDispatch,
   type HostOptions,
   type Model,
 } from "schway/host";
@@ -29,6 +31,7 @@ type Input =
   | { action: "codex-route" | "grok-route"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "inventory"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
+  | { action: "dispatch"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "core-tools" | "web-tools"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
 
 function fakeStore() {
@@ -529,6 +532,72 @@ if (input.action === "capabilities") {
   const run = await session.submit({ text: "Read the web" }, model);
   await session.close(); await host.close();
   console.log(JSON.stringify({ outcome: run.outcome, calls, results, contract: hostCapabilities().webToolsContract }));
+} else if (input.action === "dispatch") {
+  // Every physical Grok send is authorized with exact body hashes, the auth-retry resend included.
+  const store = fakeStore();
+  const account = "grok-subscription:xai";
+  await store.set({ account }, JSON.stringify({ accessToken: "dispatch-old-token", refreshToken: "dispatch-refresh", obtainedAt: Date.now(), expiresAt: Date.now() + 3_600_000 }));
+  const bodies: string[] = [];
+  let renewals = 0, rejectNext = true;
+  const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).includes("auth.x.ai")) {
+      renewals++;
+      return Response.json({ access_token: "dispatch-new-token", refresh_token: "dispatch-refresh", expires_in: 3600 });
+    }
+    bodies.push(typeof init?.body === "string" ? init.body : "");
+    if (rejectNext) { rejectNext = false; return new Response("expired", { status: 401 }); }
+    return grokOk();
+  }) as never;
+  const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
+  const host = await createHost({
+    workspaceRoot: input.workspaceRoot, homeDirectory: input.homeDirectory, sessionDirectory: input.sessionDirectory,
+    context: { policy: "strict", systemPrompt: "release dispatch probe", sections: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
+    limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 },
+    auth: { route: "grok", model: "grok-4.7", store, fetch, env: { XAI_API_KEY: "dispatch-bait-key" } },
+  } as unknown as HostOptions);
+  const session = await host.createSession();
+  const seen: HostDispatch[] = [];
+  const completed = await session.submitWithRoute({ text: "dispatch probe" }, { authorizeDispatch: dispatch => { seen.push(dispatch); } });
+  if (completed.outcome !== "completed") throw new Error(`Expected completion, got ${completed.outcome}`);
+  const hashesMatch = seen.length === bodies.length && seen.every((dispatch, index) => dispatch.bodySha256 === sha256(bodies[index]!));
+
+  rejectNext = true;
+  const before = bodies.length;
+  const refusedRun = await session.submitWithRoute({ text: "refused probe" }, { authorizeDispatch: dispatch => {
+    if (dispatch.kind === "auth-retry") throw new Error("budget exhausted");
+  } });
+  if (!("auth" in refusedRun)) throw new Error("Expected refusal detail");
+
+  const model = await host.auth!.createModel({ authorizeDispatch: () => { throw new Error("revoked"); } });
+  let directRefused = false;
+  try { for await (const _event of model.stream({ systemPrompt: "s", context: [], items: [{ type: "user", id: "u", content: [{ type: "text", text: "x" }] }] })) { /* drain */ } }
+  catch (error) { directRefused = isDispatchRefused(error); }
+
+  const readinessName = async (options: { signal?: AbortSignal; deadlineMs?: number }) => {
+    try { await host.auth!.checkReadiness(options); return "resolved"; } catch (error) { return (error as Error).name; }
+  };
+  const blocked = await createHost({
+    workspaceRoot: input.workspaceRoot, homeDirectory: input.homeDirectory, sessionDirectory: `${input.sessionDirectory}-blocked`,
+    context: { policy: "strict", systemPrompt: "release readiness probe", sections: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
+    limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 },
+    auth: { route: "grok", model: "grok-4.7", store: { get: () => new Promise<string | null>(() => {}), set: async () => { throw new Error("unexpected write"); }, delete: async () => false } },
+  } as unknown as HostOptions);
+  let timedOut = "resolved";
+  try { await blocked.auth!.checkReadiness({ deadlineMs: 20 }); } catch (error) { timedOut = (error as Error).name; }
+  const result = {
+    caps: { dispatch: hostCapabilities().dispatchAuthorizationContract, providerRequests: hostCapabilities().providerRequestsContract },
+    kinds: seen.map(dispatch => `${dispatch.kind}:${dispatch.sequence}`), hashesMatch,
+    completed: completed.usage.providerRequests,
+    refused: { status: refusedRun.auth.status, inferences: bodies.length - before, providerRequests: refusedRun.usage.providerRequests },
+    directRefused, renewals,
+    readiness: { aborted: await readinessName({ signal: AbortSignal.abort() }), timedOut },
+  };
+  const text = JSON.stringify([result, seen, completed, refusedRun]);
+  for (const secret of ["dispatch-old-token", "dispatch-new-token", "dispatch-refresh", "dispatch-bait-key"]) if (text.includes(secret)) throw new Error("Secret leaked into dispatch evidence");
+  await session.close(); await host.close(); await blocked.close();
+  console.log(JSON.stringify(result));
 } else {
   throw new Error(`Unknown action: ${(input as { action: string }).action}`);
 }
