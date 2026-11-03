@@ -16,6 +16,7 @@
 // CONTENDER_FS injects a filesystem fault: `emfile-once` fails the first
 // temporary create with EMFILE; `no-hardlinks` fails every link(2) with EPERM;
 // `stat-flap` makes the first stat of the lock path report ENOENT.
+// CONTENDER_UMASK (octal) sets the process umask before the mutation.
 // Any open(2) of the lock path outside SQLite is reported as `FD-OPEN`.
 import { mock } from "bun:test";
 import * as sqlite from "bun:sqlite";
@@ -65,7 +66,7 @@ let statFlapped = false;
 function faultyOpenSync(...args: Parameters<typeof real.openSync>): number {
   const [path] = args;
   if (String(path).endsWith("credential-store.lock")) say("FD-OPEN");
-  if (fsFault === "emfile-once" && !createEmfileUsed && String(path).includes(".schway-lock-")) {
+  if (fsFault === "emfile-once" && !createEmfileUsed && /[\\/]\.cl[a-z0-9]{5}$/.test(String(path))) {
     createEmfileUsed = true;
     say("EMFILE");
     throw errnoError("EMFILE");
@@ -147,6 +148,7 @@ const backend = {
   async delete() { return false; },
 };
 
+if (process.env.CONTENDER_UMASK) process.umask(Number.parseInt(process.env.CONTENDER_UMASK, 8));
 const store = createNativeCredentialStore(backend as never, { lockTimeoutMs });
 say("STARTED");
 const startedAt = Date.now();

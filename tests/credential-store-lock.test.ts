@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import type { Subprocess } from "bun";
 import { CREDENTIAL_LOCK_FILE_ENV, MAX_LOCK_TIMEOUT_MS, credentialStoreLockPath, validLockTimeoutMs, withCredentialStoreLock } from "../src/auth/store-lock.ts";
 import { credentialLockError, credentialStoreError, credentialStoreFailure, isCredentialLockError, preserveRefusal } from "../src/auth/store.ts";
@@ -634,26 +634,48 @@ test("the lock file is created and locked without any descriptor outside SQLite"
   expect(readdirSync(dirname(current.lock))).toEqual(["credential-store.lock"]);
 }, MARGIN_TEST_MS);
 
-test("a lock path longer than SQLite opens is refused at once, and one at the limit locks", async () => {
-  // Build a path of an exact byte length from short-enough components.
+test("a lock path longer than SQLite opens is refused before anything is created, and one at the limit locks", async () => {
+  // Build a path of an exact byte length from short-enough components, with
+  // either a long file name or a short one; a short name leaves the least
+  // room for the private temporary name beside it.
   const root = realpathSync(current.root);
-  const pathOf = (bytes: number) => {
-    let folder = join(root, `len-${bytes}`);
-    while (Buffer.byteLength(folder) + 1 + 120 < bytes) folder = join(folder, "d".repeat(100));
-    const path = join(folder, "f".repeat(bytes - Buffer.byteLength(folder) - 1));
+  const pathOf = (bytes: number, name?: string) => {
+    let folder = join(root, `len-${bytes}-${name ? "short" : "long"}`);
+    const nameBytes = name ? Buffer.byteLength(name) : 20;
+    while (Buffer.byteLength(folder) + 1 + 100 + 1 + nameBytes <= bytes) folder = join(folder, "d".repeat(100));
+    const filler = bytes - Buffer.byteLength(folder) - 1 - nameBytes - 1;
+    if (filler > 0) folder = join(folder, "d".repeat(filler));
+    const path = name ? join(folder, name) : join(folder, "f".repeat(bytes - Buffer.byteLength(folder) - 1));
     expect(Buffer.byteLength(path)).toBe(bytes);
     return path;
   };
-  const atLimit = pathOf(SQLITE_PATH_LIMIT);
-  process.env[CREDENTIAL_LOCK_FILE_ENV] = atLimit;
-  expect((await attempt(5000)).ran).toBe(true);
-  const over = pathOf(SQLITE_PATH_LIMIT + 1);
-  process.env[CREDENTIAL_LOCK_FILE_ENV] = over;
-  const result = await attempt(5000);
-  expect({ ran: result.ran, fast: result.elapsedMs < 1000 }).toEqual({ ran: false, fast: true });
-  expect(result.message).toBe(`Cannot save credential in the OS secure store. The lock path ${displayed(over)} is too long. Set SCHWAY_CREDENTIAL_LOCK_FILE to a shorter absolute path, then retry. No credential was changed.`);
-  expect(existsSync(over)).toBe(false);
+  for (const name of [undefined, "credential.lock"]) {
+    const atLimit = pathOf(SQLITE_PATH_LIMIT, name);
+    process.env[CREDENTIAL_LOCK_FILE_ENV] = atLimit;
+    const locked = await attempt(5000);
+    expect({ name, ran: locked.ran, message: locked.message }).toEqual({ name, ran: true, message: "" });
+    expect(readdirSync(dirname(atLimit))).toEqual([basename(atLimit)]);
+    const over = pathOf(SQLITE_PATH_LIMIT + 1, name);
+    process.env[CREDENTIAL_LOCK_FILE_ENV] = over;
+    const result = await attempt(5000);
+    expect({ name, ran: result.ran, fast: result.elapsedMs < 1000 }).toEqual({ name, ran: false, fast: true });
+    expect(result.message).toBe(`Cannot save credential in the OS secure store. The lock path ${displayed(over)} is too long. Set SCHWAY_CREDENTIAL_LOCK_FILE to a shorter absolute path, then retry. No credential was changed.`);
+    // Not even its parent folders were created.
+    expect(existsSync(join(root, `len-${SQLITE_PATH_LIMIT + 1}-${name ? "short" : "long"}`))).toBe(false);
+  }
 });
+
+test("a restrictive umask still creates a lock file this user can write", async () => {
+  // umask 200 strips the owner's write bit from new files; without a chmod
+  // the lock file would stay 0400 and refuse every later save.
+  mkdirSync(join(current.home, ".schway"), { mode: 0o700 });
+  const first = await attemptInChild("umask-first", CHILD_LOCK_MS, { CONTENDER_UMASK: "200" });
+  expect(first.ok).toBe(true);
+  if (process.platform !== "win32") expect(statSync(current.lock).mode & 0o777).toBe(0o600);
+  const second = await attemptInChild("umask-second", CHILD_LOCK_MS, { CONTENDER_UMASK: "200" });
+  expect(second.ok).toBe(true);
+  expect(readdirSync(join(current.home, ".schway"))).toEqual(["credential-store.lock"]);
+}, MARGIN_TEST_MS);
 
 test("an override spelled exactly as the default stays the default while an older build's folder flickers", async () => {
   // The first stat of the lock path reports it missing, as an older build

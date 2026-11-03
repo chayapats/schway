@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { randomUUID } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { accessSync, chmodSync, closeSync, constants, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
@@ -78,8 +78,8 @@ function resolveLockTarget(): LockTarget | null {
   // and an older Schway creating or removing its folder between the two calls
   // must not turn the default path into a chosen one. A `..` is excluded,
   // because after a linked folder it leads somewhere lexical resolution cannot see.
-  const dotDot = override.split(/[\\/]+/).includes("..");
-  if (!dotDot && resolve(override) === resolve(fallback)) return { path: override, chosen: false, folder: false };
+  const dotDot = (candidate: string) => candidate.split(/[\\/]+/).includes("..");
+  if (!dotDot(override) && !dotDot(fallback) && resolve(override) === resolve(fallback)) return { path: override, chosen: false, folder: false };
   return { path: override, chosen: !sameLocation(override, fallback), folder: false };
 }
 
@@ -218,19 +218,34 @@ function openFailure(path: string): Attempt {
 /** Longest full lock path SQLite opens: its path limit (1024 bytes on macOS, 512 elsewhere) minus 8 for the `-journal` name. */
 const SQLITE_PATH_LIMIT = process.platform === "darwin" ? 1016 : 504;
 
-/** True when SQLite would refuse the lock path as too long once links are resolved. */
+/**
+ * True when SQLite would refuse the lock path as too long once links are
+ * resolved. Works before anything exists: the deepest existing ancestor is
+ * resolved and the missing rest appended, so nothing needs creating first.
+ */
 function tooLongForSqlite(path: string): boolean {
+  const rest: string[] = [];
   let resolved = resolve(path);
-  try {
-    resolved = realpathSync(path);
-  } catch {
+  for (let existing = path; ; existing = dirname(existing)) {
     try {
-      resolved = join(realpathSync(dirname(path)), basename(path));
+      resolved = join(realpathSync(existing), ...rest);
+      break;
     } catch {
-      // Measure the path as given.
+      if (dirname(existing) === existing) break;
+      rest.unshift(basename(existing));
     }
   }
   return Buffer.byteLength(resolved, "utf8") > SQLITE_PATH_LIMIT;
+}
+
+/** Length of the private temporary name; with SQLite's limit 7 bytes under the OS's, any lock path that fits leaves room for it. */
+const TEMPORARY_NAME_BYTES = 8;
+
+/** A private `.cl`-prefixed temporary name of TEMPORARY_NAME_BYTES bytes, unique enough to retry on a rare clash. */
+function temporaryName(): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const suffix = [...randomBytes(TEMPORARY_NAME_BYTES - 3)].map(byte => alphabet[byte % alphabet.length]).join("");
+  return `.cl${suffix}`;
 }
 
 /** Filesystem errors from `link(2)` that mean the filesystem has no hard links. */
@@ -245,10 +260,26 @@ const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"]);
  * SQLite holds a descriptor. Returns null when the file now exists.
  */
 function createLockFile(path: string): Attempt | null {
-  const temporary = join(dirname(path), `.schway-lock-${process.pid}-${randomUUID().slice(0, 8)}`);
+  // The name is no longer than any lock file name that fits SQLite's limit
+  // plus the 7 bytes between that limit and the OS's, so a lock path that
+  // fits never fails here as too long.
+  const temporary = join(dirname(path), temporaryName());
   try {
     closeSync(openSync(temporary, "wx", 0o600));
   } catch (error) {
+    // Includes EEXIST from a clash with another process's name: retried, never removed.
+    return fsFailure(path, error);
+  }
+  try {
+    // The create mode is filtered by the umask; a lock file this user cannot
+    // write would refuse every later save.
+    chmodSync(temporary, 0o600);
+  } catch (error) {
+    try {
+      unlinkSync(temporary);
+    } catch {
+      // A leftover temporary name is harmless.
+    }
     return fsFailure(path, error);
   }
   try {
@@ -328,6 +359,9 @@ function legacyOwnerStopped(directory: string): boolean {
  */
 function tryAcquire(target: LockTarget): Attempt {
   const { path, chosen } = target;
+  // SQLite refuses a full path past its limit with SQLITE_CANTOPEN, so say so
+  // before creating anything, parent folders included.
+  if (tooLongForSqlite(path)) return refuse("too-long");
   // The parent is idempotent shared setup, never the mutex itself. A
   // recursive mkdir reports EEXIST when an ancestor is not a folder and
   // ENOENT under a broken link; the diagnosis names that component.
@@ -336,9 +370,6 @@ function tryAcquire(target: LockTarget): Attempt {
   } catch (error) {
     return fsFailure(path, error);
   }
-  // SQLite refuses a full path past its limit with SQLITE_CANTOPEN, so say so
-  // before creating anything there.
-  if (tooLongForSqlite(path)) return refuse("too-long");
   // Create the lock inode once, privately, and keep it forever. Only SQLite
   // ever holds a descriptor on it: closing any other descriptor for it can
   // drop this process's POSIX locks, in every thread.
