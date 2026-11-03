@@ -11,8 +11,10 @@
 // FIXTURE_WAIT_MS sets the history lock wait (default 1000).
 // FIXTURE_SQLITE=readonly opens every SQLite connection read-only, as a
 // sandbox that denies open(O_RDWR) while access(2) allows it would;
-// `cantopen-after:<ms>` fails every SQLite open with SQLITE_CANTOPEN once the
-// operation has run that long, while access(2) still allows the file.
+// `cantopen` fails every SQLite open with SQLITE_CANTOPEN while access(2)
+// still allows the file, and `cantopen-after-busy` does so only once a
+// statement in this process has failed with SQLITE_BUSY. Each injected
+// failure is reported as `CANTOPEN`.
 // `DONE` reports the favorites a preferences read returned.
 // Any successful descriptor open of a lock file or the preferences database
 // outside SQLite is reported as `FD-OPEN <path>`.
@@ -69,18 +71,26 @@ mock.module("node:fs/promises", () => ({
   },
 }));
 const sqliteFault = process.env.FIXTURE_SQLITE ?? "";
-const cantOpenAfterMs = /^cantopen-after:(\d+)$/.exec(sqliteFault)?.[1];
-/** When the measured operation began; open faults are timed from here. */
-let operationStartedAt = Number.POSITIVE_INFINITY;
+/** Set once a statement has failed with SQLITE_BUSY: another holder was met. */
+let sawBusy = false;
 if (sqliteFault) {
   const RealDatabase = sqlite.Database;
-  /** Database that applies the requested connection fault before opening. */
+  /** Database that applies the requested connection fault before opening and records contention. */
   class FaultyDatabase extends RealDatabase {
     constructor(path: string, options?: ConstructorParameters<typeof RealDatabase>[1]) {
-      if (cantOpenAfterMs !== undefined && Date.now() - operationStartedAt >= Number(cantOpenAfterMs)) {
+      if (sqliteFault === "cantopen" || (sqliteFault === "cantopen-after-busy" && sawBusy)) {
+        say("CANTOPEN");
         throw Object.assign(new Error("unable to open database file"), { code: "SQLITE_CANTOPEN" });
       }
       super(path, sqliteFault === "readonly" ? { readonly: true } : options);
+    }
+    override exec(...args: Parameters<InstanceType<typeof RealDatabase>["exec"]>): ReturnType<InstanceType<typeof RealDatabase>["exec"]> {
+      try {
+        return super.exec(...args);
+      } catch (error) {
+        if (String((error as { code?: unknown })?.code ?? "").startsWith("SQLITE_BUSY")) sawBusy = true;
+        throw error;
+      }
     }
   }
   mock.module("bun:sqlite", () => ({ ...sqlite, Database: FaultyDatabase }));
@@ -133,7 +143,6 @@ if (role === "gc") {
   }
 }
 const startedAt = Date.now();
-operationStartedAt = startedAt;
 try {
   const result = await operation() as { favorites?: unknown } | undefined;
   say(`DONE ${JSON.stringify({ elapsedMs: Date.now() - startedAt, ...(site === "preferences-read" ? { favorites: result?.favorites } : {}) })}`);

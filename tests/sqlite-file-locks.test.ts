@@ -276,8 +276,8 @@ test("history contention that ends on a failed open still reports busy, and a fa
   const holder = holdLock("history");
   let ended: SiteRun;
   try {
-    // Contended for the first 100 ms, then every open fails while access(2) allows the file.
-    ended = await runSite("history", "once", { FIXTURE_WAIT_MS: "300", FIXTURE_SQLITE: "cantopen-after:100" });
+    // The first attempt meets this holder; every open after that fails while access(2) allows the file.
+    ended = await runSite("history", "once", { FIXTURE_WAIT_MS: "300", FIXTURE_SQLITE: "cantopen-after-busy" });
   } finally {
     holder.exec("ROLLBACK");
     holder.close();
@@ -285,9 +285,11 @@ test("history contention that ends on a failed open still reports busy, and a fa
   // The host maps only the busy code to "blocked"; the failed open must not hide the contention.
   expect({ ok: ended.ok, code: ended.code, message: ended.message }).toEqual({ ok: false, code: HISTORY_STORE_BUSY, message: "History store busy" });
   expect(ended.elapsedMs).toBeGreaterThanOrEqual(250);
+  // The fault really followed the contention: the wait ended on failed opens.
+  expect(ended.lines.includes("CANTOPEN")).toBe(true);
   expect(ended.lines.includes("ENTERED")).toBe(false);
   // With no holder, the bound ends with the failure itself, as before.
-  const failed = await runSite("history", "once", { FIXTURE_WAIT_MS: "300", FIXTURE_SQLITE: "cantopen-after:0" });
+  const failed = await runSite("history", "once", { FIXTURE_WAIT_MS: "300", FIXTURE_SQLITE: "cantopen" });
   expect({ ok: failed.ok, code: failed.code }).toEqual({ ok: false, code: "SQLITE_CANTOPEN" });
   expect(failed.lines.includes("ENTERED")).toBe(false);
 }, TEST_TIMEOUT_MS);

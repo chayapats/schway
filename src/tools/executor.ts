@@ -152,7 +152,7 @@ export async function executeToolCall(options: {
   }
   if (capture) {
     try { await options.undo!.settle(options.undoTurn!, capture.path, capture.created); }
-    catch (error) { executed = { ...failure(options.call, `Could not save undo data after changing ${displayToolPath(options.workspace.root, capture.path)}: ${undoFailureReason(error)}`),
+    catch (error) { executed = { ...failure(options.call, `Could not save undo data after changing ${displayToolPath(options.workspace.root, capture.path)}: ${undoFailureReason(error)}.`),
       details: { undoError: hooks ? hooks.safeText(messageOf(error)) : messageOf(error) } }; }
   }
   return hooks ? hooks.finish(options.call, registered.definition, executedArgs, executed, signal!) : executed;
