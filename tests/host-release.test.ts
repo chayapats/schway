@@ -99,6 +99,7 @@ test("packed release artifact installs without private source access and adverti
       snapshotContract: "schway.host.session-snapshot/v1",
       dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1",
       providerRequestsContract: "schway.host.provider-requests/v1",
+      effortContract: "schway.host.effort/v1",
       observedInference: "not-checked",
     });
   } finally {
@@ -256,6 +257,9 @@ test("packed release consumer authorizes each grok dispatch and reads exact prov
       refused: { status: "dispatch-refused", inferences: 1, providerRequests: { initialSends: 1, authRetrySends: 0, renewalRequests: 1 } },
       directRefused: true, renewals: 2,
       readiness: { aborted: "AbortError", timedOut: "TimeoutError" },
+      effort: { contract: "schway.host.effort/v1",
+        support: { levels: ["low", "high"], offSendable: false, default: "high", evidence: "account-catalog" },
+        dispatch: [{ requested: "low", sent: "low" }], attempts: [{ requested: "low", sent: "low", reported: null }], body: "low", invalidPin: "invalid-input" },
     });
   } finally {
     await rm(dir, { recursive: true, force: true });

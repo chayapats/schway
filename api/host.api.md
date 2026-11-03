@@ -228,6 +228,11 @@ export interface ExecutionStat {
 export function hashSnapshotBytes(bytes: Uint8Array): string;
 
 // @public
+export interface HostAttemptEffort extends HostDispatchEffort {
+    readonly reported: string | null;
+}
+
+// @public
 export interface HostAuthBinding {
     checkReadiness(options?: HostReadinessOptions): Promise<HostAuthReadiness>;
     createModel(options?: HostRouteModelOptions): Promise<Model>;
@@ -243,6 +248,7 @@ export interface HostAuthBinding {
 export interface HostAuthDescription {
     // (undocumented)
     readonly credential: HostCredentialReference;
+    readonly effort: HostEffortSupport;
     // (undocumented)
     readonly model: string;
     // (undocumented)
@@ -328,6 +334,7 @@ export interface HostCapabilities {
     // (undocumented)
     readonly deviceSignInContract: "schway.host.device-sign-in/v1";
     readonly dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1";
+    readonly effortContract: "schway.host.effort/v1";
     // (undocumented)
     readonly extensionDiscovery: "disabled-only";
     // (undocumented)
@@ -480,6 +487,7 @@ export type HostDeviceSignInStart = HostDeviceSignIn | HostDeviceSignInFailure |
 export interface HostDispatch {
     readonly bodyBytes: number;
     readonly bodySha256: string;
+    readonly effort: HostDispatchEffort;
     readonly kind: "initial" | "auth-retry";
     readonly model: string;
     readonly provider: string;
@@ -491,7 +499,27 @@ export interface HostDispatch {
 export type HostDispatchAuthorizer = (dispatch: HostDispatch) => void;
 
 // @public
+export interface HostDispatchEffort {
+    readonly requested: ThinkingLevel | null;
+    readonly sent: string | null;
+}
+
+// @public
 export type HostedTool = "web_search";
+
+// @public
+export interface HostEffortPin {
+    readonly level: ThinkingLevel;
+    readonly mode: "exact";
+}
+
+// @public
+export interface HostEffortSupport {
+    readonly default: ThinkingLevel | null;
+    readonly evidence: "account-catalog" | "none";
+    readonly levels: readonly ThinkingLevel[];
+    readonly offSendable: boolean;
+}
 
 // @public
 export interface HostEntryReference {
@@ -593,6 +621,7 @@ export interface HostLimits {
 export interface HostModelChoice {
     // (undocumented)
     readonly contextWindow?: number;
+    readonly effort: HostEffortSupport;
     // (undocumented)
     readonly id: string;
     // (undocumented)
@@ -690,6 +719,8 @@ export interface HostReadinessOptions {
 // @public
 export interface HostRouteModelOptions {
     readonly authorizeDispatch?: HostDispatchAuthorizer;
+    readonly catalogModel?: HostModelChoice;
+    readonly effort?: HostEffortPin;
 }
 
 // @public
@@ -714,6 +745,7 @@ export interface HostRouteRunOptions extends HostRunOptions {
 export interface HostRunAttemptUsage {
     // (undocumented)
     readonly complete: boolean;
+    readonly effort: HostAttemptEffort | null;
     // (undocumented)
     readonly phase: "turn" | "compaction";
     // (undocumented)
@@ -951,6 +983,9 @@ export function isCredentialWriteRefused(error: unknown): error is Error;
 
 // @public
 export function isDispatchRefused(error: unknown): error is Error;
+
+// @public
+export function isRouteControlRefused(error: unknown): error is Error;
 
 // @public
 export type JsonSchema = Record<string, unknown>;

@@ -115,6 +115,7 @@ Two more additive slices remain under `schway.host.release/v2`:
 | --- | --- |
 | `dispatchAuthorizationContract` | `schway.host.dispatch-authorization/v1` |
 | `providerRequestsContract` | `schway.host.provider-requests/v1` |
+| `effortContract` | `schway.host.effort/v1` |
 
 Require both before reporting governed model dispatch as guarded. Pass a
 synchronous `authorizeDispatch` to `submitWithRoute(input, { authorizeDispatch })`
@@ -144,8 +145,15 @@ redirects and report `integration-unavailable` without retrying; Codex and Grok
 token refreshes never follow redirects. A deadline with no unrecovered provider
 failure reports the admission verdict.
 
+To pin effort, list the route's models, pass the chosen `HostModelChoice` as
+`catalogModel` with `effort: { level, mode: "exact" }` to `createModel`, and read
+`HostDispatch.effort` and each attempt's `effort` (`requested`, `sent`,
+`reported`). A pin Schway cannot send exactly rejects `invalid-input` before any
+request. `reported` is provider metadata, not proof of internal computation.
+
 | Seam | Coverage |
 | --- | --- |
 | `tests/host-dispatch-authorization.test.ts` | Fake fetch and stores with promise barriers: Grok 401 resend authorized twice and refusable on the second call with one request sent; revocation during a blocked credential read or renewal; Codex renewal before one authorized send; retries, compaction and compaction inside a route run; refused redirects against a local server; a survived compaction refusal never masking a later failure; echoed refusal wording still retried; exact body hashes; no-authorizer byte identity; secret sentinels; option validation. |
 | `tests/host-provider-requests.test.ts` | Exact counts per run, shared renewal attributed once across lifecycle-sharing hosts, bounded retries, `null` for unobservable models, readiness abort and deadline that never use the late value, and route runs settled by cancel, signal or deadline during blocked admission and post-`max_turns` reads. |
-| `tests/host-release.test.ts` | The packed consumer advertises both capabilities, authorizes the Grok initial and auth-retry sends with matching hashes, refuses the resend, reads exact counts and bounds readiness, importing only `schway/host`. |
+| `tests/host-effort.test.ts` | Listed effort support compared level by level with what the adapter accepts and sends, static description, exact pins rejected before any request when refused or dropped, exact pins sent on turns, compaction and auth-retry resends, requested/sent/reported per send and attempt, conflicting requests refused by identity, unchanged bytes without the options. |
+| `tests/host-release.test.ts` | The packed consumer advertises the capabilities, authorizes the Grok initial and auth-retry sends with matching hashes, refuses the resend, reads exact counts and bounds readiness, and pins an exact effort from a listed model, importing only `schway/host`. |
