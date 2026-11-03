@@ -541,22 +541,32 @@ explicit level, which is what the adapter enforces.
 
 **Use evidence and pin an effort.** Pass a listed choice to
 `createModel({ catalogModel: choice })`, and the adapter accepts that model's
-listed levels. Only a choice Schway listed for the same route and model counts;
-anything else rejects `invalid-input`. Add `effort: { level, mode: "exact" }`
+listed levels. Only a choice Schway listed for the same route, model and
+credential owner counts: the same explicit store, the same OS secure store, or
+the same `HostCredentialLifecycle`, so hosts sharing a lifecycle accept each
+other's choices. Anything else rejects `invalid-input`. Lifecycle logout starts
+a new credential epoch and invalidates choices listed before it; for an
+explicit or OS store, a choice reflects the account at listing time, so re-list
+after sign-in or an account change. A choice works only in the process that
+listed it; re-list in each process. Add `effort: { level, mode: "exact" }`
 (`HostEffortPin`) to send exactly that level on every call the model makes,
 compaction summaries and auth-retry resends included. Codex and Grok send `none`
 for a disabling `off` and the level name otherwise. A pin the adapter would
 refuse, or drop (an `off` without a disable control), rejects `invalid-input` at
 `createModel`, before any request: the choice is decidable from Schway-issued
 evidence before any session work, like other option errors, so it needs no new
-auth status. A request whose own `thinking` differs from the pin is refused
+auth status. Malformed options share that code, so check `effort.levels` and
+`effort.offSendable` before calling `createModel`. A request whose own `thinking` differs from the pin is refused
 before any I/O with an error `isRouteControlRefused` recognizes by identity.
 Each body is also checked before the authorizer runs, so a body without the
 pinned control is refused the same way. These refusals are never retried, and
 `submit` reports their stable message. Pins are opt-in: without `catalogModel`
 and `effort`, request bytes and behavior are unchanged, and the CLI/TUI path is
 unchanged. `submitWithRoute` takes no effort options, because its model has no
-account evidence; use `createModel` with `submit` for pinned work.
+account evidence. Use `createModel` with `submit` for pinned work; `submit`
+results carry the stable refusal message, not `submitWithRoute`'s `auth` detail.
+A wrapper around the route model must pass `call` as-is or spread to keep each
+attempt's `effort` and the run's `providerRequests`.
 
 **Observe what was sent.** Every `HostDispatch` carries `effort`
 (`HostDispatchEffort`): `requested`, the level the call asked for after any pin
@@ -582,7 +592,9 @@ or inference for the description, whether the route sends a provider-enforced
 output cap. Codex reports `{ enforced: false, default: null, maximum: null }`:
 its subscription endpoint rejects output caps, so the adapter never sends one.
 Grok reports `enforced: true` with `default` and `maximum` set to the cap the
-adapter sends when you set none, from Schway's model catalog. This uses the same
+adapter sends when you set none. That value comes from Schway's model catalog;
+xAI models missing from it, which today is all of them, get Schway's
+conservative fallback of 16,384. It is not a provider limit. This uses the same
 listing surface as effort support, so one read covers both.
 
 **Set and require a cap.** `createModel({ maxOutputTokens })` sends exactly that
@@ -590,12 +602,16 @@ cap on every call, compaction summaries and auth-retry resends included. It must
 be a positive safe integer at or below `maximum`. `requireOutputCap: true` makes
 every call carry a provider-enforced cap. On a route that sends no cap, either
 option rejects `invalid-input` at `createModel`, before any request; out-of-range
-values reject the same way. Each body is checked before the authorizer runs, and
+values reject the same way. Malformed options share `invalid-input`, so check
+`outputCap.enforced` and `outputCap.maximum` first. Each body is checked before the authorizer runs, and
 a body without the required cap is refused with an error `isRouteControlRefused`
 recognizes. Without these options, request bytes are unchanged, and the CLI/TUI
 path is unchanged. `submitWithRoute` takes no cap options; it keeps the route
-default, which `HostDispatch.outputCap` reports. Use the #444 authorizer for a
-call-count ceiling.
+default, which `HostDispatch.outputCap` reports. Capped work uses `createModel`
+with `submit`, so its results carry `submit`'s error message rather than
+`submitWithRoute`'s `auth` detail. A wrapper must pass `call` as-is or spread to
+keep each attempt's `outputCap`. Use the #444 authorizer for a call-count
+ceiling.
 
 **Observe what was sent.** Every `HostDispatch` carries `outputCap: { sent }`
 (`HostDispatchOutputCap`), the exact `max_output_tokens` value in the body, or

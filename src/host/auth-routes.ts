@@ -3,7 +3,7 @@ import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, 
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 import { dispatchRouteModel, routeModelOptions, type HostRouteModelOptions, type RouteControls } from "./dispatch.ts";
 import { catalogCapability, effortSupport, exactEffort, outputCapSupport, routeOutputCap, type HostEffortSupport, type HostOutputCapSupport } from "./route-capabilities.ts";
-import { hasDispatchRefusal, hasRedirectRefusal } from "../model/dispatch.ts";
+import { hasDispatchRefusal, hasRedirectRefusal, routeControlRefusal } from "../model/dispatch.ts";
 import { HostError } from "./index.ts";
 
 export { isCleanupUncertain, isCredentialWriteRefused };
@@ -156,6 +156,15 @@ export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescrip
   const valid = validateAuthSelection(selection);
   return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), supported: true as const,
     effort: effortSupport(valid.route, valid.model, null), outputCap: outputCapSupport(valid.route, valid.model) };
+}
+
+// The process's OS secure store is one owner for every selection that names no store or lifecycle.
+const NATIVE_OWNER: object = Object.freeze({});
+
+/** Identity of the credentials a selection reads: a lifecycle's current route store (replaced on logout), the explicit store, or the OS store. @internal */
+export function credentialOwner(selection: HostAuthSelection): object {
+  if (selection.lifecycle) return credentialLifecycleStore(selection.lifecycle, selection.route);
+  return selection.store ?? NATIVE_OWNER;
 }
 
 const defaultNativeStores = new WeakMap<object, CredentialStore>();
@@ -349,7 +358,7 @@ export async function createAuthRouteModel(selection: HostAuthSelection, options
 export async function createAuthRouteModelForRun(selection: HostAuthSelection, admitted?: CredentialLifecycleLease, options: HostRouteModelOptions = {}): Promise<Model> {
   const valid = validateAuthSelection(selection);
   // Route evidence and pins are settled before any store, adapter or network access; mismatches reject invalid-input.
-  const capability = options.catalogModel !== undefined ? catalogCapability(options.catalogModel, valid.route, valid.model) : undefined;
+  const capability = options.catalogModel !== undefined ? catalogCapability(options.catalogModel, valid.route, valid.model, credentialOwner(valid)) : undefined;
   const outputCap = routeOutputCap(valid.route, valid.model, options.maxOutputTokens, options.requireOutputCap === true);
   const controls: RouteControls = { ...(options.effort ? { effort: exactEffort(valid.route, valid.model, capability ?? null, options.effort) } : {}),
     ...(outputCap ? { outputCap } : {}) };
@@ -400,6 +409,9 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
     return { ...base, status: "dispatch-refused",
       nextAction: "The embedding application refused a provider request. The refused request was not sent. Retry the turn after the application allows it." };
   }
+  // Pinned effort or a required cap could not be sent exactly for this model; its stable message names the next step.
+  const controlRefusal = routeControlRefusal(error);
+  if (controlRefusal) return { ...base, status: "model-unavailable", nextAction: controlRefusal.message };
   if (isCredentialWriteRefused(error)) {
     // An uncertain cleanup never claims a clean fence: the late value may
     // still be visible, so the guidance says verify instead of retrying.

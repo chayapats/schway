@@ -573,3 +573,26 @@ test("a deadline that lands after a refused redirect keeps the redirect guidance
     } finally { server.stop(true); }
   });
 });
+
+test("a deadline that lands after a dispatch refusal keeps the refusal status", async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore(); await seed(store, "codex");
+    const wire = transport("codex");
+    const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch: wire.fetch }));
+    const session = await host.createSession();
+    // An embedder clock fires the deadline once the refused attempt is reported, before the run settles.
+    const fire = Promise.withResolvers<void>();
+    const clock = { now: () => Date.now(), sleep: (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+      if (ms < 60_000) { resolve(); return; }
+      void fire.promise.then(() => resolve());
+      signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }) };
+    const run = await session.submitWithRoute({ text: "refused at deadline" }, { clock, authorizeDispatch: () => { throw new Error("over budget"); },
+      onProgress: event => { if (event.type === "usage") fire.resolve(); } });
+    expect(run.outcome).toBe("limit_exceeded");
+    expect(wire.log).toHaveLength(0);
+    if (!("auth" in run)) throw new Error("expected auth detail");
+    expect(run.auth.status).toBe("dispatch-refused");
+    await session.close(); await host.close();
+  });
+});

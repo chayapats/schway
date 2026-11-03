@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { containsNoSecrets, createHost, describeAuthRoute, hostCapabilities, HostError, isRouteControlRefused, listRouteModels,
+import { containsNoSecrets, createHost, createHostCredentialLifecycle, describeAuthRoute, hostCapabilities, HostError, isRouteControlRefused, listRouteModels,
   type HostDispatch, type HostModelChoice, type HostOptions, type HostRunAttemptUsage, type Model, type ThinkingLevel } from "schway/host";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, type CredentialStore } from "../src/auth/store.ts";
 import { THINKING_LEVELS } from "../src/model/model.ts";
@@ -34,7 +34,7 @@ async function seededStore(route: Route): Promise<CredentialStore> {
 /** Catalog rows: Codex lists none/low/high with default low; xAI lists low/high without off, default high. */
 function catalog(route: Route): Response {
   return route === "codex"
-    ? Response.json({ models: [{ slug: MODEL.codex, visibility: "list", supported_reasoning_levels: [{ effort: "none" }, { effort: "low" }, { effort: "high" }], default_reasoning_effort: "low" }] })
+    ? Response.json({ models: [{ slug: MODEL.codex, visibility: "list", supported_reasoning_levels: [{ effort: "none" }, { effort: "low" }, { effort: "high" }], default_reasoning_level: "low" }] })
     : Response.json({ data: [{ id: MODEL.grok, supported_reasoning_levels: ["low", "high"], default_reasoning_effort: "high" }] });
 }
 
@@ -264,5 +264,119 @@ test("listed evidence without a pin or requested thinking leaves request bytes u
     expect(wire.bodies[1]).toBe(wire.bodies[0]!);
     expect(wire.sentEffort()).toEqual([null, null]);
     await host.close();
+  });
+});
+
+/** Transport whose catalog GET returns the given rows; inference bodies are recorded. */
+function rowsTransport(route: Route, rows: unknown[]) {
+  const bodies: string[] = [];
+  const fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    if (init?.method === "GET") return Response.json(route === "codex" ? { models: rows } : { data: rows });
+    bodies.push(typeof init?.body === "string" ? init.body : "");
+    return answer(route);
+  }) as never;
+  return { fetch, bodies };
+}
+
+test("a grok row listing no efforts accepts off only as a no-op, exactly as the CLI adapter does", async () => {
+  await withTempDir(async dir => {
+    const store = await seededStore("grok");
+    const wire = rowsTransport("grok", [{ id: MODEL.grok }]);
+    const listing = await listRouteModels({ route: "grok", store, fetch: wire.fetch });
+    if (listing.status !== "listed") throw new Error("expected listing");
+    const choice = listing.models[0]!;
+    expect(choice.effort).toEqual({ levels: ["off"], offSendable: false, default: null, evidence: "account-catalog" });
+    const host = await createHost(await options(dir, { route: "grok", model: MODEL.grok, store, fetch: wire.fetch }));
+    await expect(host.auth!.createModel({ catalogModel: choice, effort: { level: "off", mode: "exact" } })).rejects.toMatchObject({ code: "invalid-input" });
+    await drain(await host.auth!.createModel({ catalogModel: choice }), "off");
+    // The CLI builds the same capability with the shared xAI builder; neither sends a disable control.
+    const { createXaiModel } = await import("../src/model/providers/xai.ts");
+    const { xaiModelCapabilities } = await import("../src/model/model-list.ts");
+    const cli = createXaiModel({ apiKey: "cli-key", authRoute: "grok", model: MODEL.grok, modelCapability: xaiModelCapabilities([{ id: MODEL.grok }], "grok")[0], fetch: wire.fetch });
+    await drain(cli, "off");
+    expect(wire.bodies).toHaveLength(2);
+    for (const body of wire.bodies) expect((JSON.parse(body) as { reasoning?: unknown }).reasoning).toBeUndefined();
+    await host.close();
+  });
+});
+
+test("each route's default comes from its own catalog field, as the adapters parse it", async () => {
+  const codexStore = await seededStore("codex"), grokStore = await seededStore("grok");
+  const codex = await listRouteModels({ route: "codex", store: codexStore, fetch: rowsTransport("codex", [
+    { slug: "codex-level", visibility: "list", supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }], default_reasoning_level: "high" },
+    { slug: "codex-xai-field", visibility: "list", supported_reasoning_levels: [{ effort: "low" }, { effort: "high" }], default_reasoning_effort: "high" },
+  ]).fetch });
+  const grok = await listRouteModels({ route: "grok", store: grokStore, fetch: rowsTransport("grok", [
+    { id: "grok-4.7", supported_reasoning_levels: ["low", "high"], default_reasoning_effort: "medium" },
+  ]).fetch });
+  if (codex.status !== "listed" || grok.status !== "listed") throw new Error("expected listings");
+  expect(codex.models.find(model => model.id === "codex-level")!.effort.default).toBe("high");
+  expect(codex.models.find(model => model.id === "codex-xai-field")!.effort.default).toBeNull();
+  // xAI keeps an advertised default even when it is not a listed level, as its shared builder does.
+  expect(grok.models[0]!.effort).toMatchObject({ levels: ["low", "high"], default: "medium" });
+});
+
+test("listed evidence binds to the credential owner that listed it", async () => {
+  await withTempDir(async dir => {
+    const rows = [{ id: MODEL.grok, supported_reasoning_levels: ["low", "high"] }];
+    const storeA = await seededStore("grok"), storeB = await seededStore("grok");
+    const choiceA = (await listRouteModels({ route: "grok", store: storeA, fetch: rowsTransport("grok", rows).fetch }));
+    if (choiceA.status !== "listed") throw new Error("expected listing");
+    const wire = rowsTransport("grok", rows);
+    const hostB = await createHost(await options(join(dir, "b"), { route: "grok", model: MODEL.grok, store: storeB, fetch: wire.fetch }));
+    // Another account's listing is not evidence for this host's model.
+    await expect(hostB.auth!.createModel({ catalogModel: choiceA.models[0]!, effort: { level: "high", mode: "exact" } })).rejects.toMatchObject({ code: "invalid-input" });
+    expect(wire.bodies).toHaveLength(0);
+    await hostB.close();
+  });
+});
+
+test("hosts sharing one lifecycle accept each other's listing until logout replaces it", async () => {
+  await withTempDir(async dir => {
+    const base = await seededStore("grok");
+    const lifecycle = createHostCredentialLifecycle({ store: base });
+    const wire = rowsTransport("grok", [{ id: MODEL.grok, supported_reasoning_levels: ["low", "high"] }]);
+    const listing = await listRouteModels({ route: "grok", lifecycle, fetch: wire.fetch });
+    if (listing.status !== "listed") throw new Error("expected listing");
+    const choice = listing.models[0]!;
+    const first = await createHost(await options(join(dir, "one"), { route: "grok", model: MODEL.grok, lifecycle, fetch: wire.fetch }));
+    const second = await createHost(await options(join(dir, "two"), { route: "grok", model: MODEL.grok, lifecycle, fetch: wire.fetch }));
+    await drain(await first.auth!.createModel({ catalogModel: choice, effort: { level: "high", mode: "exact" } }));
+    await drain(await second.auth!.createModel({ catalogModel: choice, effort: { level: "high", mode: "exact" } }));
+    expect(wire.bodies.map(body => (JSON.parse(body) as { reasoning?: { effort?: string } }).reasoning?.effort)).toEqual(["high", "high"]);
+    // Logout starts a new credential epoch, so evidence listed before it no longer applies.
+    await lifecycle.logout("grok");
+    await expect(second.auth!.createModel({ catalogModel: choice })).rejects.toMatchObject({ code: "invalid-input" });
+    await first.close(); await second.close(); await lifecycle.close();
+  });
+});
+
+test("send controls are read from the exact bytes", async () => {
+  const { controlsFromBody } = await import("../src/model/dispatch.ts");
+  const body = JSON.stringify({ reasoning: { effort: "high" }, max_output_tokens: 512 });
+  expect(controlsFromBody(body)).toEqual({ effort: "high", outputCap: 512 });
+  expect(controlsFromBody(new TextEncoder().encode(body))).toEqual({ effort: "high", outputCap: 512 });
+  for (const unreadable of ["not json", "[1]", undefined, 42]) expect(controlsFromBody(unreadable)).toEqual({ effort: null, outputCap: null });
+});
+
+test("submit reports a route-control refusal that ends overflow recovery, not the overflow consequence", async () => {
+  await withTempDir(async dir => {
+    const store = await seededStore("codex");
+    const wire = transport("codex", { inference: [() => new Response('{"error":{"code":"context_length_exceeded"}}', { status: 400 })] });
+    const choice = await listed("codex", store, wire.fetch);
+    const host = await createHost(await options(dir, { route: "codex", model: MODEL.codex, store, fetch: wire.fetch }));
+    const session = await host.createSession();
+    for (let i = 0; i < 12; i++) await session.submit({ text: `retained ${i}` }, createScriptedModel({ text: "retained output" }));
+    const pinned = await host.auth!.createModel({ catalogModel: choice, effort: { level: "high", mode: "exact" } });
+    // The turn sends and overflows; the recovery compaction then asks for a conflicting effort and is refused.
+    let calls = 0;
+    const wrapper: Model = { provider: pinned.provider, id: pinned.id, stream: (request, call) => pinned.stream(++calls === 2 ? { ...request, thinking: "low" } : request, call) };
+    const run = await session.submit({ text: "overflowing turn" }, wrapper, { clock: { now: () => Date.now(), sleep: (ms: number, signal?: AbortSignal) => ms < 60_000 ? Promise.resolve()
+      : new Promise<void>((_resolve, reject) => signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true })) } });
+    expect(run.outcome).toBe("error");
+    if (run.outcome !== "error") throw new Error("expected error");
+    expect(run.error.message).toBe("The request asked for a reasoning effort other than the model's pinned effort, so it was not sent. Leave the request's thinking unset or match the pin.");
+    expect(wire.bodies).toHaveLength(1);
+    await session.close(); await host.close();
   });
 });

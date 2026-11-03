@@ -50,17 +50,18 @@ export interface HostEffortPin {
   readonly mode: "exact";
 }
 
-const evidence = new WeakMap<object, { readonly route: HostAuthRoute; readonly capability: ModelCapability }>();
+const evidence = new WeakMap<object, { readonly route: HostAuthRoute; readonly owner: object; readonly capability: ModelCapability }>();
 
-/** Remember the account capability behind one listed choice, so only Schway-issued evidence widens a model. @internal */
-export function registerCatalogEvidence(choice: object, route: HostAuthRoute, capability: ModelCapability): void {
-  evidence.set(choice, { route, capability: structuredClone(capability) });
+/** Remember the account capability behind one listed choice and the credential owner that listed it. @internal */
+export function registerCatalogEvidence(choice: object, route: HostAuthRoute, owner: object, capability: ModelCapability): void {
+  evidence.set(choice, { route, owner, capability: structuredClone(capability) });
 }
 
-/** Return the capability behind a listed choice for exactly this route and model; anything else rejects `invalid-input`. @internal */
-export function catalogCapability(choice: unknown, route: HostAuthRoute, model: string): ModelCapability {
+/** Return the capability behind a choice listed for this route, model and credential owner; anything else rejects `invalid-input`. @internal */
+export function catalogCapability(choice: unknown, route: HostAuthRoute, model: string, owner: object): ModelCapability {
   const found = typeof choice === "object" && choice !== null ? evidence.get(choice) : undefined;
-  if (!found || found.route !== route || found.capability.id !== model) throw new HostError("invalid-input");
+  // Another account's listing, or a lifecycle route store that logout has replaced, is not evidence for this model.
+  if (!found || found.route !== route || found.owner !== owner || found.capability.id !== model) throw new HostError("invalid-input");
   return structuredClone(found.capability);
 }
 

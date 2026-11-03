@@ -1,8 +1,8 @@
-import { checkAuthReadiness, classifyAuthError, credentialReferenceForRoute, effectiveStore, validateAuthSelection,
+import { checkAuthReadiness, classifyAuthError, credentialOwner, credentialReferenceForRoute, effectiveStore, validateAuthSelection,
   type HostAuthRoute, type HostAuthSelection, type HostAuthStatusCode } from "./auth-routes.ts";
 import { credentialWriteRefusedError } from "../auth/store.ts";
 import type { ModelCapability } from "../model/catalog.ts";
-import type { ListedModel } from "../model/model-list.ts";
+import { codexModelCapabilities, xaiModelCapabilities, type ListedModel } from "../model/model-list.ts";
 import { effortSupport, outputCapSupport, registerCatalogEvidence, type HostEffortSupport, type HostOutputCapSupport } from "./route-capabilities.ts";
 
 /** One selectable account model with the shared route recommendation, observed context limit and exact effort support. */
@@ -16,20 +16,14 @@ export interface HostModelChoice {
   readonly outputCap: HostOutputCapSupport;
 }
 
-/** Route capability for one listed model, built the way the adapter's own catalog path builds it. */
+/** Route capability for one listed model, from the same shared builders the adapters' catalog paths use. */
 function listedCapability(route: HostAuthRoute, model: ListedModel): ModelCapability {
-  const supportedThinking = model.supportedThinking ?? (route === "grok" ? ["off"] as const : []);
-  return { id: model.id, authRoute: route, supportedThinking,
-    ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
-    ...(model.maxOutput !== undefined ? { maxOutput: model.maxOutput } : {}),
-    ...(model.defaultThinking !== undefined && supportedThinking.includes(model.defaultThinking) ? { defaultThinking: model.defaultThinking } : {}),
-    // xAI lists off only when it can send the disable control; OpenAI's policy derives that from the listed levels.
-    ...(route === "grok" && supportedThinking.includes("off") ? { supportsDisabling: true } : {}) };
+  return route === "codex" ? codexModelCapabilities([model])[0]! : xaiModelCapabilities([model], "grok")[0]!;
 }
 
 /** A bounded account catalog or safe route failure, with no credential or provider-body payloads. */
 export type HostRouteModels =
-  | { readonly status: "listed"; readonly route: HostAuthRoute; readonly models: readonly HostModelChoice[]; readonly containsNoSecrets: true }
+  | { readonly status: "listed"; readonly route: HostAuthRoute; readonly models: HostModelChoice[]; readonly containsNoSecrets: true }
   | { readonly status: Exclude<HostAuthStatusCode, "configured-unverified">; readonly route: HostAuthRoute; readonly nextAction: string; readonly containsNoSecrets: true };
 
 /** List at most 64 selectable account models without inference, credential renewal or credential writes. */
@@ -88,7 +82,8 @@ export async function listRouteModels(selection: Omit<HostAuthSelection, "model"
   const recommended = recommendedListedModel(valid.route, models);
   // Keep the shared recommendation even when it lies beyond the 64-row bound.
   const bounded = [models.find(model => model.id === recommended)!, ...models.filter(model => model.id !== recommended)].slice(0, 64);
-  return { status: "listed", route: valid.route, containsNoSecrets: true, models: Object.freeze(bounded.map(model => {
+  // A fresh array of frozen choices: callers may sort or filter the list, never edit a choice.
+  return { status: "listed", route: valid.route, containsNoSecrets: true, models: bounded.map(model => {
     const source = listed.find(entry => entry.id === model.id) ?? { id: model.id };
     const capability = listedCapability(valid.route, source);
     const choice: HostModelChoice = Object.freeze({
@@ -98,7 +93,7 @@ export async function listRouteModels(selection: Omit<HostAuthSelection, "model"
       outputCap: outputCapSupport(valid.route, model.id),
     });
     // Only a choice Schway listed can widen a route model; the capability stays private.
-    registerCatalogEvidence(choice, valid.route, capability);
+    registerCatalogEvidence(choice, valid.route, credentialOwner(valid), capability);
     return choice;
-  })) };
+  }) };
 }

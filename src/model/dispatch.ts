@@ -32,6 +32,18 @@ export function sentControls(body: Record<string, unknown>): ProviderSendControl
   return { effort: typeof effort === "string" ? effort : null, outputCap: typeof cap === "number" && Number.isSafeInteger(cap) ? cap : null };
 }
 
+/** Read the controls from the exact request bytes, the same bytes the dispatch hash covers; unreadable bytes carry none. @internal */
+export function controlsFromBody(body: unknown): ProviderSendControls {
+  let text: string | undefined;
+  if (typeof body === "string") text = body;
+  else if (body instanceof Uint8Array) text = new TextDecoder().decode(body);
+  if (text === undefined) return { effort: null, outputCap: null };
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? sentControls(parsed as Record<string, unknown>) : { effort: null, outputCap: null };
+  } catch { return { effort: null, outputCap: null }; }
+}
+
 /** Effort a terminal Responses object states it applied; null when it names none, never inferred from the request. @internal */
 export function reportedEffort(response: unknown): string | null {
   const reasoning = typeof response === "object" && response !== null ? (response as { reasoning?: unknown }).reasoning : undefined;
@@ -103,6 +115,11 @@ export function routeControlRefusedError(message: string): Error {
 /** True only for a route-control refusal error object Schway threw, not its `cause` wrappers; text never matches. */
 export function isRouteControlRefused(error: unknown): error is Error {
   return error instanceof Error && controlRefusals.has(error);
+}
+
+/** The route-control refusal Schway threw, found on the error or along its `cause` links; text never matches. @internal */
+export function routeControlRefusal(error: unknown): Error | undefined {
+  return causeChain(error).find(isRouteControlRefused) as Error | undefined;
 }
 
 /** True when the error or an error it wraps as `cause` is a dispatch or route-control refusal; neither is ever retried. @internal */

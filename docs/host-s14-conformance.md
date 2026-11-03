@@ -146,18 +146,23 @@ redirects and report `integration-unavailable` without retrying; Codex and Grok
 token refreshes never follow redirects. A deadline with no unrecovered provider
 failure reports the admission verdict.
 
-To pin effort, list the route's models, pass the chosen `HostModelChoice` as
-`catalogModel` with `effort: { level, mode: "exact" }` to `createModel`, and read
+To pin effort, list the route's models in the same process and with the same
+store or lifecycle, pass the chosen `HostModelChoice` as `catalogModel` with
+`effort: { level, mode: "exact" }` to `createModel`, and read
 `HostDispatch.effort` and each attempt's `effort` (`requested`, `sent`,
-`reported`). A pin Schway cannot send exactly rejects `invalid-input` before any
-request. `reported` is provider metadata, not proof of internal computation.
+`reported`). Check `effort.levels` and `effort.offSendable` first: a pin Schway
+cannot send exactly rejects `invalid-input` before any request, the same code as
+malformed options. Re-list after logout, sign-in or an account change. Use
+`createModel` with `submit`, not `submitWithRoute`, for pinned or capped work.
+`reported` is provider metadata, not proof of internal computation.
 
 To bound output, read `outputCap.enforced` from the route description or a listed
 model. On Grok, pass `maxOutputTokens` (at most `outputCap.maximum`) and
 `requireOutputCap: true` to `createModel`; on Codex, `requireOutputCap` rejects
 `invalid-input` because the endpoint accepts no cap. Read `HostDispatch.outputCap`
-and each attempt's `outputCap.sent`. Caps are not monetary bounds; subscription
-spend stays unknown.
+and each attempt's `outputCap.sent`. Grok's 16,384 default is Schway's
+conservative catalog fallback, not a provider limit. Caps are not monetary
+bounds; subscription spend stays unknown.
 
 | Seam | Coverage |
 | --- | --- |

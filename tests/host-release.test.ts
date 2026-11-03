@@ -364,9 +364,9 @@ test("packed catalog consumer uses only the public API and selected subscription
         `await Bun.plugin({name:'catalog-guard',setup(builder){
           builder.onLoad({filter:/(?:tui|@opentui|providers[/\\\\](?:${unselected}|xai\\.ts|openai\\.ts|openai-compatible))/},()=>{throw new Error('catalog loaded unrelated runtime');});
         }});`);
-      // Rows without reasoning metadata: Codex accepts no explicit effort and sends no cap; Grok accepts off and sends its default cap.
+      // Rows without reasoning metadata: Codex accepts no explicit effort and sends no cap; Grok accepts off only as a no-op and sends its default cap.
       const effort = route === "codex" ? { levels: [], offSendable: false, default: null, evidence: "account-catalog" }
-        : { levels: ["off"], offSendable: true, default: null, evidence: "account-catalog" };
+        : { levels: ["off"], offSendable: false, default: null, evidence: "account-catalog" };
       const outputCap = route === "codex" ? { enforced: false, default: null, maximum: null } : { enforced: true, default: 16384, maximum: 16384 };
       expect(result).toEqual({ result: { route, status: "listed", containsNoSecrets: true,
         models: [{ id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: true, contextWindow: 64000, effort, outputCap }] }, requests: 1, writes: 0 });
