@@ -1,9 +1,12 @@
 // One Schway-mediated credential mutation per process, reported as stdout lines.
 // Roles: `hold` enters the lock and never leaves (the parent SIGKILLs it to model
 // a crashed holder); `once` enters, marks a shared occupancy directory, waits
-// CONTENDER_HOLD_MS, then leaves. Any removal of the lock path is reported, and
+// CONTENDER_HOLD_MS, then leaves. `STARTED` is reported just before the mutation
+// begins polling the lock. Any removal of the lock path is reported, and
 // CONTENDER_BREAK_DELAY_MS stalls this process's first removal so a contender
 // acting on an earlier stale read is preempted inside its read-then-remove window.
+// CONTENDER_LOCK_TIMEOUT_MS (default 30 s) widens the native store's 2 s lock
+// bound, so machine load turns into a longer wait rather than a refusal.
 import { mock } from "bun:test";
 import * as filesystem from "node:fs";
 
@@ -13,6 +16,7 @@ const role = process.argv[2];
 const occupancy = process.env.CONTENDER_OCCUPANCY ?? "";
 const holdMs = Number(process.env.CONTENDER_HOLD_MS ?? "0");
 const breakDelayMs = Number(process.env.CONTENDER_BREAK_DELAY_MS ?? "0");
+const lockTimeoutMs = Number(process.env.CONTENDER_LOCK_TIMEOUT_MS ?? "30000");
 /** Write one synchronous protocol line, so a later SIGKILL cannot lose it. */
 const say = (event: string, detail = "") => real.writeSync(1, `${event} ${name}${detail ? ` ${detail}` : ""}\n`);
 
@@ -54,6 +58,8 @@ const backend = {
   async set() {
     if (role === "hold") {
       say("ENTERED");
+      // Stay inside the lock until SIGKILL; the interval keeps the event loop alive.
+      setInterval(() => {}, 60_000);
       await new Promise(() => {});
     }
     let marked = false;
@@ -72,7 +78,9 @@ const backend = {
 };
 
 try {
-  await createNativeCredentialStore(backend as never).set({ account: "lock-fixture", label: "Lock fixture" }, "value");
+  const store = createNativeCredentialStore(backend as never, { lockTimeoutMs });
+  say("STARTED");
+  await store.set({ account: "lock-fixture", label: "Lock fixture" }, "value");
   say("DONE");
   process.exit(0);
 } catch (error) {

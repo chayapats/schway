@@ -121,18 +121,44 @@ export function isCleanupUncertain(error: unknown): boolean {
   return /credential cleanup (could not be verified|uncertain)/i.test(error.message);
 }
 
+/** Sanitized credential-lock failure for a save or delete that never ran; `reason` names the cause and next action. */
+export function credentialLockError(operation: "save" | "delete", reason: string): Error {
+  const error = new Error(`Cannot ${operation} credential in the OS secure store. ${reason} No credential was changed.`);
+  (error as { code?: unknown }).code = "credential-lock-unavailable";
+  return error;
+}
+
+/** True when an error is a credential-lock failure from `credentialLockError`, whose message is already sanitized. */
+export function isCredentialLockError(error: unknown): error is Error {
+  return error instanceof Error && (error as { code?: unknown }).code === "credential-lock-unavailable";
+}
+
+/** User-facing text for a failed save or delete: a lock failure keeps its specific next action, anything else gets generic store guidance. */
+export function credentialStoreFailure(operation: "save" | "delete", error: unknown): string {
+  return isCredentialLockError(error) ? error.message : credentialStoreError(operation);
+}
+
 /** Preserve a fence refusal unchanged; convert any other write failure to a sanitized store error.
  * A cleanup-uncertain error is preserved, never sanitized into a clean
  * refusal: callers must be able to tell "maybe still visible" apart from
- * "no credential was changed". */
+ * "no credential was changed". A credential-lock failure is preserved too:
+ * it is already sanitized and names a next action the generic text lacks. */
 export function preserveRefusal(operation: "save" | "delete", error: unknown): Error {
   if (isCredentialWriteRefused(error)) return error;
   if (isCleanupUncertain(error)) return error instanceof Error ? error : new Error(credentialStoreError(operation));
+  if (isCredentialLockError(error)) return error;
   return new Error(credentialStoreError(operation));
 }
 
+/** Native-store construction seams; production callers pass none. */
+export interface NativeCredentialStoreOptions {
+  /** Bounded wait for the cross-process credential lock, defaulting to 2000 ms; tests widen it for load margin. */
+  readonly lockTimeoutMs?: number;
+}
+
 /** Adapt Bun's OS secure storage without exposing native errors or enabling unrestricted access. */
-export function createNativeCredentialStore(native?: typeof Bun.secrets): CredentialStore {
+export function createNativeCredentialStore(native?: typeof Bun.secrets, options: NativeCredentialStoreOptions = {}): CredentialStore {
+  const lock = (operation: "save" | "delete") => ({ operation, ...(options.lockTimeoutMs === undefined ? {} : { timeoutMs: options.lockTimeoutMs }) });
   const address = (identity: CredentialIdentity) => ({ service: "schway", name: identity.account });
   const backend = native ?? Bun.secrets;
   return {
@@ -144,13 +170,13 @@ export function createNativeCredentialStore(native?: typeof Bun.secrets): Creden
       return withCredentialStoreLock(async () => {
         try { await backend.set({ ...address(identity), value }); }
         catch { throw new Error(credentialStoreError("save")); }
-      }, { operation: "save" });
+      }, lock("save"));
     },
     async delete(identity) {
       return withCredentialStoreLock(async () => {
         try { return await backend.delete(address(identity)); }
         catch { throw new Error(credentialStoreError("delete")); }
-      }, { operation: "delete" });
+      }, lock("delete"));
     },
     // Serialized by the cross-process credential-store lock, so every
     // Schway-mediated writer in any local process takes its turn. Writers
@@ -172,7 +198,7 @@ export function createNativeCredentialStore(native?: typeof Bun.secrets): Creden
         } catch {
           throw new Error(credentialStoreError("delete"));
         }
-      }, { operation: "delete" });
+      }, lock("delete"));
     },
   };
 }

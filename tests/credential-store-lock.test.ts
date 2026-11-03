@@ -1,12 +1,23 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { hostname, tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { homedir, hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Subprocess } from "bun";
 import { CREDENTIAL_LOCK_FILE_ENV, credentialStoreLockPath, withCredentialStoreLock } from "../src/auth/store-lock.ts";
+import { credentialLockError, credentialStoreError, credentialStoreFailure, isCredentialLockError, preserveRefusal } from "../src/auth/store.ts";
 import { effectiveStore, isCredentialWriteRefused } from "../src/host/auth-routes.ts";
 
 const CONTENDER = join(import.meta.dir, "fixtures/credential-store-lock/contender.ts");
+
+// Timing margins. Contenders that must eventually succeed get a 30 s lock
+// bound (the fixture default, and MARGIN_LOCK_MS in process) against at most
+// a few 50 ms critical sections, and their tests allow 60 s for process
+// startup. Machine load can therefore only slow them down, never turn a wait
+// into a refusal. Refusal at the real 2 s bound is asserted separately.
+const MARGIN_LOCK_MS = 30_000;
+const MARGIN_TEST_MS = 60_000;
+/** Root bypasses permission bits, so permission-denied cases cannot be staged as root. */
+const RUNS_AS_ROOT = process.getuid?.() === 0;
 
 /** A fixture process reporting `<EVENT> <name>` lines for one Schway-mediated mutation. */
 interface Contender {
@@ -38,7 +49,7 @@ function spawnContender(role: "hold" | "once", name: string, env: Record<string,
   return {
     child,
     lines,
-    async waitFor(match, timeoutMs = 10_000) {
+    async waitFor(match, timeoutMs = 30_000) {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
         const found = lines.find(match);
@@ -93,7 +104,7 @@ afterEach(() => {
 });
 
 /** Native store whose backend counts calls and flags any overlapping write via the shared occupancy marker. */
-async function occupancyStore(): Promise<{ store: import("../src/auth/store.ts").CredentialStore; calls: () => number; overlaps: () => number }> {
+async function occupancyStore(lockTimeoutMs?: number): Promise<{ store: import("../src/auth/store.ts").CredentialStore; calls: () => number; overlaps: () => number }> {
   const { createNativeCredentialStore } = await import("../src/auth/store.ts");
   let calls = 0;
   let overlaps = 0;
@@ -108,16 +119,19 @@ async function occupancyStore(): Promise<{ store: import("../src/auth/store.ts")
     },
     delete: async () => { calls++; return false; },
   };
-  return { store: createNativeCredentialStore(secrets as never), calls: () => calls, overlaps: () => overlaps };
+  return { store: createNativeCredentialStore(secrets as never, lockTimeoutMs === undefined ? {} : { lockTimeoutMs }), calls: () => calls, overlaps: () => overlaps };
 }
 
 /** Run one guarded attempt, reporting whether its work ran, its rejection (null on success) and the elapsed time. */
-async function attempt(timeoutMs: number): Promise<{ ran: boolean; failure: unknown; elapsedMs: number }> {
+async function attempt(timeoutMs: number, operation: "save" | "delete" = "save"): Promise<{ ran: boolean; failure: unknown; message: string; elapsedMs: number }> {
   const startedAt = Date.now();
   let ran = false;
-  const failure = await withCredentialStoreLock(async () => { ran = true; }, { timeoutMs }).then(() => null, (error: unknown) => error);
-  return { ran, failure, elapsedMs: Date.now() - startedAt };
+  const failure = await withCredentialStoreLock(async () => { ran = true; }, { timeoutMs, operation }).then(() => null, (error: unknown) => error);
+  return { ran, failure, message: String((failure as Error | null)?.message ?? ""), elapsedMs: Date.now() - startedAt };
 }
+
+/** Lines reporting a second holder or any removal of the lock path. */
+const violations = (lines: readonly string[]) => lines.filter(line => line.startsWith("OVERLAP") || line.startsWith("REMOVE"));
 
 test("concurrent stale breakers after a crashed holder never yield two holders", async () => {
   const { env } = current;
@@ -147,7 +161,7 @@ test("concurrent stale breakers after a crashed holder never yield two holders",
     await kill(first);
     await kill(second);
   }
-}, 20_000);
+}, MARGIN_TEST_MS);
 
 test("contenders in several processes take turns after a crashed holder", async () => {
   const crashed = spawnContender("hold", "crashed", current.env);
@@ -156,14 +170,14 @@ test("contenders in several processes take turns after a crashed holder", async 
     await crashed.waitFor(line => line === "ENTERED crashed");
     await kill(crashed);
     for (const name of ["a", "b", "c", "d"]) contenders.push(spawnContender("once", name, { ...current.env, CONTENDER_HOLD_MS: "50" }));
-    // An in-process Schway mutation contends with the child processes too.
-    const local = await occupancyStore();
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 5000 && !contenders.some(contender => contender.lines.some(line => line.startsWith("ENTERED")))) await Bun.sleep(5);
+    // An in-process Schway mutation contends with the child processes too,
+    // started once a child is inside so the two actually race.
+    const local = await occupancyStore(MARGIN_LOCK_MS);
+    await Promise.any(contenders.map(contender => contender.waitFor(line => line.startsWith("ENTERED"))));
     await local.store.set({ account: "local", label: "Local" }, "value");
     const exits = await Promise.all(contenders.map(contender => contender.child.exited));
     const lines = contenders.flatMap(contender => contender.lines);
-    expect(lines.filter(line => line.startsWith("OVERLAP") || line.startsWith("REMOVE"))).toEqual([]);
+    expect(violations(lines)).toEqual([]);
     expect(local.overlaps()).toBe(0);
     expect(local.calls()).toBe(1);
     expect(exits).toEqual([0, 0, 0, 0]);
@@ -172,7 +186,38 @@ test("contenders in several processes take turns after a crashed holder", async 
     await kill(crashed);
     for (const contender of contenders) await kill(contender);
   }
-}, 20_000);
+}, MARGIN_TEST_MS);
+
+test("contenders already polling when the holder is SIGKILLed never yield two holders", async () => {
+  const holder = spawnContender("hold", "holder", current.env);
+  const contenders: Contender[] = [];
+  try {
+    await holder.waitFor(line => line === "ENTERED holder");
+    for (const name of ["a", "b", "c", "d"]) contenders.push(spawnContender("once", name, { ...current.env, CONTENDER_HOLD_MS: "50" }));
+    for (const contender of contenders) await contender.waitFor(line => line.startsWith("STARTED"));
+    const local = await occupancyStore(MARGIN_LOCK_MS);
+    const localSet = local.store.set({ account: "local", label: "Local" }, "value");
+    // Every contender is polling against the live holder; let each run many
+    // poll rounds, and confirm none got in while the holder was alive.
+    await Bun.sleep(300);
+    expect(contenders.flatMap(contender => contender.lines).filter(line => line.startsWith("ENTERED"))).toEqual([]);
+    expect(local.calls()).toBe(0);
+    // The kernel releases the lock at once; all five race for it together.
+    await kill(holder);
+    await localSet;
+    const exits = await Promise.all(contenders.map(contender => contender.child.exited));
+    const lines = contenders.flatMap(contender => contender.lines);
+    // The shared occupancy marker admits one holder at a time across all five.
+    expect(violations(lines)).toEqual([]);
+    expect(local.overlaps()).toBe(0);
+    expect(local.calls()).toBe(1);
+    expect(exits).toEqual([0, 0, 0, 0]);
+    expect(lines.filter(line => line.startsWith("DONE")).sort()).toEqual(["DONE a", "DONE b", "DONE c", "DONE d"]);
+  } finally {
+    await kill(holder);
+    for (const contender of contenders) await kill(contender);
+  }
+}, MARGIN_TEST_MS);
 
 test("a holder in another process blocks mutations until the OS releases it on SIGKILL", async () => {
   const holder = spawnContender("hold", "holder", current.env);
@@ -180,11 +225,11 @@ test("a holder in another process blocks mutations until the OS releases it on S
     await holder.waitFor(line => line === "ENTERED holder");
     const blocked = await attempt(200);
     expect(blocked.ran).toBe(false);
-    expect(String((blocked.failure as Error)?.message)).toMatch(/^Cannot save credential in the OS secure store\./);
-    // A real mutation fails closed after its bounded wait without backend contact.
+    expect(blocked.message).toBe(credentialStoreError("save"));
+    // A real mutation fails closed after its default 2 s bound without backend contact.
     const local = await occupancyStore();
     const refused = await local.store.set({ account: "a", label: "a" }, "late").then(() => null, (error: unknown) => error);
-    expect(String((refused as Error)?.message)).toMatch(/^Cannot save credential in the OS secure store\./);
+    expect(String((refused as Error)?.message)).toBe(credentialStoreError("save"));
     expect(local.calls()).toBe(0);
     await kill(holder);
     // No stale verdict or removal: the kernel already dropped the dead holder's lock.
@@ -195,7 +240,7 @@ test("a holder in another process blocks mutations until the OS releases it on S
   } finally {
     await kill(holder);
   }
-}, 20_000);
+}, MARGIN_TEST_MS);
 
 test("concurrent holders serialize through the shared lock", async () => {
   const order: string[] = [];
@@ -209,7 +254,7 @@ test("concurrent holders serialize through the shared lock", async () => {
   await new Promise(resolve => setTimeout(resolve, 25));
   const second = withCredentialStoreLock(async () => {
     order.push("second");
-  });
+  }, { timeoutMs: MARGIN_LOCK_MS });
   await new Promise(resolve => setTimeout(resolve, 25));
   // Second contender waits while the first holds the lock.
   expect(order).toEqual(["first-start"]);
@@ -218,24 +263,46 @@ test("concurrent holders serialize through the shared lock", async () => {
   expect(order).toEqual(["first-start", "first-end", "second"]);
 });
 
-test("an earlier release's lock directory is honored for the bounded wait and never removed", async () => {
-  // Earlier releases used a directory at this path. Neither a missing owner
-  // nor a provably stopped one lets a contender remove it by path.
-  for (const owner of [undefined, { host: hostname(), pid: 2147483647, token: crypto.randomUUID() }]) {
+test("a holder parked on an unreferenced promise keeps the lock through garbage collection", async () => {
+  // Nothing references the holder's pending chain, so only the lock module
+  // keeps its connection alive; finalizing it would silently drop the lock.
+  let entered = false;
+  void withCredentialStoreLock(async () => { entered = true; await new Promise(() => {}); });
+  for (let spin = 0; spin < 200 && !entered; spin++) await Bun.sleep(5);
+  expect(entered).toBe(true);
+  Bun.gc(true);
+  await Bun.sleep(50);
+  Bun.gc(true);
+  const contender = await attempt(200);
+  expect(contender.ran).toBe(false);
+  expect(contender.message).toBe(credentialStoreError("save"));
+});
+
+test("an earlier release's lock directory is never removed, and fails fast only for a provably stopped owner", async () => {
+  const legacyMessage = /^Cannot save credential in the OS secure store\. An older Schway's lock folder is at \S*credential-store\.lock\. Close every older Schway, delete that folder, then retry\. No credential was changed\.$/;
+  const cases = [
+    { name: "stopped", owner: { host: hostname(), pid: 2147483647, token: crypto.randomUUID() }, fast: true },
+    { name: "live", owner: { host: hostname(), pid: process.pid, token: crypto.randomUUID() }, fast: false },
+    { name: "foreign host", owner: { host: `not-${hostname()}`, pid: 2147483647, token: crypto.randomUUID() }, fast: false },
+    { name: "no owner yet", owner: undefined, fast: false },
+  ];
+  for (const { name, owner, fast } of cases) {
     mkdirSync(current.lock, { mode: 0o700, recursive: true });
     if (owner) writeFileSync(join(current.lock, "owner.json"), JSON.stringify(owner));
-    const result = await attempt(100);
-    expect(result.ran).toBe(false);
-    expect(result.elapsedMs).toBeLessThan(5000);
-    expect(String((result.failure as Error)?.message)).toMatch(/^Cannot save credential in the OS secure store\./);
+    const result = await attempt(fast ? 5000 : 300);
+    expect({ name, ran: result.ran }).toEqual({ name, ran: false });
+    expect(result.message).toMatch(legacyMessage);
+    expect(isCredentialLockError(result.failure)).toBe(true);
+    // A stopped owner cannot clear by waiting; an unproven one waits out the bound.
+    if (fast) expect(result.elapsedMs).toBeLessThan(1000);
+    else expect(result.elapsedMs).toBeGreaterThanOrEqual(250);
     expect(statSync(current.lock).isDirectory()).toBe(true);
     if (owner) expect(JSON.parse(readFileSync(join(current.lock, "owner.json"), "utf8"))).toEqual(owner);
-    // The older holder releases its directory; the next mutation proceeds.
     rmSync(current.lock, { recursive: true, force: true });
-    const next = await attempt(1000);
-    expect(next.ran).toBe(true);
-    rmSync(current.lock, { force: true });
   }
+  // The older holder releases its directory; the next mutation proceeds.
+  const next = await attempt(1000);
+  expect(next.ran).toBe(true);
 });
 
 test("once the lock file exists, an earlier release can neither acquire nor break it", async () => {
@@ -252,6 +319,52 @@ test("once the lock file exists, an earlier release can neither acquire nor brea
   expect(statSync(current.lock).ino).toBe(lock.ino);
 });
 
+test.skipIf(RUNS_AS_ROOT)("a lock file this user cannot write fails fast instead of admitting a second holder", async () => {
+  await withCredentialStoreLock(async () => {});
+  // SQLite would open it read-only, and a read-only BEGIN IMMEDIATE excludes nobody.
+  chmodSync(current.lock, 0o400);
+  const result = await attempt(5000);
+  expect(result.ran).toBe(false);
+  expect(result.elapsedMs).toBeLessThan(1000);
+  expect(result.message).toMatch(/^Cannot save credential in the OS secure store\. Schway cannot create or open its lock file at \S+\. Make that location writable for this user, then retry\. No credential was changed\.$/);
+});
+
+test.skipIf(RUNS_AS_ROOT)("a lock directory this user cannot write fails fast", async () => {
+  const locked = join(current.root, "read-only");
+  mkdirSync(locked, { mode: 0o500 });
+  process.env[CREDENTIAL_LOCK_FILE_ENV] = join(locked, "credential.lock");
+  try {
+    const result = await attempt(5000, "delete");
+    expect(result.ran).toBe(false);
+    expect(result.elapsedMs).toBeLessThan(1000);
+    expect(result.message).toMatch(/^Cannot delete credential in the OS secure store\. Schway cannot create or open its lock file at /);
+  } finally {
+    chmodSync(locked, 0o700);
+  }
+});
+
+test("a lock path under a regular file fails fast", async () => {
+  const file = join(current.root, "a-file");
+  writeFileSync(file, "");
+  // Both the direct parent and a deeper ancestor being a regular file are permanent.
+  for (const path of [join(file, "credential.lock"), join(file, "nested", "credential.lock")]) {
+    process.env[CREDENTIAL_LOCK_FILE_ENV] = path;
+    const result = await attempt(5000);
+    expect(result.ran).toBe(false);
+    expect(result.elapsedMs).toBeLessThan(1000);
+    expect(result.message).toMatch(/Schway cannot create or open its lock file at /);
+  }
+});
+
+test("a lock path holding something other than a lock file fails fast with its own next action", async () => {
+  mkdirSync(join(current.home, ".schway"), { recursive: true });
+  writeFileSync(current.lock, "x".repeat(4096));
+  const result = await attempt(5000);
+  expect(result.ran).toBe(false);
+  expect(result.elapsedMs).toBeLessThan(1000);
+  expect(result.message).toMatch(/^Cannot save credential in the OS secure store\. The file at \S+credential-store\.lock is not a Schway lock file\. With no Schway running, delete it, then retry\. No credential was changed\.$/);
+});
+
 test("the lock file defaults to the per-user Schway home and follows an absolute override", async () => {
   const blank = spawnContender("once", "blank", { ...current.env, [CREDENTIAL_LOCK_FILE_ENV]: " " });
   expect(await blank.child.exited).toBe(0);
@@ -262,11 +375,14 @@ test("the lock file defaults to the per-user Schway home and follows an absolute
   expect(await overridden.child.exited).toBe(0);
   expect(statSync(pinned).isFile()).toBe(true);
   expect(existsSync(join(current.home, ".schway", "credential-store.lock"))).toBe(false);
-  expect(credentialStoreLockPath({ HOME: current.home, [CREDENTIAL_LOCK_FILE_ENV]: pinned })).toBe(pinned);
-  expect(credentialStoreLockPath({ [CREDENTIAL_LOCK_FILE_ENV]: "" })).toEndWith(join(".schway", "credential-store.lock"));
-}, 20_000);
+  // In process, the path follows the current environment and home directory.
+  process.env[CREDENTIAL_LOCK_FILE_ENV] = pinned;
+  expect(credentialStoreLockPath()).toBe(pinned);
+  process.env[CREDENTIAL_LOCK_FILE_ENV] = "";
+  expect(credentialStoreLockPath()).toBe(join(homedir(), ".schway", "credential-store.lock"));
+}, MARGIN_TEST_MS);
 
-test("a relative lock-file override fails closed without backend contact", async () => {
+test("a relative lock-file override fails closed at once without backend contact", async () => {
   const cwd = process.cwd();
   const scratch = join(current.root, "cwd");
   mkdirSync(scratch);
@@ -277,7 +393,7 @@ test("a relative lock-file override fails closed without backend contact", async
     const local = await occupancyStore();
     const startedAt = Date.now();
     const refused = await local.store.delete({ account: "a", label: "a" }).then(() => null, (error: unknown) => error);
-    expect(String((refused as Error)?.message)).toMatch(/^Cannot delete credential in the OS secure store\./);
+    expect(String((refused as Error)?.message)).toBe("Cannot delete credential in the OS secure store. SCHWAY_CREDENTIAL_LOCK_FILE must be an absolute path. Set an absolute path or unset it, then retry. No credential was changed.");
     // A misconfiguration refuses at once instead of waiting out the bound.
     expect(Date.now() - startedAt).toBeLessThan(1000);
     expect(local.calls()).toBe(0);
@@ -285,6 +401,23 @@ test("a relative lock-file override fails closed without backend contact", async
   } finally {
     process.chdir(cwd);
   }
+});
+
+test("lock failures keep their next action through store-error sanitizers", async () => {
+  const lockFailure = credentialLockError("delete", "Reason. Action.");
+  expect(preserveRefusal("delete", lockFailure)).toBe(lockFailure);
+  expect(credentialStoreFailure("delete", lockFailure)).toBe(lockFailure.message);
+  // Anything else, including native error text, still becomes generic guidance.
+  expect(preserveRefusal("save", new Error("native keychain detail")).message).toBe(credentialStoreError("save"));
+  expect(credentialStoreFailure("save", new Error("native keychain detail"))).toBe(credentialStoreError("save"));
+  // The API-key removal path reports the lock's next action, not the keychain text.
+  const { removeStoredCredential } = await import("../src/auth/management.ts");
+  const local = await occupancyStore();
+  process.env[CREDENTIAL_LOCK_FILE_ENV] = "relative.lock";
+  const result = await removeStoredCredential({ provider: "openai", store: local.store, env: {} });
+  expect(result.ok).toBe(false);
+  expect(result.message).toMatch(/^Cannot delete credential in the OS secure store\. SCHWAY_CREDENTIAL_LOCK_FILE must be an absolute path\./);
+  expect(local.calls()).toBe(0);
 });
 
 test("a mutation racing a held lock fails closed without backend contact", async () => {
