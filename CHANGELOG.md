@@ -34,6 +34,16 @@
 
 ### Fixed
 
+- A Codex or Grok run, stream or CLI turn cancelled or timed out after its
+  credential renewal request left no longer loses the refresh token the
+  provider already rotated, which forced a new sign-in. The request completes
+  and its response is stored unless a logout, replacement sign-in or write
+  fence refuses it. Later runs join it instead of resending the old token, and
+  `renewalRequests` still counts it once. A lifecycle owner's `close()`
+  reports `busy` until that request settles. In the CLI this fixes Grok turns
+  and the Grok model picker; Codex turns already kept the rotated token.
+  Catalog discovery (`schway models list`) keeps its rule of never writing
+  credentials after its deadline or cancellation (#456).
 - Serialize OS secure-store saves and deletions across processes with a SQLite
   `BEGIN IMMEDIATE` lock that the operating system releases when its holder
   exits, even on SIGKILL. Concurrent contenders after a crashed holder no longer
@@ -97,8 +107,7 @@
   the route's refresher, shares single-flight renewal, fencing and counts with
   runs and keeps the run failure categories. An abort or deadline settles
   promptly, and a token request that the stopped renewal itself sent still
-  completes and stores its rotated credential. A renewal that only joined a
-  run's request follows that run's cancellation, tracked in #456 (#455).
+  completes and stores its rotated credential (#455).
 - Export `SearchProvider`, `createWebSearchTool(provider, options?)` and
   `createWebFetchTool(options?)` through `schway/host`, advertised by
   `webToolsContract: "schway.host.web-tools/v1"`. Explicit read-only tools keep

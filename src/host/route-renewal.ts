@@ -1,7 +1,7 @@
 import { credentialWriteRefusedError, isCleanupUncertain } from "../auth/store.ts";
 import { classifyRouteFailure, credentialReferenceForRoute, effectiveStore, readinessBounds, routeCredentialState, validateAuthSelection,
   type HostAuthReadiness, type HostAuthSelection } from "./auth-routes.ts";
-import { acquireCredentialLifecycle } from "./credential-lifecycle.ts";
+import { acquireCredentialLifecycle, holdRenewal } from "./credential-lifecycle.ts";
 
 /** Bounds for one explicit renewal; omission keeps only the refresher's own 30-second ceiling. */
 export interface HostRouteRenewalOptions {
@@ -51,16 +51,18 @@ export async function renewSelectedRoute(memo: HostAuthSelection, valid: HostAut
   if (signal?.aborted) return { outcome: "cancelled", renewalRequests: 0, auth: interrupted };
   const classify = (error: unknown): HostAuthReadiness => classifyRouteFailure(error, valid, "renewal");
   const fenced = (): HostAuthReadiness => classify(credentialWriteRefusedError());
-  // Aborted only by a stop that lands before this call sends its token request, so nothing is sent afterwards.
-  const unsent = new AbortController();
+  // Stops this call's wait. Before its token request leaves, nothing is sent afterwards; once it has left, the
+  // renewal completes and stores its response unless a logout or a fence refuses it, because the provider may
+  // already have rotated the refresh token.
+  const stop = new AbortController();
   // Join the route's participants before the read, as runs do, so a shared renewal may persist for this call.
-  const lease = valid.lifecycle ? acquireCredentialLifecycle(valid.lifecycle, valid.route, valid.credentialWriteGuard, unsent.signal) : undefined;
+  const lease = valid.lifecycle ? acquireCredentialLifecycle(valid.lifecycle, valid.route, valid.credentialWriteGuard, stop.signal) : undefined;
   const store = lease?.store ?? effectiveStore(memo);
   let requests: 0 | 1 = 0;
   let observed: HostAuthReadiness | undefined;
 
   const renew = async (): Promise<[HostRouteRenewal["outcome"], HostAuthReadiness]> => {
-    const state = await routeCredentialState(valid, () => unsent.signal.aborted, store);
+    const state = await routeCredentialState(valid, () => stop.signal.aborted, store);
     // A logout during the read fences this participant; its old route store refuses the read, so report the fence.
     if (lease?.interest.refused) return ["failed", fenced()];
     observed = state.readiness;
@@ -72,10 +74,11 @@ export async function renewSelectedRoute(memo: HostAuthSelection, valid: HostAut
       if (lease) lease.interest.refused = true;
       return ["failed", fenced()];
     }
-    unsent.signal.throwIfAborted();
+    stop.signal.throwIfAborted();
     // With a lifecycle, logout aborts this participant too.
-    const waiting = lease?.interest.controller.signal ?? unsent.signal;
-    const started = () => { requests = 1; };
+    const waiting = lease?.interest.controller.signal ?? stop.signal;
+    // A renewal this call sent keeps its participation until it settles, even after this call stops waiting.
+    const started = (settled: Promise<void>) => { requests = 1; if (lease) holdRenewal(lease, settled); };
     try {
       if (valid.route === "codex") {
         const { createSubscriptionTokenRefresher } = await import("../model/providers/codex-subscription.ts");
@@ -103,10 +106,9 @@ export async function renewSelectedRoute(memo: HostAuthSelection, valid: HostAut
       resolve({ outcome, renewalRequests: requests, auth });
     };
     const stopped = (outcome: "cancelled" | "limit_exceeded"): void => {
-      // Before its token request leaves, a stop abandons this call and its participation. Once it has left, the
-      // provider may already have rotated the refresh token, so the request finishes in the background and this
-      // call stays a participant until it settles: its response is stored unless a logout or a fence refuses it.
-      if (requests === 0) { unsent.abort(); lease?.release(); }
+      stop.abort();
+      // A renewal already sent defers this release until it settles.
+      lease?.release();
       // Stopped before the store answered, there is no verdict; afterwards, the verdict read is the latest one.
       finish(outcome, observed ? withoutModel(observed) : interrupted);
     };

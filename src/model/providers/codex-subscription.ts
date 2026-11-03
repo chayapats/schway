@@ -19,7 +19,7 @@ import type {
   ModelTool,
   ThinkingLevel,
 } from "../model.ts";
-import { countingRenewalFetch, isRefusedRedirect, providerDispatch, redirectRefusal, redirectRefusedError, reportedEffort, sentControls } from "../dispatch.ts";
+import { isRefusedRedirect, providerDispatch, redirectRefusal, redirectRefusedError, reportedEffort, sentControls } from "../dispatch.ts";
 import {
   CODEX_SUBSCRIPTION_LABEL,
   codexSubscriptionIdentity,
@@ -476,11 +476,12 @@ export function createSubscriptionTokenRefresher(input: {
   fetch?: CodexFetchLike;
 }): {
   /** Return a valid access token, refreshing once before expiry with racing callers sharing the renewal.
-   * `onRenewal` fires once per physical refresh request this caller starts; joiners never see it. */
-  getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }>;
+   * `onRenewal` fires once per physical refresh request this caller starts, in the step that sends it, with a promise
+   * that settles once that renewal and its credential write have settled; joiners never see it. */
+  getValidAccessToken(signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void): Promise<{ accessToken: string; accountId?: string }>;
 } {
   return {
-    async getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> {
+    async getValidAccessToken(signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void): Promise<{ accessToken: string; accountId?: string }> {
       throwIfAborted(signal);
       const state = codexLifecycle(input.store);
       const pendingWrites = state.writes;
@@ -513,7 +514,7 @@ export function createSubscriptionTokenRefresher(input: {
       if (!refresh || refresh.generation !== generation) {
         const refreshToken = stored.refreshToken;
         const refreshSignal = AbortSignal.timeout(CODEX_REFRESH_TIMEOUT_MS);
-        const promise = refreshSubscriptionTokens({ refreshToken, fetch: countingRenewalFetch(input.fetch, onRenewal), signal: refreshSignal })
+        const promise = refreshSubscriptionTokens({ refreshToken, fetch: input.fetch, signal: refreshSignal })
           .catch((error: unknown) => {
             if (refreshSignal.aborted) {
               throw new Error(
@@ -544,6 +545,8 @@ export function createSubscriptionTokenRefresher(input: {
         void promise.catch(() => {});
         refresh = { generation, promise };
         state.refresh = refresh;
+        // Creating the renewal sent its request: count it for this caller, with the renewal's settlement.
+        onRenewal?.(promise.then(() => {}, () => {}));
       }
       const renewed = await raceWithAbort(refresh.promise, signal);
       return { accessToken: renewed.accessToken, accountId: renewed.accountId ?? accountIdFromAccessToken(renewed.accessToken) };
@@ -1122,7 +1125,7 @@ export function createCodexSubscriptionModel(options: {
   /** Verified capabilities for this exact account and model. */
   modelCapability?: ModelCapability;
   tokens?: CodexTokens;
-  refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> };
+  refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void): Promise<{ accessToken: string; accountId?: string }> };
   store?: CredentialStore;
   fetch?: CodexFetchLike;
   secrets?: string[];
@@ -1530,11 +1533,11 @@ function parseCodexToolArguments(json: string): unknown {
 async function resolveStreamCredential(
   input: {
     tokens?: CodexTokens;
-    refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: () => void): Promise<{ accessToken: string; accountId?: string }> };
+    refresher?: { getValidAccessToken(signal?: AbortSignal, onRenewal?: (settled: Promise<void>) => void): Promise<{ accessToken: string; accountId?: string }> };
   },
   signal: AbortSignal | undefined,
   secrets: string[],
-  onRenewal?: () => void,
+  onRenewal?: (settled: Promise<void>) => void,
 ): Promise<{ accessToken: string; accountId?: string }> {
   throwIfAborted(signal, secrets);
   if (input.refresher) {

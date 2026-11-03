@@ -7,8 +7,11 @@ import { codexSubscriptionIdentity, credentialLockError, grokSubscriptionIdentit
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { withTempDir } from "./helpers.ts";
 import { encodeXaiSse } from "./fixtures/xai.ts";
-import { createSubscriptionTokenRefresher as createCodexRefresher } from "../src/model/providers/codex-subscription.ts";
-import { createSubscriptionTokenRefresher as createGrokRefresher } from "../src/model/providers/grok-subscription.ts";
+import { clearSubscriptionTokens, createSubscriptionTokenRefresher as createCodexRefresher } from "../src/model/providers/codex-subscription.ts";
+import { createSubscriptionTokenRefresher as createGrokRefresher, deleteSubscriptionTokens } from "../src/model/providers/grok-subscription.ts";
+import { loadProviderModel } from "../src/model/loader.ts";
+import { sampleRequest } from "./fixtures/openai.ts";
+import { collect } from "./helpers/scripted-model.ts";
 
 type Route = "codex" | "grok";
 type Kind = "store" | "lifecycle";
@@ -652,4 +655,149 @@ for (const route of ROUTES) test(`${route} sends the token request in the same s
   expect(atStop).toEqual({ counted: 1, sends: 1 });
   await b;
   expect({ counted, sends }).toEqual({ counted: 1, sends: 1 });
+});
+
+/** Clock whose run-deadline sleep fires only when the test says so; backoff sleeps return at once. */
+function deadlineClock() {
+  const fire = Promise.withResolvers<void>();
+  return { fire: () => fire.resolve(), clock: { now: () => Date.now(), sleep: (ms: number, signal?: AbortSignal) => ms < 60_000 ? Promise.resolve()
+    : new Promise<void>((resolve, reject) => {
+      void fire.promise.then(() => resolve());
+      signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }) } };
+}
+
+// #456: a run stopped after its own renewal request left keeps the credential the provider already rotated.
+for (const route of ROUTES) for (const kind of KINDS) {
+  for (const stop of ["cancel", "deadline"] as const) test(`${route} ${kind}: a run ${stop === "cancel" ? "cancelled" : "timed out"} after its renewal left keeps the rotated credential`, async () => {
+    await withTempDir(async dir => {
+      const store = await seeded(route, EXPIRED);
+      const wire = transport(route, rotatingTokens());
+      const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch });
+      const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
+      const first = await host.createSession(), second = await host.createSession();
+      const held = wire.hold();
+      const controller = new AbortController(), deadline = deadlineClock();
+      const pending = first.submitWithRoute({ text: "renew, then stop" }, stop === "cancel" ? { signal: controller.signal } : { clock: deadline.clock });
+      await held.started;
+      if (stop === "cancel") controller.abort(); else deadline.fire();
+      const stopped = await pending;
+      expect(stopped.outcome).toBe(stop === "cancel" ? "cancelled" : "limit_exceeded");
+      // The run still reports the request it sent, once.
+      expect(stopped.usage.providerRequests).toEqual({ initialSends: 0, authRetrySends: 0, renewalRequests: 1 });
+      held.release();
+      await until(() => store.writes === 1, "the rotated credential to be stored");
+      await Bun.sleep(5);
+      expect(await store.value()).toContain("rotated-refresh-sentinel-1");
+      // The next run uses it: no second token request, which the provider would reject.
+      const next = await second.submitWithRoute({ text: "after the stop" });
+      expect(next.outcome).toBe("completed");
+      expect(next.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 0 });
+      expect(await host.auth!.renew()).toMatchObject({ outcome: "fresh", renewalRequests: 0 });
+      expect(wire.counts).toMatchObject({ token: 1, inference: 1 });
+      await first.close(); await second.close(); await host.close(); await lifecycle?.close();
+    });
+  });
+
+  test(`${route} ${kind}: a run arriving after a cancelled run's renewal joins its in-flight request`, async () => {
+    await withTempDir(async dir => {
+      const store = await seeded(route, EXPIRED);
+      const wire = transport(route, rotatingTokens());
+      const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch });
+      const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
+      const first = await host.createSession(), second = await host.createSession();
+      const held = wire.hold();
+      const controller = new AbortController();
+      const pending = first.submitWithRoute({ text: "renew, then cancel" }, { signal: controller.signal });
+      await held.started;
+      controller.abort();
+      expect(await pending).toMatchObject({ outcome: "cancelled", usage: { providerRequests: { renewalRequests: 1 } } });
+      const reads = store.reads;
+      let settled = false;
+      const running = second.submitWithRoute({ text: "join it" }).finally(() => { settled = true; });
+      await until(() => store.reads >= reads + 2, "the next run to join");
+      await Bun.sleep(5);
+      expect(settled).toBe(false);
+      expect(wire.counts.token).toBe(1);
+      held.release();
+      const run = await running;
+      expect(run.outcome).toBe("completed");
+      expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 0 });
+      expect(wire.counts).toMatchObject({ token: 1, inference: 1 });
+      expect(await store.value()).toContain("rotated-refresh-sentinel-1");
+      await first.close(); await second.close(); await host.close(); await lifecycle?.close();
+    });
+  });
+
+  test(`${route} ${kind}: a cancelled direct route stream keeps the rotated credential its renewal received`, async () => {
+    await withTempDir(async dir => {
+      const store = await seeded(route, EXPIRED);
+      const wire = transport(route, rotatingTokens());
+      const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch });
+      const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
+      const session = await host.createSession();
+      const held = wire.hold();
+      const controller = new AbortController();
+      const pending = session.submit({ text: "direct stream" }, await host.auth!.createModel(), { signal: controller.signal });
+      await held.started;
+      controller.abort();
+      expect(await pending).toMatchObject({ outcome: "cancelled", usage: { providerRequests: { renewalRequests: 1 } } });
+      held.release();
+      await until(() => store.writes === 1, "the rotated credential to be stored");
+      await Bun.sleep(5);
+      expect(await store.value()).toContain("rotated-refresh-sentinel-1");
+      expect(await host.auth!.renew()).toMatchObject({ outcome: "fresh", renewalRequests: 0 });
+      expect(wire.counts.token).toBe(1);
+      await session.close(); await host.close(); await lifecycle?.close();
+    });
+  });
+
+  test(`${route} ${kind}: a logout during a cancelled run's in-flight renewal still fences its write`, async () => {
+    await withTempDir(async dir => {
+      const store = await seeded(route, EXPIRED);
+      const wire = transport(route, rotatingTokens());
+      const { selection, lifecycle } = selectionFor(kind, route, store, { fetch: wire.fetch });
+      const host = await createHost(await options(dir, { ...selection, model: MODEL[route] }));
+      const session = await host.createSession();
+      const held = wire.hold();
+      const controller = new AbortController();
+      const pending = session.submitWithRoute({ text: "renew, then cancel" }, { signal: controller.signal });
+      await held.started;
+      controller.abort();
+      expect((await pending).outcome).toBe("cancelled");
+      await session.close(); await host.close();
+      if (lifecycle) {
+        // The cancelled run still takes part in its in-flight renewal, so the owner stays busy until it settles.
+        await expect(lifecycle.close()).rejects.toMatchObject({ code: "busy" });
+        await lifecycle.logout(route);
+      } else if (route === "codex") await clearSubscriptionTokens(store);
+      else await deleteSubscriptionTokens(store);
+      held.release();
+      await Bun.sleep(20);
+      expect(await store.value()).toBeNull();
+      expect(wire.counts.token).toBe(1);
+      await lifecycle?.close();
+    });
+  });
+}
+
+for (const route of ROUTES) test(`${route} CLI turn cancelled after its renewal left keeps the rotated credential`, async () => {
+  // The CLI loads the same adapters and refreshers without a host or lifecycle.
+  const store = await seeded(route, EXPIRED);
+  const wire = transport(route, rotatingTokens());
+  const model = route === "codex"
+    ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: "gpt-5.4", codexStore: store }, wire.fetch)
+    : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: "grok-4.7", grokStore: store }, wire.fetch);
+  const held = wire.hold();
+  const controller = new AbortController();
+  const cancelled = collect(model.stream({ ...sampleRequest(), signal: controller.signal })).then(() => "completed", (error: unknown) => (error as Error).name);
+  await held.started;
+  controller.abort();
+  expect(await cancelled).toBe("AbortError");
+  held.release();
+  await until(() => store.writes === 1, "the rotated credential to be stored");
+  await Bun.sleep(5);
+  expect(await store.value()).toContain("rotated-refresh-sentinel-1");
+  await collect(model.stream(sampleRequest()));
+  expect(wire.counts).toMatchObject({ token: 1, inference: 1 });
 });
