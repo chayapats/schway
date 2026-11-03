@@ -240,6 +240,11 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
     const view = createConversationView(terminal.renderer, { controller, workspaceRoot: root, home, env: {}, secrets: [], quit() {},
       submit: (value, accepted) => dispatchEditorInput(value, controller, async () => false, accepted) });
     const settle = async () => { await Bun.sleep(5); view.refresh(); await terminal.flush(); };
+    /** Settle until the frame shows `text`; the bound only reports a stuck render through the assertion below. */
+    const waitForFrame = async (text: string) => {
+      for (const end = Date.now() + 5_000; !terminal.captureCharFrame().includes(text) && Date.now() < end;) await settle();
+      return terminal.captureCharFrame();
+    };
     const editor = terminal.renderer.root.findDescendantById("prompt") as TextareaRenderable;
     try {
       await settle();
@@ -275,15 +280,15 @@ for (const activationFails of [false, true]) test(`rendered sign-in preserves a 
       expect(controller.snapshot().credentialEntry).toBeDefined();
       await terminal.mockInput.pasteBracketedText("signed-in-key");
       terminal.mockInput.pressEnter();
-      for (let i = 0; i < 100 && controller.snapshot().credentialEntry; i++) await settle();
-      await settle();
+      // Activation continues after the key entry closes, and a successful one then removes the saved-key notice
+      // for the ready state. Assert only once the frame shows that settled outcome.
+      const frame = await waitForFrame(activationFails ? "! Attention" : `openai/${ROUTE_FALLBACK_MODELS.openai} · OpenAI API key`);
       expect(editor.plainText).toBe(draft);
       expect(editor.cursorOffset).toBe(cursor);
       expect(editor.focused).toBe(true);
       expect(session.items.filter(item => item.type === "user")).toHaveLength(0);
       expect(requests).toBe(0);
       expect(await store.get(credentialIdentity({ provider: "openai" }))).toBe("signed-in-key");
-      const frame = terminal.captureCharFrame();
       if (activationFails) {
         expect(controller.snapshot().status).toBe("error");
         expect(frame).toContain("! Attention");

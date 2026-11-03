@@ -18,6 +18,16 @@ let terminal: Awaited<ReturnType<typeof createTestRenderer>>;
 let controller: import("../../src/tui/controller.ts").TuiController | undefined;
 let submission: Promise<unknown> | undefined;
 let selection: Promise<unknown> | undefined;
+// A fresh Bun draft worker can miss the interactive 500 ms exit budget on a loaded CI runner. These
+// processes prove memory restoration, not exit latency, so their exit draft save gets an explicit 4 s
+// budget, still inside the 8 s bound each test puts on the whole process.
+const DRAFT_SAVE_BUDGET_MS = 4000;
+const exitPath = join(import.meta.dir, "../../src/drafts/exit.ts");
+const exit = await import(exitPath) as typeof import("../../src/drafts/exit.ts");
+// Keep the real function: mocking can update the module namespace in place.
+const flushDraftOnExit = exit.flushDraftOnExit;
+mock.module(exitPath, () => ({ ...exit, flushDraftOnExit: (input: Parameters<typeof flushDraftOnExit>[0], workerPath?: string) =>
+  flushDraftOnExit(input, workerPath, DRAFT_SAVE_BUDGET_MS) }));
 const viewPath = join(import.meta.dir, "../../src/tui/view.ts");
 const originalView = await import(viewPath);
 const createView = originalView.createConversationView;

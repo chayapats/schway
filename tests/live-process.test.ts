@@ -6,23 +6,57 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runLiveProcesses } from "../src/live/process.ts";
 import { parseWorkerInput, runWorker } from "../src/live/worker.ts";
+import type { SmokeDiagnostics } from "../src/live/diagnostics.ts";
 import { withTempDir } from "./helpers.ts";
+import { manualClock } from "./helpers/manual-clock.ts";
 
 const fixture = join(import.meta.dir, "fixtures/live-process.ts");
 const revision = "0123456789012345678901234567890123456789";
 const settings = (providers: Array<"compatible" | "openai-api-key">, timeoutMs = 600) => ({
   enabled: true, revision, timeoutMs, providers, env: {} as Record<string, string>,
 });
+// Production and protocol workers keep their own real-time deadline. This budget keeps it out of
+// any test's reach, so only a held supervisor clock (below) can expire a lane.
+const WORKER_BUDGET_MS = 60_000;
+// The installed command cannot take a test clock. Its budget only bounds a stuck run, far beyond
+// the observed sub-second ARM64 runs, so it never decides an outcome.
+const INSTALLED_BUDGET_MS = "20000";
+/** Lane deadlines that expire only when a test advances them past an explicit barrier; reaping keeps real time. */
+const heldDeadline = () => {
+  const clock = manualClock();
+  return { clock: { now: clock.now, sleep: clock.sleep }, expire: clock.advance };
+};
+/** A lane clock that never reaches its deadline, so only the worker's own behavior decides the outcome. */
+const neverExpires = () => heldDeadline().clock;
 const gone = (pid: number) => {
   try { process.kill(pid, 0); return false; }
   catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
 };
-const waitForPid = async (path: string) => {
-  for (let i = 0; i < 80; i++) {
-    try { return Number(await readFile(path, "utf8")); } catch { await Bun.sleep(10); }
+/** Poll a fixture barrier. The bound only names a stuck fixture; no outcome under test depends on it. */
+async function until<T>(read: () => Promise<T | undefined>, what: string): Promise<T> {
+  const end = Date.now() + 8_000;
+  for (;;) {
+    const value = await read();
+    if (value !== undefined) return value;
+    if (Date.now() > end) throw Error(`fixture never reached: ${what}`);
+    await Bun.sleep(10);
   }
-  throw Error("fixture did not start");
-};
+}
+/** Wait for a complete, positive PID; an absent or partial file never reads as process group 0. */
+const waitForPid = (path: string) => until(async () => {
+  const pid = Number(await readFile(path, "utf8").catch(() => ""));
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}, `PID in ${path}`);
+/** Wait until a worker records in its workspace that its model stream started. */
+const waitForModelStart = (workspace: () => string) => until(async () =>
+  workspace() ? access(join(workspace(), ".model-started")).then(() => true, () => undefined) : undefined, "model start");
+/** Wait until a worker's private checkpoint reaches the given progress. */
+const waitForProgress = (workspace: () => string, ready: (diagnostics: SmokeDiagnostics) => boolean) => until(async () => {
+  if (!workspace()) return;
+  const progress = await readFile(join(workspace(), ".smoke-progress.json"), "utf8").then(JSON.parse, () => undefined) as
+    { diagnostics?: SmokeDiagnostics } | undefined;
+  return progress?.diagnostics && ready(progress.diagnostics) ? true : undefined;
+}, "checkpoint progress");
 
 /** Replay a sentinel read request, then return its actual tool result as compatible SSE. */
 async function sentinelSse(request: Request, id = "fixture"): Promise<string> {
@@ -71,13 +105,15 @@ test("cancelled or expired workspace setup never spawns a paid worker", async ()
       let root = "";
       let report;
       let spawned = 0;
+      const selection = { ...settings(["openai-api-key"]), signal: controller.signal,
+        env: { SCHWAY_FIXTURE_MODE: "hang", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET" } };
+      // Setup takes no lane time until the workspace callback cancels or spends the whole budget.
+      let elapsed = 0;
       try {
-        report = await runLiveProcesses({ ...settings(["openai-api-key"], mode === "cancelled" ? 600 : 30), signal: controller.signal,
-          env: { SCHWAY_FIXTURE_MODE: "hang", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET" } },
-        { workerFile: fixture, onWorkspace: path => {
+        report = await runLiveProcesses(selection, { workerFile: fixture, now: () => elapsed, onWorkspace: path => {
           root = path;
           if (mode === "cancelled") controller.abort();
-          else Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 55);
+          else elapsed = selection.timeoutMs;
         } });
         spawned = launches.mock.calls.length;
       } finally { launches.mockRestore(); }
@@ -111,12 +147,17 @@ test("hard-stop progress rejects malformed, oversized and symlinked checkpoints 
     ];
     for (const checkpoint of invalid) {
       let root = "";
-      const report = await runLiveProcesses({ ...settings(["openai-api-key"], 200), env: { SCHWAY_FIXTURE_MODE: "hang-stream" } },
-        { workerFile: fixture, onWorkspace: path => {
+      const deadline = heldDeadline();
+      const pending = runLiveProcesses({ ...settings(["openai-api-key"], 200), env: { SCHWAY_FIXTURE_MODE: "hang-stream" } },
+        { workerFile: fixture, ...deadline.clock, onWorkspace: path => {
           root = path;
           if (checkpoint === "symlink") symlinkSync(secretPath, join(path, ".smoke-progress.json"));
           else writeFileSync(join(path, ".smoke-progress.json"), checkpoint);
         } });
+      // Expire the lane only once the worker has recorded that its model stream started.
+      await waitForModelStart(() => root);
+      await deadline.expire(200);
+      const report = await pending;
       expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "unavailable", toolRoundTrip: false });
       expect(report.scenarios[0]).not.toHaveProperty("diagnostics");
       expect(JSON.stringify(report)).not.toMatch(/PRIVATE_SECRET|private\.json/);
@@ -136,7 +177,7 @@ const input = JSON.parse(raw);
 console.log(JSON.stringify({ provider: input.provider, model: input.model, authSource: "env", status: "passed", reason: "verified",
   durationMs: 1, toolRoundTrip: true, diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1,
     providerRetries: 0, httpRequestsStarted: 2, httpResponsesReceived: 2, lastHttpStatus: 200, providerBody: "PRIVATE_SECRET" } }));`);
-    const report = await runLiveProcesses(settings(["openai-api-key"]), { workerFile });
+    const report = await runLiveProcesses(settings(["openai-api-key"]), { workerFile, ...neverExpires() });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error", toolRoundTrip: false });
     expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
   });
@@ -147,11 +188,19 @@ test("supervised timeout retains HTTP 503 and Schway retry counts without retain
   let calls = 0;
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() {
     calls++;
-    return Response.json({ error: { message: "PRIVATE_PROVIDER_BODY", code: 503 } }, { status: 503 });
+    // The second 503 asks for a long backoff, so no third request can start between the barrier and expiry.
+    return Response.json({ error: { message: "PRIVATE_PROVIDER_BODY", code: 503 } },
+      { status: 503, headers: calls === 2 ? { "retry-after": "30" } : {} });
   } });
   try {
-    const report = await runLiveProcesses({ ...settings(["compatible", "openai-api-key"], 1700),
-      compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } });
+    const deadline = heldDeadline();
+    let root = "";
+    const pending = runLiveProcesses({ ...settings(["compatible", "openai-api-key"], WORKER_BUDGET_MS),
+      compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } }, { ...deadline.clock, onWorkspace: path => { root = path; } });
+    // Expire the lane during the backoff after the second 503, once the worker has checkpointed that retry.
+    await waitForProgress(() => root, diagnostics => diagnostics.providerRetries === 2);
+    await deadline.expire(WORKER_BUDGET_MS);
+    const report = await pending;
     expect(calls).toBe(2);
     expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "none", toolRoundTrip: false,
       diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 0, toolResultsCompleted: 0,
@@ -166,11 +215,14 @@ test("real non-cooperative process and same-group descendant die, workspace remo
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
     const roots: string[] = [];
+    const deadline = heldDeadline();
     const reportPromise = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 450), env: {
       SCHWAY_FIXTURE_MODE: "hang-with-descendant", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET",
-    } }, { workerFile: fixture, onWorkspace: root => roots.push(root) });
+    } }, { workerFile: fixture, ...deadline.clock, onWorkspace: root => roots.push(root) });
+    // Expire the lane only once the worker and its same-group descendant have both published their PIDs.
     const pid = await waitForPid(pidPath);
     const descendant = await waitForPid(`${pidPath}.descendant`);
+    await deadline.expire(450);
     const report = await reportPromise;
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "timeout" });
     expect(report.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
@@ -187,10 +239,14 @@ test("started model process that ignores abort is classified as provider timeout
   await withTempDir(async temp => {
     const pidPath = join(temp, "worker.pid");
     let root = "";
+    const deadline = heldDeadline();
     const pending = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 350), env: {
       SCHWAY_FIXTURE_MODE: "hang-stream", SCHWAY_FIXTURE_PID_FILE: pidPath,
-    } }, { workerFile: fixture, onWorkspace: path => { root = path; } });
+    } }, { workerFile: fixture, ...deadline.clock, onWorkspace: path => { root = path; } });
     const pid = await waitForPid(pidPath);
+    // The stream-start evidence is what makes this a provider timeout, so expire only after it exists.
+    await waitForModelStart(() => root);
+    await deadline.expire(350);
     const report = await pending;
     expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout" });
     expect(report.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
@@ -206,7 +262,7 @@ test("a worker cannot report pass while its descendant remains alive", async () 
     let root = "";
     const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "orphan", SCHWAY_FIXTURE_PID_FILE: pidPath,
-    } }, { workerFile: fixture, onWorkspace: path => { root = path; } });
+    } }, { workerFile: fixture, ...neverExpires(), onWorkspace: path => { root = path; } });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "process_group_leak" });
     expect(gone(await waitForPid(`${pidPath}.descendant`))).toBe(true);
     await expect(access(root)).rejects.toThrow();
@@ -220,7 +276,7 @@ test("non-cooperative output-limit worker is hard stopped without changing provi
     const roots: string[] = [];
     const report = await runLiveProcesses({ ...settings(["openai-api-key"], 1200), env: {
       SCHWAY_FIXTURE_MODE: "deferred-output", SCHWAY_FIXTURE_PID_FILE: pidPath,
-    } }, { workerFile: fixture, onWorkspace: root => roots.push(root) });
+    } }, { workerFile: fixture, ...neverExpires(), onWorkspace: root => roots.push(root) });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "output_limit" });
     expect(report.scenarios[0]).not.toHaveProperty("cleanup");
     expect(roots).toHaveLength(1);
@@ -237,19 +293,19 @@ test("oversized stdout and malformed worker response are rejected without echo, 
     let root = "";
     const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "oversized", SCHWAY_FIXTURE_PID_FILE: pidPath, OPENAI_API_KEY: "PRIVATE_SECRET",
-    } }, { workerFile: fixture, onWorkspace: path => { root = path; } });
+    } }, { workerFile: fixture, ...neverExpires(), onWorkspace: path => { root = path; } });
     expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
-    expect(gone(Number(await readFile(pidPath, "utf8")))).toBe(true);
+    expect(gone(await waitForPid(pidPath))).toBe(true);
     await expect(access(root)).rejects.toThrow();
     expect(JSON.stringify(report)).not.toContain("PRIVATE_SECRET");
     const forged = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "forged", OPENAI_API_KEY: "PRIVATE_SECRET",
-    } }, { workerFile: fixture });
+    } }, { workerFile: fixture, ...neverExpires() });
     expect(forged.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
     expect(JSON.stringify(forged)).not.toContain("PRIVATE_SECRET");
     const fakeTimeout = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_MODE: "fake-timeout",
-    } }, { workerFile: fixture });
+    } }, { workerFile: fixture, ...neverExpires() });
     expect(fakeTimeout.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error" });
   });
 });
@@ -262,7 +318,7 @@ test("cancellation kills the non-cooperative worker before cleanup or another pr
     const roots: string[] = [];
     const pending = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 1500), signal: controller.signal,
       env: { SCHWAY_FIXTURE_MODE: "hang", SCHWAY_FIXTURE_PID_FILE: pidPath } },
-    { workerFile: fixture, onWorkspace: root => roots.push(root) });
+    { workerFile: fixture, ...neverExpires(), onWorkspace: root => roots.push(root) });
     const pid = await waitForPid(pidPath);
     controller.abort();
     const report = await pending;
@@ -279,7 +335,7 @@ test("selected worker fake succeeds without loading a sibling or printing an inj
     const roots: string[] = [];
     const report = await runLiveProcesses({ ...settings(["openai-api-key"]), env: {
       SCHWAY_FIXTURE_PID_FILE: join(temp, "worker.pid"), OPENAI_API_KEY: "PRIVATE_SECRET",
-    } }, { workerFile: fixture, onWorkspace: root => roots.push(root) });
+    } }, { workerFile: fixture, ...neverExpires(), onWorkspace: root => roots.push(root) });
     expect(report.aggregate).toBe("passed");
     expect(report.scenarios).toMatchObject([{ status: "passed", provider: "openai-api-key", toolRoundTrip: true }]);
     expect(roots).toHaveLength(1);
@@ -318,7 +374,7 @@ test("installed command uses supervised child and local fake compatible HTTP tra
   } });
   try {
     const proc = Bun.spawn([process.execPath, "run", "live-smoke", "--enable-live", "--provider", "compatible", "--base-url",
-      `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", "5000"], {
+      `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", INSTALLED_BUDGET_MS], {
       cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "LOCAL_FAKE_SECRET" }, stdout: "pipe", stderr: "pipe",
     });
     const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -328,35 +384,48 @@ test("installed command uses supervised child and local fake compatible HTTP tra
     expect(stdout + stderr).not.toContain("LOCAL_FAKE_SECRET");
     expect(JSON.parse(stdout)).toMatchObject({ aggregate: "passed", scenarios: [{ status: "passed", toolRoundTrip: true, authSource: "none" }] });
   } finally { server.stop(true); }
-}, 15_000);
+}, 30_000);
 
 test("supervised shared deadline preserves the completed tool round and second request progress", async () => {
   if (process.platform === "win32") return;
   let calls = 0;
+  const deadline = heldDeadline();
+  // Each held response spends three fifths of the lane budget: either fits alone, but their sum does not.
+  const share = WORKER_BUDGET_MS * 3 / 5;
+  let holding = true;
+  let release!: () => void;
+  const released = new Promise<void>(resolve => { release = resolve; });
+  let secondStarted!: () => void;
+  const secondRequest = new Promise<"second request">(resolve => { secondStarted = () => resolve("second request"); });
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
     calls++;
     const sse = await sentinelSse(request, "private-generation-id");
-    // Each response fits the lane budget independently, but their sum does not.
-    await Bun.sleep(700);
+    if (holding && calls === 1) await deadline.expire(share);
+    else if (holding) { secondStarted(); await released; }
     return new Response(sse, { headers: { "content-type": "text/event-stream", "x-request-id": "PRIVATE_HEADER" } });
   } });
   try {
-    const selection = { ...settings(["compatible", "openai-api-key"], 1200),
+    const selection = { ...settings(["compatible", "openai-api-key"], WORKER_BUDGET_MS),
       compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" as const },
       models: { compatible: "gpt-4o" }, env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "PRIVATE_KEY" } };
-    const timed = await runLiveProcesses(selection);
+    const pending = runLiveProcesses(selection, deadline.clock);
+    // Barrier: the first round and its tool result completed and the second request started, all within budget.
+    expect(await Promise.race([secondRequest, pending.then(() => "lane ended")])).toBe("second request");
+    await deadline.expire(share);
+    const timed = await pending;
     expect(calls).toBe(2);
     expect(timed.scenarios[0]).toMatchObject({ status: "failed_provider", reason: "timeout", authSource: "none", toolRoundTrip: false,
       diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 1, toolResultsCompleted: 1, providerRetries: 0,
         httpRequestsStarted: 2, httpResponsesReceived: 1, lastHttpStatus: 200 } });
     expect(timed.scenarios[1]).toMatchObject({ status: "pending", reason: "prior_run_timeout" });
     expect(JSON.stringify(timed)).not.toMatch(/PRIVATE_KEY|PRIVATE_HEADER|private-generation-id|smoke-sentinel|127\.0\.0\.1|schway-live-/);
-    const passed = await runLiveProcesses({ ...selection, providers: ["compatible"], timeoutMs: 4000 });
+    holding = false;
+    const passed = await runLiveProcesses({ ...selection, providers: ["compatible"] }, neverExpires());
     expect(passed.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true,
       diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1, providerRetries: 0,
         httpRequestsStarted: 2, httpResponsesReceived: 2, lastHttpStatus: 200 } });
     expect(calls).toBe(4);
-  } finally { server.stop(true); }
+  } finally { release(); server.stop(true); }
 }, 10_000);
 
 test("checkpoint write or rename failures do not change a verified supervised round trip", async () => {
@@ -370,8 +439,8 @@ test("checkpoint write or rename failures do not change a verified supervised ro
     for (const blockedPath of [".smoke-progress.json.tmp", ".smoke-progress.json"]) {
       let root = "";
       const before = calls;
-      const report = await runLiveProcesses({ ...settings(["compatible"], 4000), models: { compatible: "gpt-4o" },
-        compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } }, { onWorkspace: path => {
+      const report = await runLiveProcesses({ ...settings(["compatible"], WORKER_BUDGET_MS), models: { compatible: "gpt-4o" },
+        compatible: { baseUrl: `http://127.0.0.1:${server.port}/v1`, auth: "none" } }, { ...neverExpires(), onWorkspace: path => {
         root = path;
         // A directory deterministically rejects writing the temp file or renaming onto the destination.
         mkdirSync(join(path, blockedPath));
@@ -409,12 +478,12 @@ test("supervised production worker carries exact thinking into both real adapter
       const level = provider === "openai-api-key" ? "high" : "medium";
       for (const explicit of [true, false]) {
         const requestFile = join(temp, `${provider}-${explicit}.json`);
-        const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: 4000,
+        const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: WORKER_BUDGET_MS,
           models: { [provider]: model }, ...(explicit ? { thinking: { [provider]: level } } : {}),
           compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" }, env: {
             SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
             OPENAI_API_KEY: "PRIVATE_KEY", XAI_API_KEY: "PRIVATE_XAI_KEY",
-          } }, { workerFile: fixture });
+          } }, { workerFile: fixture, ...neverExpires() });
         expect(report.scenarios[0]).toMatchObject({ provider, model, status: "passed", toolRoundTrip: true });
         if (explicit) expect(report.scenarios[0]?.thinking).toBe(level);
         else expect(report.scenarios[0]).not.toHaveProperty("thinking");
@@ -449,12 +518,12 @@ test("supervised account and endpoint discovery refuses unsupported or absent ca
     for (const provider of ["codex", "compatible", "grok", "xai-api-key"] as const) {
       for (const catalogMode of ["unsupported", "missing", "failure"]) {
         const requestFile = join(temp, `${provider}-${catalogMode}.json`);
-        const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: 4000,
+        const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: WORKER_BUDGET_MS,
           models: { [provider]: provider === "compatible" ? "meta/muse-spark-1.3-contributor" : provider === "codex" ? "gpt-6-sol" : "grok-4.7" },
           thinking: { [provider]: "medium" }, compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" },
           env: { SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
             SCHWAY_FIXTURE_CATALOG_MODE: catalogMode, XAI_API_KEY: "PRIVATE_KEY" },
-        }, { workerFile: fixture });
+        }, { workerFile: fixture, ...neverExpires() });
         expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", thinking: "medium", toolRoundTrip: false,
           reason: catalogMode === "failure" ? "thinking_capability_unavailable" : "unsupported_thinking" });
         const requests = JSON.parse(await readFile(requestFile, "utf8")) as Array<{ body?: unknown }>;
@@ -478,7 +547,7 @@ const input = JSON.parse(raw);
 console.log(JSON.stringify({ provider: input.provider, model: input.model, thinking: ${JSON.stringify(returned) ?? "undefined"},
 authSource: "env", status: "passed", reason: "verified", durationMs: 1, toolRoundTrip: true }));`);
       const report = await runLiveProcesses({ ...settings(["openai-api-key"]),
-        ...(expected ? { thinking: { "openai-api-key": expected } } : {}) }, { workerFile });
+        ...(expected ? { thinking: { "openai-api-key": expected } } : {}) }, { workerFile, ...neverExpires() });
       expect(report.scenarios[0]).toMatchObject({ status: "failed_runner", reason: "runner_error", toolRoundTrip: false });
       if (expected) expect(report.scenarios[0]?.thinking).toBe(expected);
       else expect(report.scenarios[0]).not.toHaveProperty("thinking");
@@ -489,8 +558,14 @@ authSource: "env", status: "passed", reason: "verified", durationMs: 1, toolRoun
 
 test("supervisor preserves explicit thinking on timeout and later pending lanes", async () => {
   if (process.platform === "win32") return;
-  const report = await runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 250),
-    thinking: { "openai-api-key": "high", compatible: "medium" }, env: { SCHWAY_FIXTURE_MODE: "hang-stream" } }, { workerFile: fixture });
+  let root = "";
+  const deadline = heldDeadline();
+  const pending = runLiveProcesses({ ...settings(["openai-api-key", "compatible"], 250),
+    thinking: { "openai-api-key": "high", compatible: "medium" }, env: { SCHWAY_FIXTURE_MODE: "hang-stream" } },
+  { workerFile: fixture, ...deadline.clock, onWorkspace: path => { root = path; } });
+  await waitForModelStart(() => root);
+  await deadline.expire(250);
+  const report = await pending;
   expect(report.scenarios).toMatchObject([{ thinking: "high", status: "failed_provider", reason: "timeout" },
     { thinking: "medium", status: "pending", reason: "prior_run_timeout" }]);
 });
@@ -509,7 +584,7 @@ test("installed thinking option reaches the production worker and unsupported co
     for (const level of ["off", "medium"]) {
       const before = calls;
       const proc = Bun.spawn([process.execPath, "run", "live-smoke", "--enable-live", "--provider", "compatible",
-        "--thinking", `compatible=${level}`, "--base-url", `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", "4000"], {
+        "--thinking", `compatible=${level}`, "--base-url", `http://127.0.0.1:${server.port}/v1`, "--auth", "none", "--timeout-ms", INSTALLED_BUDGET_MS], {
         cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENAI_COMPATIBLE_API_KEY: "PRIVATE_UNUSED_KEY" }, stdout: "pipe", stderr: "pipe",
       });
       const [stdout, stderr, exit] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
@@ -520,8 +595,7 @@ test("installed thinking option reaches the production worker and unsupported co
       expect(stdout + stderr).not.toContain("PRIVATE_UNUSED_KEY");
     }
   } finally { server.stop(true); }
-}, 15_000);
-
+}, 30_000);
 
 test("supervised discovery accepts production-size catalogs before both inference rounds", async () => {
   if (process.platform === "win32") return;
@@ -531,12 +605,12 @@ test("supervised discovery accepts production-size catalogs before both inferenc
       ["compatible", 762_009, "meta/muse-spark-1.3-contributor"],
     ] as const) {
       const requestFile = join(temp, `${provider}.json`);
-      const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: 4000,
+      const report = await runLiveProcesses({ enabled: true, providers: [provider], revision, timeoutMs: WORKER_BUDGET_MS,
         models: { [provider]: model }, thinking: { [provider]: "medium" },
         compatible: { baseUrl: "https://openrouter.ai/api/v1", auth: "none" },
         env: { SCHWAY_FIXTURE_MODE: "protocol", SCHWAY_FIXTURE_REQUEST_FILE: requestFile,
           SCHWAY_FIXTURE_CATALOG_BYTES: String(catalogBytes) },
-      }, { workerFile: fixture });
+      }, { workerFile: fixture, ...neverExpires() });
       expect(report.scenarios[0]).toMatchObject({ status: "passed", reason: "verified", toolRoundTrip: true,
         diagnostics: { modelAttemptsStarted: 2, modelRoundsCompleted: 2, toolResultsCompleted: 1,
           httpRequestsStarted: 3, httpResponsesReceived: 3 } });
@@ -544,4 +618,4 @@ test("supervised discovery accepts production-size catalogs before both inferenc
       expect(requests.filter(request => request.body).map(request => request.body?.model)).toEqual([model, model]);
     }
   });
-});
+}, 15_000);
