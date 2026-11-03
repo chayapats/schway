@@ -327,7 +327,11 @@ Online listing makes the selected route's catalog request. Explicit
 `auto` uses the existing credential precedence. A selected subscription may
 refresh its token. One five-second remote-operation deadline covers route
 credential reads, token refresh, catalog request and response-body consumption.
-Failure never switches billing routes or substitutes a built-in result.
+That deadline ends the listing, not a token refresh whose request already left:
+the provider may already have rotated the refresh token, so the refresh finishes
+and its new sign-in is stored before the command exits (see
+[Cancellation](#cancellation)). Failure never switches billing routes or
+substitutes a built-in result.
 
 `--offline` reads local settings and explicit env files, without credential-store
 access, refresh or network. An explicit route is labelled with built-in metadata
@@ -371,5 +375,6 @@ subscription's required token refresh is its only permitted credential write.
 Cancellation is orderly and never corrupts session state.
 
 - Headless: one `AbortSignal` flows from SIGINT/SIGTERM through model streaming, tools, and provider requests. Cancelling exits non-zero and still leaves a resumable session; cancelled streams are not written as durable assistant messages.
+- Renewed sign-ins: a subscription token refresh whose request already left is not abandoned when a run or `schway models list` stops, because the provider may already have rotated the refresh token. Before exiting, the CLI waits for that refresh to finish and store the new sign-in, and writes `Saving the renewed sign-in… · Ctrl+C quit without saving` to stderr. The wait is bounded by the refresh's 30-second timeout plus the credential-store write. Another Ctrl+C quits at once with exit code 130 and the warning `Quit before the renewed sign-in was saved. If the next command is rejected, sign in again in interactive mode with /login.`
 - Interactive: press Esc to stop the running turn and return to the input editor; Ctrl+C cancels when running and quits when idle. Quitting restores the terminal and releases resources.
 - Provider retries cover transient failures only (network resets, 429, 5xx) up to three total attempts with exponential backoff and `Retry-After`. Authentication errors, malformed requests, and ordinary tool failures are not retried.

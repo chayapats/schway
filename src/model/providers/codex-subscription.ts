@@ -1,6 +1,6 @@
 import { DeviceFlowError, deviceFlowExpiresAt, sleepDeviceFlow, validateDeviceVerificationUri, withinDeviceFlow, type DeviceFlowAuthorization } from "../../auth/device-flow.ts";
 import { imageInputPart } from "../../conversation/images.ts";
-import { abortableCatalogOperation, boundedCatalogFetch, fetchProviderModelListResult, type ModelListResult } from "../model-list.ts";
+import { abortableCatalogOperation, fetchProviderModelListResult, type ModelListResult } from "../model-list.ts";
 import { assertThinking } from "../thinking.ts";
 import type {
   AssistantContent,
@@ -26,6 +26,7 @@ import {
   preserveRefusal,
   type CredentialStore,
 } from "../../auth/store.ts";
+import { trackSentRenewal } from "../../auth/renewals.ts";
 
 /** Public Codex CLI OAuth client shipped in the official Codex CLI binary, shared rather than private. */
 export const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -461,14 +462,15 @@ export async function refreshSubscriptionTokens(input: {
     throw new Error(codexRefreshFailedError(messageOf(error)));
   }
   throwIfAborted(input.signal);
-  const payload = await readTokenPayload(response, input.signal);
   if (!response.ok) {
+    // The status alone decides: an error body is untrusted and may be an HTML gateway page.
+    void response.body?.cancel().catch(() => {});
     if (response.status === 400 || response.status === 401) {
       throw new Error(codexRevokedSessionError());
     }
     throw new Error(codexRefreshFailedError(`HTTP ${response.status}`));
   }
-  return toCodexTokens(payload);
+  return toCodexTokens(await readTokenPayload(response, input.signal));
 }
 
 /** True when the stored login is still the one `read` holds; an unreadable value counts as replaced. */
@@ -487,6 +489,8 @@ export function createSubscriptionTokenRefresher(input: {
   fetch?: CodexFetchLike;
   /** Ceiling for one shared refresh, its request and body included; defaults to `CODEX_REFRESH_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /** Receive each credential this caller is given, renewed or stored, as its stored JSON; used for output redaction. */
+  onCredential?: (raw: string) => void;
 }): {
   /** Return a valid access token, refreshing once before expiry with racing callers sharing the renewal.
    * `onRenewal` fires once per physical refresh request this caller starts, in the step that sends it, with a promise
@@ -518,6 +522,7 @@ export function createSubscriptionTokenRefresher(input: {
         throw new Error(codexMissingLoginError());
       }
       if (!subscriptionAccessExpired(stored)) {
+        input.onCredential?.(JSON.stringify(serializeSubscriptionTokens(stored)));
         return { accessToken: stored.accessToken, accountId: stored.accountId ?? accountIdFromAccessToken(stored.accessToken) };
       }
       if (!stored.refreshToken) {
@@ -561,10 +566,14 @@ export function createSubscriptionTokenRefresher(input: {
         void promise.catch(() => {});
         refresh = { generation, promise };
         state.refresh = refresh;
-        // Creating the renewal sent its request: count it for this caller, with the renewal's settlement.
-        onRenewal?.(promise.then(() => {}, () => {}));
+        // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
+        // the process from exiting before a rotated token is stored.
+        const settled = promise.then(() => {}, () => {});
+        trackSentRenewal(settled);
+        onRenewal?.(settled);
       }
       const renewed = await raceWithAbort(refresh.promise, signal);
+      input.onCredential?.(JSON.stringify(serializeSubscriptionTokens(renewed)));
       return { accessToken: renewed.accessToken, accountId: renewed.accountId ?? accountIdFromAccessToken(renewed.accessToken) };
     },
   };
@@ -573,24 +582,29 @@ export function createSubscriptionTokenRefresher(input: {
 /** Discover with a caller-owned refresh lifetime; no credential write starts after cancellation. */
 export async function fetchDiscoveryCatalog(input: {
   store: CredentialStore; fetch?: CodexFetchLike; signal: AbortSignal;
+  /** Original identity owner when reads are memoized for route selection; renewal and its write use it. */
+  lifecycleStore?: CredentialStore;
+  /** Register every credential this discovery uses, a renewed one included. */
+  onCredential?: (raw: string) => void;
 }): Promise<ModelListResult> {
   input.signal.throwIfAborted();
-  let tokens = await abortableCatalogOperation(loadSubscriptionTokens(input.store), input.signal);
+  // Read through the caller's deadline-bound store, so a hung read ends with the deadline and a missing or
+  // unrenewable login never reaches the refresher.
+  const tokens = await abortableCatalogOperation(loadSubscriptionTokens(input.store), input.signal);
   if (!tokens) throw new Error(codexMissingLoginError());
+  let credential: { accessToken: string; accountId?: string } = { accessToken: tokens.accessToken, accountId: tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken) };
   if (subscriptionAccessExpired(tokens)) {
     if (!tokens.refreshToken) throw new Error(codexExpiredSessionError());
-    const refreshed = await abortableCatalogOperation(refreshSubscriptionTokens({
-      refreshToken: tokens.refreshToken, signal: input.signal,
-      fetch: boundedCatalogFetch({ ...input, label: "ChatGPT subscription" }),
-    }), input.signal);
-    input.signal.throwIfAborted();
-    tokens = { ...refreshed, refreshToken: refreshed.refreshToken ?? tokens.refreshToken };
-    await abortableCatalogOperation(saveSubscriptionTokens(input.store, tokens), input.signal);
+    // The shared refresher owns renewal: once its request has left, it completes and stores the rotated token even
+    // after discovery's deadline or cancellation, and a later command joins it instead of resending the old token.
+    const refresher = createSubscriptionTokenRefresher({ store: input.lifecycleStore ?? input.store, fetch: input.fetch,
+      ...(input.onCredential ? { onCredential: input.onCredential } : {}) });
+    credential = await abortableCatalogOperation(refresher.getValidAccessToken(input.signal), input.signal);
   }
   input.signal.throwIfAborted();
   return fetchProviderModelListResult({
     url: `${CODEX_MODELS_URL}?client_version=${encodeURIComponent(CODEX_CATALOG_CLIENT_VERSION)}`,
-    headers: codexRequestHeaders(tokens.accessToken, tokens.accountId ?? accountIdFromAccessToken(tokens.accessToken)),
+    headers: codexRequestHeaders(credential.accessToken, credential.accountId),
     fetch: input.fetch, signal: input.signal, label: "ChatGPT subscription", parseOptions: { maxModels: 256, codex: true },
   });
 }

@@ -4,6 +4,7 @@ import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
 import { boundedCatalogFetch, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { GROK_CHALLENGE_ERROR, GROK_QUOTA_ERROR } from "../grok-errors.ts";
 import { isRefusedRedirect, redirectRefusal } from "../dispatch.ts";
+import { trackSentRenewal } from "../../auth/renewals.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -249,8 +250,7 @@ export async function loadSubscriptionTokens(store: CredentialStore, onCredentia
 type RefreshCaller = { onCredential?: (raw: string) => void };
 type CredentialLifecycle = {
   generation: number; writes: Promise<void>; callers: Set<RefreshCaller>;
-  /** `abandonable` marks a renewal that catalog discovery started, which stops unwritten once nobody waits on it. */
-  refresh?: { generation: number; promise: Promise<GrokTokens>; controller: AbortController; abandonable: boolean };
+  refresh?: { generation: number; promise: Promise<GrokTokens> };
 };
 const credentialLifecycles = new WeakMap<CredentialStore, CredentialLifecycle>();
 function credentialLifecycle(store: CredentialStore): CredentialLifecycle {
@@ -288,28 +288,20 @@ interface SubscriptionTokenInput {
   lifecycleStore?: CredentialStore; onCredential?: (raw: string) => void;
 }
 
-/** Share renewal per original store and generation; cancellation detaches only this caller.
+/** Share renewal per original store and generation; cancellation detaches only this caller, never a renewal already sent.
  * `onRenewal` fires once per physical refresh request this caller starts, in the step that sends it, with a promise that
- * settles once that renewal and its credential write have settled; joiners of a shared renewal never see it.
- * A renewal that an `abandonable` caller (catalog discovery) starts stops unwritten once nobody waits on it. */
-async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: AbortSignal, rejectedToken?: string, onRenewal?: (settled: Promise<void>) => void, abandonable = false): Promise<string> {
+ * settles once that renewal and its credential write have settled; joiners of a shared renewal never see it. */
+async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: AbortSignal, rejectedToken?: string, onRenewal?: (settled: Promise<void>) => void): Promise<string> {
   aborted(signal);
   const owner = input.lifecycleStore ?? input.store, state = credentialLifecycle(owner);
   const caller: RefreshCaller = { onCredential: input.onCredential };
   // Register before any asynchronous read so this caller hears of a renewal that lands while it waits.
   state.callers.add(caller);
   // A renewal exists only once its request has left, and the provider may already have rotated the refresh
-  // token, so a caller that stops detaches itself only: the renewal completes and stores its response unless a
-  // logout, replacement sign-in or write fence refuses it, and later callers join it instead of resending. Only a
-  // renewal that discovery started keeps discovery's rule: no credential write once every caller has left.
-  const detach = () => {
-    state.callers.delete(caller);
-    if (!state.callers.size && state.refresh?.abandonable) {
-      const refresh = state.refresh;
-      state.refresh = undefined;
-      refresh.controller.abort();
-    }
-  };
+  // token, so a caller that stops, catalog discovery included, detaches itself only: the renewal completes and
+  // stores its response unless a logout, a write fence or a sign-in that replaced the login refuses it, and later
+  // callers join it instead of resending.
+  const detach = () => { state.callers.delete(caller); };
   signal?.addEventListener("abort", detach, { once: true });
   const getToken = async (): Promise<string> => {
     aborted(signal);
@@ -359,10 +351,13 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       });
       // Cancellation can happen before a caller begins awaiting this shared promise.
       void promise.catch(() => {});
-      refresh = { generation, promise, controller, abandonable };
+      refresh = { generation, promise };
       state.refresh = refresh;
-      // Creating the renewal sent its request: count it for this caller, with the renewal's settlement.
-      onRenewal?.(promise.then(() => {}, () => {}));
+      // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
+      // the process from exiting before a rotated token is stored.
+      const settled = promise.then(() => {}, () => {});
+      trackSentRenewal(settled);
+      onRenewal?.(settled);
     }
     const renewed = await raceAbort(refresh.promise, signal);
     aborted(signal);
@@ -416,8 +411,8 @@ export async function fetchDiscoveryCatalog(input: {
   /** Register every selected credential read, including fresh reads after concurrent replacement. */
   onCredential?: (raw: string) => void;
 }): Promise<ModelListResult> {
-  // Discovery owns its deadline: a renewal it starts is abandoned, never written, once every caller has left.
-  const getToken = (rejectedToken?: string) => resolveSubscriptionToken(input, input.signal, rejectedToken, undefined, true);
+  // Discovery's deadline bounds only its wait: a renewal it sent still completes and stores the rotated token.
+  const getToken = (rejectedToken?: string) => resolveSubscriptionToken(input, input.signal, rejectedToken);
   let accessToken = await getToken();
   let authError: unknown;
   const authorizedFetch: GrokFetch = async (url, init) => {

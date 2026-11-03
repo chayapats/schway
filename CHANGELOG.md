@@ -44,9 +44,16 @@
   request settles, at most 30 seconds plus the store write, even when the
   transport ignores cancellation. In the TUI, a Grok turn stopped with Esc or
   the Grok model picker no longer loses the token; Codex turns already kept
-  it. A headless run interrupted with Ctrl-C, and catalog discovery (`schway
-  models list`), can still exit before the request settles; #458 tracks them
-  (#456).
+  it (#456).
+- `schway models list` and headless runs no longer lose a rotated refresh
+  token when they stop after a renewal request left. Discovery's five-second
+  deadline still ends the listing, but its renewal now finishes and stores the
+  new sign-in; Codex discovery uses the shared ChatGPT refresher. Before it
+  exits, the CLI waits for any renewal that already left and writes `Saving
+  the renewed sign-in… · Ctrl+C quit without saving` to stderr. Another Ctrl+C
+  quits at once with exit code 130 and a warning that the next command may
+  need sign-in. A ChatGPT token-refresh error is now reported by its HTTP
+  status even when its body is not JSON (#458).
 - Serialize OS secure-store saves and deletions across processes with a SQLite
   `BEGIN IMMEDIATE` lock that the operating system releases when its holder
   exits, even on SIGKILL. Concurrent contenders after a crashed holder no longer
