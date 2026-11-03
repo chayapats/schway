@@ -541,22 +541,32 @@ explicit level, which is what the adapter enforces.
 
 **Use evidence and pin an effort.** Pass a listed choice to
 `createModel({ catalogModel: choice })`, and the adapter accepts that model's
-listed levels. Only a choice Schway listed for the same route and model counts;
-anything else rejects `invalid-input`. Add `effort: { level, mode: "exact" }`
+listed levels. Only a choice Schway listed for the same route, model and
+credential owner counts: the same explicit store, the same OS secure store, or
+the same `HostCredentialLifecycle`, so hosts sharing a lifecycle accept each
+other's choices. Anything else rejects `invalid-input`. Lifecycle logout starts
+a new credential epoch and invalidates choices listed before it; for an
+explicit or OS store, a choice reflects the account at listing time, so re-list
+after sign-in or an account change. A choice works only in the process that
+listed it; re-list in each process. Add `effort: { level, mode: "exact" }`
 (`HostEffortPin`) to send exactly that level on every call the model makes,
 compaction summaries and auth-retry resends included. Codex and Grok send `none`
 for a disabling `off` and the level name otherwise. A pin the adapter would
 refuse, or drop (an `off` without a disable control), rejects `invalid-input` at
 `createModel`, before any request: the choice is decidable from Schway-issued
 evidence before any session work, like other option errors, so it needs no new
-auth status. A request whose own `thinking` differs from the pin is refused
+auth status. Malformed options share that code, so check `effort.levels` and
+`effort.offSendable` before calling `createModel`. A request whose own `thinking` differs from the pin is refused
 before any I/O with an error `isRouteControlRefused` recognizes by identity.
 Each body is also checked before the authorizer runs, so a body without the
 pinned control is refused the same way. These refusals are never retried, and
 `submit` reports their stable message. Pins are opt-in: without `catalogModel`
 and `effort`, request bytes and behavior are unchanged, and the CLI/TUI path is
 unchanged. `submitWithRoute` takes no effort options, because its model has no
-account evidence; use `createModel` with `submit` for pinned work.
+account evidence. Use `createModel` with `submit` for pinned work; `submit`
+results carry the stable refusal message, not `submitWithRoute`'s `auth` detail.
+A wrapper around the route model must pass `call` as-is or spread to keep each
+attempt's `effort` and the run's `providerRequests`.
 
 **Observe what was sent.** Every `HostDispatch` carries `effort`
 (`HostDispatchEffort`): `requested`, the level the call asked for after any pin
