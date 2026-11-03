@@ -11,11 +11,12 @@
 // CONTENDER_SQLITE injects a connection fault: `readonly` opens every
 // connection read-only (as a sandbox that denies open(O_RDWR) would);
 // `vanish-once` deletes the lock file just before the first open;
-// `open-denied` fails every SQLite open with SQLITE_CANTOPEN and every direct
-// read-write open of the lock file with EACCES while access(2) still allows
-// it (as Landlock can); `cantopen-emfile-once` fails the first SQLite open
-// with SQLITE_CANTOPEN and the following direct open with EMFILE.
-// CONTENDER_FS=emfile-once fails the first exclusive create of the lock file with EMFILE.
+// `open-denied` fails every SQLite open with SQLITE_CANTOPEN while access(2)
+// still allows the file (as Landlock can); `cantopen-once` fails only the first.
+// CONTENDER_FS injects a filesystem fault: `emfile-once` fails the first
+// temporary create with EMFILE; `no-hardlinks` fails every link(2) with EPERM;
+// `stat-flap` makes the first stat of the lock path report ENOENT.
+// Any open(2) of the lock path outside SQLite is reported as `FD-OPEN`.
 import { mock } from "bun:test";
 import * as sqlite from "bun:sqlite";
 import * as filesystem from "node:fs";
@@ -59,30 +60,40 @@ function watched<F extends (...args: never[]) => unknown>(remove: F): F {
 /** An Error carrying a Node-style errno code. */
 const errnoError = (code: string) => Object.assign(new Error(`${code}: injected by the lock fixture`), { code });
 let createEmfileUsed = false;
-let probeEmfileUsed = false;
-/** openSync that injects the requested fault for the lock path only. */
+let statFlapped = false;
+/** openSync that reports any descriptor on the lock path and injects a temporary-create fault. */
 function faultyOpenSync(...args: Parameters<typeof real.openSync>): number {
-  const [path, flags] = args;
-  if (String(path).endsWith("credential-store.lock")) {
-    if (fsFault === "emfile-once" && !createEmfileUsed && flags === "wx") {
-      createEmfileUsed = true;
-      say("EMFILE");
-      throw errnoError("EMFILE");
-    }
-    if (typeof flags === "number" && (flags & real.constants.O_RDWR) !== 0) {
-      if (sqliteFault === "open-denied") throw errnoError("EACCES");
-      if (sqliteFault === "cantopen-emfile-once" && !probeEmfileUsed) {
-        probeEmfileUsed = true;
-        say("PROBE-EMFILE");
-        throw errnoError("EMFILE");
-      }
-    }
+  const [path] = args;
+  if (String(path).endsWith("credential-store.lock")) say("FD-OPEN");
+  if (fsFault === "emfile-once" && !createEmfileUsed && String(path).includes(".schway-lock-")) {
+    createEmfileUsed = true;
+    say("EMFILE");
+    throw errnoError("EMFILE");
   }
   return real.openSync(...args);
+}
+/** linkSync that fails as a filesystem without hard links would. */
+function faultyLinkSync(...args: Parameters<typeof real.linkSync>): void {
+  if (fsFault === "no-hardlinks") {
+    say("NO-HARDLINK");
+    throw errnoError("EPERM");
+  }
+  return real.linkSync(...args);
+}
+/** statSync whose first call on the lock path reports it missing, as a racing older build could. */
+function faultyStatSync(...args: Parameters<typeof real.statSync>): ReturnType<typeof real.statSync> {
+  if (fsFault === "stat-flap" && !statFlapped && String(args[0]).endsWith("credential-store.lock")) {
+    statFlapped = true;
+    say("STAT-FLAP");
+    throw errnoError("ENOENT");
+  }
+  return real.statSync(...args);
 }
 mock.module("node:fs", () => ({
   ...real,
   openSync: faultyOpenSync,
+  linkSync: faultyLinkSync,
+  statSync: faultyStatSync,
   rmSync: watched(real.rmSync),
   rmdirSync: watched(real.rmdirSync),
   unlinkSync: watched(real.unlinkSync),
@@ -101,7 +112,7 @@ if (sqliteFault) {
         real.unlinkSync(path);
         say("VANISHED");
       }
-      if (sqliteFault === "open-denied" || (sqliteFault === "cantopen-emfile-once" && !cantOpenUsed)) {
+      if (sqliteFault === "open-denied" || (sqliteFault === "cantopen-once" && !cantOpenUsed)) {
         cantOpenUsed = true;
         throw Object.assign(new Error("unable to open database file"), { code: "SQLITE_CANTOPEN" });
       }

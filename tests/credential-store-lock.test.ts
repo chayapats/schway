@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import type { Subprocess } from "bun";
@@ -16,6 +16,13 @@ const CONTENDER = join(import.meta.dir, "fixtures/credential-store-lock/contende
 // into a refusal. Refusal at the real 2 s bound is asserted separately.
 const MARGIN_LOCK_MS = 30_000;
 const MARGIN_TEST_MS = 60_000;
+// Single-mutation child probes face no holder, so a 15 s bound is ample. A
+// probe that outlives it by 3 s is killed and reaped, so even a test making
+// three such calls ends well inside MARGIN_TEST_MS.
+const CHILD_LOCK_MS = 15_000;
+const CHILD_KILL_GRACE_MS = 3_000;
+/** SQLite's full-path limit for the lock file on this platform (see docs/credentials.md). */
+const SQLITE_PATH_LIMIT = process.platform === "darwin" ? 1016 : 504;
 /** Root bypasses permission bits, so permission-denied cases cannot be staged as root. */
 const RUNS_AS_ROOT = process.getuid?.() === 0;
 
@@ -131,7 +138,7 @@ async function attempt(timeoutMs: number, operation: "save" | "delete" = "save")
 }
 
 /** Lines reporting a second holder or any removal of the lock path. */
-const violations = (lines: readonly string[]) => lines.filter(line => line.startsWith("OVERLAP") || line.startsWith("REMOVE"));
+const violations = (lines: readonly string[]) => lines.filter(line => line.startsWith("OVERLAP") || line.startsWith("REMOVE") || line.startsWith("FD-OPEN"));
 
 /** Sorted names of contenders that completed their mutation. */
 const doneNames = (lines: readonly string[]) => lines.filter(line => line.startsWith("DONE ")).map(line => line.split(" ")[1]).sort();
@@ -139,13 +146,13 @@ const doneNames = (lines: readonly string[]) => lines.filter(line => line.starts
 /** Expected display of a path in lock messages: the test process's home shortened to `~`. */
 const displayed = (text: string) => text.split(homedir() + sep).join(`~${sep}`);
 
-/** Run one mutation in a fixture process whose HOME makes the isolated lock path its default; a child that outlives its bound by 15 s is killed and reaped. */
+/** Run one mutation in a fixture process whose HOME makes the isolated lock path its default; a child that outlives its bound by CHILD_KILL_GRACE_MS is killed and reaped. */
 async function attemptInChild(name: string, lockTimeoutMs: number, env: Record<string, string> = {}): Promise<{ ok: boolean; message: string; elapsedMs: number; lines: string[] }> {
   const contender = spawnContender("once", name, { ...current.env, CONTENDER_HOLD_MS: "0", CONTENDER_LOCK_TIMEOUT_MS: String(lockTimeoutMs), ...env });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = await Promise.race([
     contender.child.exited.then(() => false),
-    new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), lockTimeoutMs + 15_000); }),
+    new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(true), lockTimeoutMs + CHILD_KILL_GRACE_MS); }),
   ]);
   clearTimeout(timer);
   if (expired) {
@@ -320,7 +327,7 @@ test("an earlier build's lock directory is never removed, and fails fast only fo
   for (const { name, stamp, fast } of cases) {
     mkdirSync(current.lock, { mode: 0o700, recursive: true });
     stamp?.();
-    const result = await attemptInChild(name, fast ? MARGIN_LOCK_MS : 300);
+    const result = await attemptInChild(name, fast ? CHILD_LOCK_MS : 300);
     expect({ name, ok: result.ok }).toEqual({ name, ok: false });
     expect(result.message).toMatch(legacyMessage);
     // A stopped owner cannot clear by waiting; an unproven one waits out the bound.
@@ -356,7 +363,7 @@ test("a folder or non-lock file at a chosen lock path is never called an older l
 test("a non-lock file at the default path fails fast and names it deletable", async () => {
   mkdirSync(join(current.home, ".schway"), { recursive: true });
   writeFileSync(current.lock, "x".repeat(4096));
-  const result = await attemptInChild("damaged", MARGIN_LOCK_MS);
+  const result = await attemptInChild("damaged", CHILD_LOCK_MS);
   expect(result.ok).toBe(false);
   expect(result.elapsedMs).toBeLessThan(1000);
   expect(result.message).toBe("Cannot save credential in the OS secure store. The file at ~/.schway/credential-store.lock is not a Schway lock file. With no Schway running, delete it, then retry. No credential was changed.");
@@ -399,7 +406,7 @@ test("a read-only connection is refused, even while a read-write holder holds th
   try {
     const readOnly = spawnContender("once", "readonly", { ...current.env, CONTENDER_SQLITE: "readonly", CONTENDER_HOLD_MS: "0" });
     expect(await readOnly.child.exited).toBe(1);
-    expect(readOnly.lines.filter(line => line.startsWith("ENTERED") || line.startsWith("OVERLAP"))).toEqual([]);
+    expect(readOnly.lines.filter(line => line.startsWith("ENTERED") || line.startsWith("OVERLAP") || line.startsWith("FD-OPEN"))).toEqual([]);
     const failed = readOnly.lines.find(line => line.startsWith("FAILED readonly "));
     const { message, elapsedMs } = JSON.parse(failed!.slice("FAILED readonly ".length)) as { message: string; elapsedMs: number };
     expect(message).toBe("Cannot save credential in the OS secure store. Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry. No credential was changed.");
@@ -409,7 +416,7 @@ test("a read-only connection is refused, even while a read-write holder holds th
     await holder;
   }
   // Read-only and alone, it is still refused rather than admitted.
-  const alone = await attemptInChild("readonly-alone", MARGIN_LOCK_MS, { CONTENDER_SQLITE: "readonly" });
+  const alone = await attemptInChild("readonly-alone", CHILD_LOCK_MS, { CONTENDER_SQLITE: "readonly" });
   expect(alone.ok).toBe(false);
   expect(alone.message).toMatch(/Schway cannot write its lock file at /);
 }, MARGIN_TEST_MS);
@@ -444,7 +451,7 @@ test.skipIf(RUNS_AS_ROOT)("a lock directory this user cannot write fails fast", 
 test("a lock file deleted just before the open is retried, not refused", async () => {
   // Deleting the file is a documented recovery step; a save racing it must
   // recreate the file and succeed within its bound.
-  const result = await attemptInChild("vanish", MARGIN_LOCK_MS, { CONTENDER_SQLITE: "vanish-once" });
+  const result = await attemptInChild("vanish", CHILD_LOCK_MS, { CONTENDER_SQLITE: "vanish-once" });
   expect(result.lines).toContain("VANISHED vanish");
   expect(result.ok).toBe(true);
   expect(statSync(current.lock).isFile()).toBe(true);
@@ -463,6 +470,11 @@ test("lock paths that waiting cannot fix fail fast with a matching next action",
   symlinkSync(join(current.root, "missing-volume", "schway"), danglingDir);
   const loopDir = join(current.root, "loop-dir");
   symlinkSync(loopDir, loopDir);
+  // Links whose targets run through a regular file lead nowhere (ENOTDIR).
+  const throughFile = join(current.root, "through-file.lock");
+  symlinkSync(join(file, "y"), throughFile);
+  const parentThroughFile = join(current.root, "parent-through-file");
+  symlinkSync(join(file, "sub"), parentThroughFile);
   const long = join(current.root, "x".repeat(300), "credential.lock");
   const parentFile = (at: string) => `${at} is a file, not a folder. Set SCHWAY_CREDENTIAL_LOCK_FILE to a path inside a folder, then retry.`;
   const link = (at: string) => `The symbolic link at ${at} is broken or loops. Fix that link, then retry.`;
@@ -477,6 +489,8 @@ test("lock paths that waiting cannot fix fail fast with a matching next action",
     { path: join(danglingDir, "credential.lock"), reason: link(danglingDir) },
     { path: join(danglingDir, "nested", "credential.lock"), reason: link(danglingDir) },
     { path: join(loopDir, "credential.lock"), reason: link(loopDir) },
+    { path: throughFile, reason: link(throughFile) },
+    { path: join(parentThroughFile, "credential.lock"), reason: link(parentThroughFile) },
     { path: long, reason: `The lock path ${long} is too long. Set SCHWAY_CREDENTIAL_LOCK_FILE to a shorter absolute path, then retry.` },
   ];
   for (const { path, reason } of cases) {
@@ -492,13 +506,13 @@ test("a broken link or file in the default lock folder fails fast and names it",
   const schway = join(current.home, ".schway");
   // A ~/.schway pointing at an unmounted volume.
   symlinkSync(join(current.root, "missing-volume", "schway"), schway);
-  const unmounted = await attemptInChild("unmounted", MARGIN_LOCK_MS);
+  const unmounted = await attemptInChild("unmounted", CHILD_LOCK_MS);
   expect(unmounted.ok).toBe(false);
   expect(unmounted.elapsedMs).toBeLessThan(1000);
   expect(unmounted.message).toBe("Cannot save credential in the OS secure store. The symbolic link at ~/.schway is broken or loops. Fix that link, then retry. No credential was changed.");
   rmSync(schway);
   writeFileSync(schway, "");
-  const file = await attemptInChild("file", MARGIN_LOCK_MS);
+  const file = await attemptInChild("file", CHILD_LOCK_MS);
   expect(file.ok).toBe(false);
   expect(file.elapsedMs).toBeLessThan(1000);
   expect(file.message).toBe("Cannot save credential in the OS secure store. ~/.schway is a file, not a folder. Move that file, then retry. No credential was changed.");
@@ -573,27 +587,81 @@ test("an override reaching the default location by another spelling is the defau
   mkdirSync(join(volume, "schway"), { recursive: true });
   mkdirSync(join(volume, ".schway", "credential-store.lock"), { recursive: true });
   symlinkSync(join(volume, "schway"), schway);
-  const dotted = await attemptInChild("dotted", MARGIN_LOCK_MS, { [CREDENTIAL_LOCK_FILE_ENV]: `${schway}${sep}..${sep}.schway${sep}credential-store.lock` });
+  const dotted = await attemptInChild("dotted", CHILD_LOCK_MS, { [CREDENTIAL_LOCK_FILE_ENV]: `${schway}${sep}..${sep}.schway${sep}credential-store.lock` });
   expect(dotted.message).toBe(chosen);
   expect(dotted.elapsedMs).toBeLessThan(1000);
 }, MARGIN_TEST_MS);
 
-test("an open the sandbox denies while access(2) allows it fails fast as unwritable", async () => {
-  // Every SQLite open fails with SQLITE_CANTOPEN and a direct read-write open with EACCES.
-  const result = await attemptInChild("denied", MARGIN_LOCK_MS, { CONTENDER_SQLITE: "open-denied" });
+test("an open the sandbox denies while access(2) allows it ends the bound as unwritable, without a probe", async () => {
+  // Every SQLite open fails with SQLITE_CANTOPEN while access(2) allows the
+  // file. Without opening a descriptor, that cannot be told from a transient
+  // failure, so it waits out the bound, then names the cannot-write action.
+  const result = await attemptInChild("denied", 300, { CONTENDER_SQLITE: "open-denied" });
   expect(result.ok).toBe(false);
-  expect(result.elapsedMs).toBeLessThan(1000);
+  expect(result.elapsedMs).toBeGreaterThanOrEqual(250);
   expect(result.message).toBe("Cannot save credential in the OS secure store. Schway cannot write its lock file at ~/.schway/credential-store.lock. Make that location writable for this user, then retry. No credential was changed.");
+  expect(violations(result.lines)).toEqual([]);
 }, MARGIN_TEST_MS);
 
-test("a descriptor shortage is retried within the bound, not refused", async () => {
-  // EMFILE on the exclusive create, then EMFILE from the open diagnosis after SQLITE_CANTOPEN.
-  const create = await attemptInChild("emfile", MARGIN_LOCK_MS, { CONTENDER_FS: "emfile-once" });
+test("descriptor shortages and a one-off open failure are retried within the bound, not refused", async () => {
+  // EMFILE on the private temporary create, then one SQLITE_CANTOPEN.
+  const create = await attemptInChild("emfile", CHILD_LOCK_MS, { CONTENDER_FS: "emfile-once" });
   expect(create.lines).toContain("EMFILE emfile");
   expect(create.ok).toBe(true);
-  const probe = await attemptInChild("probe", MARGIN_LOCK_MS, { CONTENDER_SQLITE: "cantopen-emfile-once" });
-  expect(probe.lines).toContain("PROBE-EMFILE probe");
-  expect(probe.ok).toBe(true);
+  const reopened = await attemptInChild("reopened", CHILD_LOCK_MS, { CONTENDER_SQLITE: "cantopen-once" });
+  expect(reopened.ok).toBe(true);
+  expect(violations([...create.lines, ...reopened.lines])).toEqual([]);
+}, MARGIN_TEST_MS);
+
+test("the lock file is created and locked without any descriptor outside SQLite", async () => {
+  // A fresh lock file is published by link(2) from a private temporary name,
+  // so no descriptor on the lock path itself is ever closed outside SQLite.
+  const fresh = await attemptInChild("fresh", CHILD_LOCK_MS);
+  expect(fresh.ok).toBe(true);
+  expect(violations(fresh.lines)).toEqual([]);
+  const lock = statSync(current.lock);
+  expect({ size: lock.size, nlink: lock.nlink }).toEqual({ size: 0, nlink: 1 });
+  if (process.platform !== "win32") expect(lock.mode & 0o777).toBe(0o600);
+  expect(readdirSync(dirname(current.lock))).toEqual(["credential-store.lock"]);
+  // Without hard links, SQLite itself creates the file.
+  rmSync(current.lock);
+  const fallback = await attemptInChild("fallback", CHILD_LOCK_MS, { CONTENDER_FS: "no-hardlinks" });
+  expect(fallback.lines).toContain("NO-HARDLINK fallback");
+  expect(fallback.ok).toBe(true);
+  expect(violations(fallback.lines)).toEqual([]);
+  expect(statSync(current.lock).size).toBe(0);
+  if (process.platform !== "win32") expect(statSync(current.lock).mode & 0o777).toBe(0o600);
+  expect(readdirSync(dirname(current.lock))).toEqual(["credential-store.lock"]);
+}, MARGIN_TEST_MS);
+
+test("a lock path longer than SQLite opens is refused at once, and one at the limit locks", async () => {
+  // Build a path of an exact byte length from short-enough components.
+  const root = realpathSync(current.root);
+  const pathOf = (bytes: number) => {
+    let folder = join(root, `len-${bytes}`);
+    while (Buffer.byteLength(folder) + 1 + 120 < bytes) folder = join(folder, "d".repeat(100));
+    const path = join(folder, "f".repeat(bytes - Buffer.byteLength(folder) - 1));
+    expect(Buffer.byteLength(path)).toBe(bytes);
+    return path;
+  };
+  const atLimit = pathOf(SQLITE_PATH_LIMIT);
+  process.env[CREDENTIAL_LOCK_FILE_ENV] = atLimit;
+  expect((await attempt(5000)).ran).toBe(true);
+  const over = pathOf(SQLITE_PATH_LIMIT + 1);
+  process.env[CREDENTIAL_LOCK_FILE_ENV] = over;
+  const result = await attempt(5000);
+  expect({ ran: result.ran, fast: result.elapsedMs < 1000 }).toEqual({ ran: false, fast: true });
+  expect(result.message).toBe(`Cannot save credential in the OS secure store. The lock path ${displayed(over)} is too long. Set SCHWAY_CREDENTIAL_LOCK_FILE to a shorter absolute path, then retry. No credential was changed.`);
+  expect(existsSync(over)).toBe(false);
+});
+
+test("an override spelled exactly as the default stays the default while an older build's folder flickers", async () => {
+  // The first stat of the lock path reports it missing, as an older build
+  // removing and recreating its folder between two stat calls would.
+  mkdirSync(current.lock, { recursive: true });
+  const result = await attemptInChild("flap", 300, { CONTENDER_FS: "stat-flap" });
+  expect(result.lines).toContain("STAT-FLAP flap");
+  expect(result.message).toBe("Cannot save credential in the OS secure store. An older Schway's lock folder is at ~/.schway/credential-store.lock. Close every older Schway, delete that folder, then retry. No credential was changed.");
 }, MARGIN_TEST_MS);
 
 test("lock waits must be whole milliseconds within the supported range", async () => {

@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
-import { accessSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { accessSync, chmodSync, closeSync, constants, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, statSync, unlinkSync } from "node:fs";
 import { homedir, hostname, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { credentialLockError, credentialStoreError } from "./store.ts";
@@ -73,6 +74,12 @@ function resolveLockTarget(): LockTarget | null {
   if (override === undefined || override.trim() === "") return { path: fallback, chosen: false, folder: false };
   if (!isAbsolute(override)) return null;
   if (override.endsWith("/") || override.endsWith(sep)) return { path: override, chosen: true, folder: true };
+  // A lexical match needs no filesystem: the stat pair below is not atomic,
+  // and an older Schway creating or removing its folder between the two calls
+  // must not turn the default path into a chosen one. A `..` is excluded,
+  // because after a linked folder it leads somewhere lexical resolution cannot see.
+  const dotDot = override.split(/[\\/]+/).includes("..");
+  if (!dotDot && resolve(override) === resolve(fallback)) return { path: override, chosen: false, folder: false };
   return { path: override, chosen: !sameLocation(override, fallback), folder: false };
 }
 
@@ -111,11 +118,13 @@ type Inode = { readonly dev: number; readonly ino: number };
  */
 type Attempt =
   | { readonly kind: "held"; readonly lock: Database; readonly inode: Inode }
-  | { readonly kind: "busy" }
+  | { readonly kind: "busy"; readonly cantOpen?: true }
   | { readonly kind: "legacy"; readonly stopped: boolean }
   | { readonly kind: "refused"; readonly refusal: Refusal };
 
 const BUSY: Attempt = { kind: "busy" };
+/** SQLite could not open an existing regular file that access(2) allows; see `withCredentialStoreLock`. */
+const CANT_OPEN: Attempt = { kind: "busy", cantOpen: true };
 const refuse = (reason: Refusal["reason"], at?: string): Attempt => ({ kind: "refused", refusal: at === undefined ? { reason } : { reason, at } });
 
 /** Errno code of a filesystem error, if any. */
@@ -151,7 +160,8 @@ function diagnosePath(path: string): Attempt | null {
       try {
         target = statSync(component);
       } catch (error) {
-        return errno(error) === "ENOENT" || errno(error) === "ELOOP" ? refuse("link", component) : null;
+        // ENOTDIR: the link's target runs through a regular file, so it leads nowhere.
+        return ["ENOENT", "ELOOP", "ENOTDIR"].includes(errno(error) ?? "") ? refuse("link", component) : null;
       }
       if (!last && !target.isDirectory()) return refuse("parent-file", component);
     } else if (!last && !entry.isDirectory()) {
@@ -181,41 +191,93 @@ function sqliteFailure(error: unknown): Attempt {
 }
 
 /**
- * Connections whose open transaction is a held lock, with the inode each
- * one locked. A held connection must stay reachable until `release`: a
- * holder waiting on a promise nothing else references would otherwise let
- * the garbage collector finalize the connection and silently drop the lock
- * while the holder still counts as inside.
+ * Connections whose open transaction is a held lock. A held connection must
+ * stay reachable until `release`: a holder waiting on a promise nothing else
+ * references would otherwise let the garbage collector finalize the
+ * connection and silently drop the lock while the holder still counts as inside.
  */
-const HELD = new Map<Database, Inode>();
-
-/** True when this process holds the lock on that inode through any connection. */
-function holdsInode(inode: Inode): boolean {
-  for (const held of HELD.values()) if (held.dev === inode.dev && held.ino === inode.ino) return true;
-  return false;
-}
+const HELD = new Set<Database>();
 
 /**
- * Diagnose a failed SQLite open of an existing regular file. A missing file
- * (deleted since the stat) or a descriptor shortage clears by retrying; only
- * a file this user may not open for writing is refused. `access(2)` answers
- * without a descriptor, but sandboxes can allow it while denying the open,
- * so a direct read-write open then asks for the real errno. Closing that
- * probe would drop this process's POSIX locks on the inode, so it runs only
- * while no connection here holds one; otherwise the attempt is retried.
+ * Diagnose a failed SQLite open of an existing regular file without opening
+ * a descriptor: closing any descriptor on the lock file outside SQLite can
+ * drop this process's POSIX locks, including one another thread holds. A
+ * path `access(2)` denies is refused; anything else (a file deleted since
+ * the stat, a descriptor shortage, or a sandbox that allows access(2) but
+ * denies the open) is retried and remembered for the bound.
  */
-function openFailure(path: string, inode: Inode): Attempt {
+function openFailure(path: string): Attempt {
   try {
     accessSync(path, constants.R_OK | constants.W_OK);
+    return CANT_OPEN;
   } catch (error) {
     return DENIED.has(errno(error) ?? "") ? refuse("unwritable") : BUSY;
   }
-  if (holdsInode(inode)) return BUSY;
+}
+
+/** Longest full lock path SQLite opens: its path limit (1024 bytes on macOS, 512 elsewhere) minus 8 for the `-journal` name. */
+const SQLITE_PATH_LIMIT = process.platform === "darwin" ? 1016 : 504;
+
+/** True when SQLite would refuse the lock path as too long once links are resolved. */
+function tooLongForSqlite(path: string): boolean {
+  let resolved = resolve(path);
   try {
-    closeSync(openSync(path, constants.O_RDWR | (constants.O_NONBLOCK ?? 0)));
-    return BUSY;
+    resolved = realpathSync(path);
+  } catch {
+    try {
+      resolved = join(realpathSync(dirname(path)), basename(path));
+    } catch {
+      // Measure the path as given.
+    }
+  }
+  return Buffer.byteLength(resolved, "utf8") > SQLITE_PATH_LIMIT;
+}
+
+/** Filesystem errors from `link(2)` that mean the filesystem has no hard links. */
+const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"]);
+
+/**
+ * Create the empty lock file once, without ever holding a descriptor on it
+ * outside SQLite. The descriptor belongs to a private temporary name that is
+ * closed before `link(2)` publishes it, and the link fails rather than
+ * following or replacing anything already at the lock path. On a filesystem
+ * without hard links, SQLite itself creates the file, so even then only
+ * SQLite holds a descriptor. Returns null when the file now exists.
+ */
+function createLockFile(path: string): Attempt | null {
+  const temporary = join(dirname(path), `.schway-lock-${process.pid}-${randomUUID().slice(0, 8)}`);
+  try {
+    closeSync(openSync(temporary, "wx", 0o600));
   } catch (error) {
-    return DENIED.has(errno(error) ?? "") ? refuse("unwritable") : BUSY;
+    return fsFailure(path, error);
+  }
+  try {
+    linkSync(temporary, path);
+    return null;
+  } catch (error) {
+    if (errno(error) === "EEXIST") return null;
+    if (!NO_HARD_LINKS.has(errno(error) ?? "")) return fsFailure(path, error);
+  } finally {
+    try {
+      unlinkSync(temporary);
+    } catch {
+      // A leftover temporary name is harmless; the lock path never refers to it.
+    }
+  }
+  // No hard links: let SQLite create the file. Its own close keeps every
+  // other connection's lock on that file, in any thread of this process.
+  try {
+    lstatSync(path);
+    return null;
+  } catch (error) {
+    if (errno(error) !== "ENOENT") return fsFailure(path, error);
+  }
+  try {
+    new Database(path, { readwrite: true, create: true }).close();
+    chmodSync(path, 0o600);
+    return null;
+  } catch (error) {
+    return fsFailure(path, error);
   }
 }
 
@@ -274,19 +336,24 @@ function tryAcquire(target: LockTarget): Attempt {
   } catch (error) {
     return fsFailure(path, error);
   }
+  // SQLite refuses a full path past its limit with SQLITE_CANTOPEN, so say so
+  // before creating anything there.
+  if (tooLongForSqlite(path)) return refuse("too-long");
   // Create the lock inode once, privately, and keep it forever. Only SQLite
-  // opens an existing lock file: closing any other descriptor for it can drop
-  // this process's POSIX locks. A brand-new inode has no locks to drop.
+  // ever holds a descriptor on it: closing any other descriptor for it can
+  // drop this process's POSIX locks, in every thread.
   try {
-    closeSync(openSync(path, "wx", 0o600));
+    lstatSync(path);
   } catch (error) {
-    if (errno(error) !== "EEXIST") return fsFailure(path, error);
+    if (errno(error) !== "ENOENT") return fsFailure(path, error);
+    const created = createLockFile(path);
+    if (created) return created;
   }
   let before: ReturnType<typeof statSync>;
   try {
     before = statSync(path);
   } catch (error) {
-    // The exclusive create saw something here: a broken or looping link stays broken.
+    // Something is here that does not resolve: a broken, looping or file-crossing link is named.
     return fsFailure(path, error);
   }
   if (before.isDirectory()) {
@@ -301,12 +368,14 @@ function tryAcquire(target: LockTarget): Attempt {
   // committed. Anything else, such as an existing database, is not opened,
   // because even switching its journal mode could rewrite it.
   if (!before.isFile() || before.size !== 0) return refuse("not-lock");
+  // A link from here to a longer target can still exceed SQLite's limit.
+  if (tooLongForSqlite(path)) return refuse("too-long");
   const inode = { dev: before.dev, ino: before.ino };
   let lock: Database;
   try {
     lock = new Database(path, { readwrite: true, create: false });
   } catch (error) {
-    return String((error as { code?: unknown })?.code ?? "").startsWith("SQLITE_CANTOPEN") ? openFailure(path, inode) : sqliteFailure(error);
+    return String((error as { code?: unknown })?.code ?? "").startsWith("SQLITE_CANTOPEN") ? openFailure(path) : sqliteFailure(error);
   }
   try {
     // An in-memory journal keeps the verification write below from creating
@@ -327,7 +396,7 @@ function tryAcquire(target: LockTarget): Attempt {
     release(lock);
     return sqliteFailure(error);
   }
-  HELD.set(lock, inode);
+  HELD.add(lock);
   return { kind: "held", lock, inode };
 }
 
@@ -407,8 +476,14 @@ export async function withCredentialStoreLock<T>(work: () => Promise<T>, opts?: 
   if (target.folder) throw credentialLockError(operation, refusalReason({ reason: "not-lock" }, target));
   const legacy = () => credentialLockError(operation, `An older Schway's lock folder is at ${displayPath(target.path)}. Close every older Schway, delete that folder, then retry.`);
   const deadline = Date.now() + timeoutMs;
+  // When every attempt in the bound failed only because SQLite could not
+  // open a file access(2) allows, as in a sandbox that denies the open, the
+  // bound ends with the cannot-write action instead of the generic text.
+  // Without a descriptor, that cannot be told apart from a transient failure sooner.
+  let onlyCantOpen = true;
   for (;;) {
     const attempt = tryAcquire(target);
+    if (attempt.kind !== "busy" || attempt.cantOpen !== true) onlyCantOpen = false;
     if (attempt.kind === "held") {
       if (stillNamesInode(target.path, attempt.inode)) {
         try {
@@ -425,7 +500,11 @@ export async function withCredentialStoreLock<T>(work: () => Promise<T>, opts?: 
     }
     // Fail closed instead of mutating without the lock: the operation never
     // ran, so callers map this to a terminal store state and retry the turn.
-    if (Date.now() >= deadline) throw attempt.kind === "legacy" ? legacy() : new Error(credentialStoreError(operation));
+    if (Date.now() >= deadline) {
+      if (attempt.kind === "legacy") throw legacy();
+      if (onlyCantOpen) throw credentialLockError(operation, refusalReason({ reason: "unwritable" }, target));
+      throw new Error(credentialStoreError(operation));
+    }
     await sleep(Math.min(LOCK_POLL_MS, Math.max(0, deadline - Date.now())));
   }
 }
