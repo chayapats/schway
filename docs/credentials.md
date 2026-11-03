@@ -180,7 +180,10 @@ for example because of permissions, a read-only mount or a sandbox where
 `access(2)` and `open(2)` disagree, and a read-only `BEGIN IMMEDIATE` excludes
 no other writer. Such a connection is refused. The journal stays in memory and
 the transaction is never committed, so the lock file stays empty and no side
-file appears.
+file appears. A Schway lock file is always empty, so Schway refuses a non-empty
+file at the lock path without opening it; an existing database there, including
+a WAL database, is never modified. Beside an empty lock file, SQLite may delete
+a leftover `-journal` file.
 
 **Crash semantics.** If the holder dies mid-mutation, the next contender gets the
 lock as soon as the operating system reaps that process. Whatever the secure
@@ -196,7 +199,11 @@ secure store. Unlock or allow access to your OS credential store; …`. Nothing
 changes, and retrying is safe. A second acquisition inside one process waits out
 the same bound and fails closed rather than deadlocking. Transient conditions,
 such as a lock file deleted just before it is opened or a shortage of file
-descriptors, are retried within the same bound.
+descriptors, are retried within the same bound. When SQLite cannot open an
+existing lock file that `access(2)` allows, Schway opens it directly once to
+learn why, so a sandbox that denies the open fails fast instead of waiting.
+Closing that descriptor would drop this process's lock on the file on Linux, so
+Schway skips the check while this process holds the lock.
 
 **Refusals that waiting cannot clear.** These fail at once, before contacting the
 secure store, with a specific next action. Each message starts with `Cannot save
@@ -210,17 +217,18 @@ under your home directory are shown with `~`.
 | Condition | Message after the prefix |
 | --- | --- |
 | Relative `SCHWAY_CREDENTIAL_LOCK_FILE` | `SCHWAY_CREDENTIAL_LOCK_FILE must be an absolute path. Set an absolute path or unset it, then retry.` |
-| Permission denied, a read-only mount, or a lock file or connection this user cannot write | `Schway cannot write its lock file at <path>. Make that location writable for this user, then retry.` |
-| A parent of the lock path is a regular file | `A parent of <path> is a file, not a folder. Move that file, then retry.` |
-| The lock path is a broken or looping symbolic link | `The lock path <path> is a broken or looping symbolic link. Fix that link, then retry.` |
+| Permission denied, a read-only mount, a sandbox that denies the open, or a lock file or connection this user cannot write | `Schway cannot write its lock file at <path>. Make that location writable for this user, then retry.` |
+| At the default path: a folder on the way to the lock file is a regular file | `<folder> is a file, not a folder. Move that file, then retry.` |
+| At a `SCHWAY_CREDENTIAL_LOCK_FILE` path: a folder on the way to the lock file is a regular file | `<folder> is a file, not a folder. Set SCHWAY_CREDENTIAL_LOCK_FILE to a path inside a folder, then retry.` |
+| The lock path, or a folder on the way to it, is a broken or looping symbolic link | `The symbolic link at <link> is broken or loops. Fix that link, then retry.` |
 | The lock path is too long for the filesystem | `The lock path <path> is too long. Set SCHWAY_CREDENTIAL_LOCK_FILE to a shorter absolute path, then retry.` |
-| At the default path: something other than a lock file, such as a data file or device | `The file at <path> is not a Schway lock file. With no Schway running, delete it, then retry.` |
-| At a `SCHWAY_CREDENTIAL_LOCK_FILE` path: a folder or anything other than a lock file | `SCHWAY_CREDENTIAL_LOCK_FILE does not name a Schway lock file. Set it to a new file path, then retry.` |
+| At the default path: anything other than an empty lock file, such as a data file, database or device | `The file at <path> is not a Schway lock file. With no Schway running, delete it, then retry.` |
+| At a `SCHWAY_CREDENTIAL_LOCK_FILE` path: a folder, a value ending in a path separator, or anything other than an empty lock file | `SCHWAY_CREDENTIAL_LOCK_FILE does not name a Schway lock file. Set it to a new file path, then retry.` |
 | At the default path: an earlier build's lock folder whose owner is provably stopped | `An older Schway's lock folder is at <path>. Close every older Schway, delete that folder, then retry.` |
 
-Schway never suggests deleting a path you chose with `SCHWAY_CREDENTIAL_LOCK_FILE`:
-earlier builds never used that variable, so a folder there is your own, not an
-older lock. At the default path, an earlier build's lock folder with a live,
+Schway never suggests deleting or moving a path you chose with
+`SCHWAY_CREDENTIAL_LOCK_FILE`: earlier builds never used that variable, so a
+folder or file there is your own, not an older lock. At the default path, an earlier build's lock folder with a live,
 foreign or missing owner waits out the bound first, then shows the same
 older-Schway message. Schway reads that folder's owner stamp only if it is a
 small regular file, so a planted FIFO or device cannot block it.
@@ -240,10 +248,13 @@ home is read-only (systemd `ProtectHome=`). Point it at a new file under a
 writable local folder, such as `credential-store.lock` inside the unit's
 `StateDirectory=`, not at the folder itself. Schway reads the variable on every
 save or deletion and creates missing parent directories. A blank value, or one
-naming the default path, uses the default location. A relative value fails at
-once with its own message, without contacting the store. Processes that should
-serialize must use the same path; processes with different paths do not exclude
-each other.
+that reaches the default lock file, uses the default location. Schway compares
+device and inode, so a link alias of `~/.schway`, or a case variant on a
+case-insensitive filesystem, counts as the default, while a `..` after a linked
+folder counts where it physically leads. A relative value, or one ending in a
+path separator, fails at once with its own message, without contacting the
+store. Processes that should serialize must use the same path; processes with
+different paths do not exclude each other.
 
 ### Upgrade note: lock-directory builds stop saving credentials
 
@@ -336,6 +347,12 @@ in-flight mutation, normally milliseconds. Schway does not guard the path: a
 one-file deny would miss symbolic links, hard links, extensions and embedder
 code, and holding the lock in a helper process would add a process start and new
 failure modes to every save. Do not point tools at the lock file.
+
+**Worker threads.** Schway tracks the connections it holds per JavaScript thread
+and takes the lock only from its main thread. An embedder that also takes it
+from a worker thread in the same process could have one thread's open
+diagnosis, described under the bounded wait, close a descriptor and drop the
+other thread's lock on Linux. Take the lock from one thread per process.
 
 **Reusing the primitive.** Embedders that build their own lock this way should
 follow the same rules:
