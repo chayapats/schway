@@ -570,6 +570,44 @@ sent nothing observable reports `effort: null`.
 
 See `tests/host-effort.test.ts`.
 
+## Output caps
+
+`hostCapabilities().outputCapContract` advertises `schway.host.output-cap/v1`
+([#446](https://github.com/chayapats/schway/issues/446)), an additive slice
+under `release/v2`. `RELEASE_CONTRACT` is unchanged.
+
+**Read support before I/O.** `describeAuthRoute(selection).outputCap` and each
+listed `HostModelChoice.outputCap` (`HostOutputCapSupport`) say, with no network
+or inference for the description, whether the route sends a provider-enforced
+output cap. Codex reports `{ enforced: false, default: null, maximum: null }`:
+its subscription endpoint rejects output caps, so the adapter never sends one.
+Grok reports `enforced: true` with `default` and `maximum` set to the cap the
+adapter sends when you set none, from Schway's model catalog. This uses the same
+listing surface as effort support, so one read covers both.
+
+**Set and require a cap.** `createModel({ maxOutputTokens })` sends exactly that
+cap on every call, compaction summaries and auth-retry resends included. It must
+be a positive safe integer at or below `maximum`. `requireOutputCap: true` makes
+every call carry a provider-enforced cap. On a route that sends no cap, either
+option rejects `invalid-input` at `createModel`, before any request; out-of-range
+values reject the same way. Each body is checked before the authorizer runs, and
+a body without the required cap is refused with an error `isRouteControlRefused`
+recognizes. Without these options, request bytes are unchanged, and the CLI/TUI
+path is unchanged. `submitWithRoute` takes no cap options; it keeps the route
+default, which `HostDispatch.outputCap` reports. Use the #444 authorizer for a
+call-count ceiling.
+
+**Observe what was sent.** Every `HostDispatch` carries `outputCap: { sent }`
+(`HostDispatchOutputCap`), the exact `max_output_tokens` value in the body, or
+null when the body carries none, as on Codex. Each `HostRunAttemptUsage` carries
+the same for its last route send, or null when it sent nothing observable.
+
+Output-token caps bound how many tokens the provider may return; they are not
+monetary bounds. Subscription spend stays unknown to Schway: it never estimates
+cost, and an enforced cap does not prove a charge.
+
+See `tests/host-output-cap.test.ts`.
+
 ## Managed session data: retire and delete owned native sessions
 
 `schway.host.managed-session-data/v1` narrows the supported native-data lifecycle for Jit correction, forget and delete. The application retires a context and removes owned native artifacts after active work settles, without private imports or rewriting conversation records.
@@ -924,7 +962,8 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `beginDeviceSignIn` | Start bounded selected-route device approval without exposing tokens. |
 | `checkAuthReadiness` | Check selected-route store readiness without network or inference, optionally bounded. |
 | `listRouteModels` | List a bounded selected-account catalog without inference or credential writes. |
-| `HostModelChoice` | Selectable model with recommendation, observed context limit and effort support. |
+| `HostModelChoice` | Selectable model with recommendation, observed context limit, effort and output-cap support. |
+| `HostOutputCapSupport` | Whether a route sends an enforced output cap, with its default and maximum. |
 | `HostRouteModels` | Listed models or safe route failure with `containsNoSecrets`. |
 | `classifyAuthError` | Map a route-bound failure to a safe status without secrets. |
 | `containsNoSecrets` | Test helper confirming sentinels are absent from returned data. |
@@ -982,6 +1021,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostDispatch` | Frozen credential-free record of one physical inference send. |
 | `HostDispatchAuthorizer` | Synchronous veto called immediately before each physical send. |
 | `HostDispatchEffort` | Effort requested and the exact effort control one body carries. |
+| `HostDispatchOutputCap` | Exact output cap one body carries. |
 | `HostEffortPin` | Exact effort a route model sends on every call. |
 | `HostEffortSupport` | Accepted effort levels, `off` support and default from the adapter's policy. |
 | `HostedTool` | Native closed hosted-lookup union; host sends none. |
