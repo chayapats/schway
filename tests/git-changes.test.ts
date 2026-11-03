@@ -932,12 +932,11 @@ test("dubious ownership and a missing git binary are inspection failures, not no
       const status = await inspectGitStatus(dir);
       expect("error" in status && status.error).toStartWith("Git inspection failed: git unavailable");
     });
-    // A directory outside any repository is still a plain non-Git workspace.
-    const plain = join(dir, "..", `${dir.split("/").at(-1)}-plain`);
-    await mkdir(plain, { recursive: true });
-    try {
-      const status = await inspectGitStatus(plain);
-      expect(status).toEqual({ isGit: false, root: plain });
-    } finally { await rm(plain, { recursive: true, force: true }); }
+  });
+  // A directory outside any repository is still a plain non-Git workspace. It gets its own temp root:
+  // a sibling of `dir` would sit outside every root this test created.
+  await withTempDir(async plain => {
+    const status = await inspectGitStatus(plain);
+    expect(status).toEqual({ isGit: false, root: plain });
   });
 });

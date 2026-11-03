@@ -1,0 +1,145 @@
+{
+  "tests/anthropic-removal.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/cli.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/config-cli.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/credential-store-lock.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 5
+  },
+  "tests/diagnostics-cli.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/diagnostics.test.ts": {
+    "mkdtemp": 2,
+    "recursiveRemoval": 2
+  },
+  "tests/docs-links.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/doctor-cli.test.ts": {
+    "mkdtemp": 5,
+    "recursiveRemoval": 1
+  },
+  "tests/doctor.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/drafts-store.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/fixtures/core-tools-parity.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/fixtures/credential-store-lock/isolate-preload.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/fixtures/readme-demo.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/fixtures/tui-demo.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/history-collector.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/history-store.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/history-telemetry.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/host-managed-session-data.test.ts": {
+    "recursiveRemoval": 4
+  },
+  "tests/host-release.test.ts": {
+    "mkdtemp": 9,
+    "recursiveRemoval": 9
+  },
+  "tests/journeys-241.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/packaging.test.ts": {
+    "recursiveRemoval": 1
+  },
+  "tests/reasoning-effort.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/review-resume.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/review-scope.test.ts": {
+    "recursiveRemoval": 1
+  },
+  "tests/screen-catalog.test.ts": {
+    "mkdtemp": 2,
+    "recursiveRemoval": 3
+  },
+  "tests/screen-catalog/harness.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/session-branches.test.ts": {
+    "recursiveRemoval": 1
+  },
+  "tests/skills.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 2
+  },
+  "tests/tui-context.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 2
+  },
+  "tests/tui-debug.test.ts": {
+    "mkdtemp": 2,
+    "recursiveRemoval": 2
+  },
+  "tests/tui-history.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 3
+  },
+  "tests/tui-sessions.test.ts": {
+    "recursiveRemoval": 1
+  },
+  "tests/tui-slash-palette-enter.test.ts": {
+    "recursiveRemoval": 1
+  },
+  "tests/tui-view.test.ts": {
+    "recursiveRemoval": 1
+  },
+  "tests/turn-telemetry.test.ts": {
+    "mkdtemp": 1,
+    "recursiveRemoval": 1
+  },
+  "tests/undo-evidence.test.ts": {
+    "recursiveRemoval": 2
+  },
+  "tests/web-fetch-integration.test.ts": {
+    "mkdtemp": 3,
+    "recursiveRemoval": 3
+  },
+  "tests/workspace-attachments.test.ts": {
+    "recursiveRemoval": 2
+  }
+}
