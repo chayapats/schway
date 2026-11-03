@@ -634,6 +634,13 @@ export async function fetchSubscriptionCatalog(input: {
   } catch {
     throw new Error("ChatGPT model catalog returned invalid JSON.");
   }
+  const models = codexCatalogCapabilities(payload);
+  if (!models.length) throw new Error("No selectable models were returned for this ChatGPT subscription.");
+  return models;
+}
+
+/** Parse a raw Codex catalog payload into route capabilities exactly as the adapter reads it; rejects an invalid list. */
+export function codexCatalogCapabilities(payload: unknown): ModelCapability[] {
   if (!payload || typeof payload !== "object" || !("models" in payload) || !Array.isArray(payload.models) || payload.models.length > 256) {
     throw new Error("ChatGPT model catalog returned an invalid model list.");
   }
@@ -658,7 +665,6 @@ export async function fetchSubscriptionCatalog(input: {
       supportedThinking,
     });
   }
-  if (!models.size) throw new Error("No selectable models were returned for this ChatGPT subscription.");
   return [...models.values()];
 }
 

@@ -86,20 +86,6 @@ export function xaiModelCapabilities(models: readonly ListedModel[], authRoute: 
   }));
 }
 
-/** Turn parsed Codex rows into capabilities as the adapter's catalog parser does: listed levels only, a default only when listed. */
-export function codexModelCapabilities(models: readonly ListedModel[]): ModelCapability[] {
-  return models.map(model => {
-    const supportedThinking = model.supportedThinking ?? [];
-    return {
-      id: model.id, authRoute: "codex" as const,
-      ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
-      ...(model.maxOutput !== undefined ? { maxOutput: model.maxOutput } : {}),
-      ...(model.defaultThinking !== undefined && supportedThinking.includes(model.defaultThinking) ? { defaultThinking: model.defaultThinking } : {}),
-      supportedThinking,
-    };
-  });
-}
-
 type ModelListRoute = "api-key" | "codex" | "compatible" | "xai" | "grok";
 
 /** Choose a marked default, the route fallback, a catalog ID, then the first listed ID. */

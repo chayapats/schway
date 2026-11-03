@@ -32,14 +32,20 @@ export function sentControls(body: Record<string, unknown>): ProviderSendControl
   return { effort: typeof effort === "string" ? effort : null, outputCap: typeof cap === "number" && Number.isSafeInteger(cap) ? cap : null };
 }
 
+/** Exact bytes of a request body in every form the dispatch hash accepts; undefined for a body Schway cannot inspect. @internal */
+export function requestBodyBytes(body: unknown): Uint8Array | undefined {
+  if (typeof body === "string") return new TextEncoder().encode(body);
+  if (body instanceof ArrayBuffer) return new Uint8Array(body);
+  if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  return undefined;
+}
+
 /** Read the controls from the exact request bytes, the same bytes the dispatch hash covers; unreadable bytes carry none. @internal */
 export function controlsFromBody(body: unknown): ProviderSendControls {
-  let text: string | undefined;
-  if (typeof body === "string") text = body;
-  else if (body instanceof Uint8Array) text = new TextDecoder().decode(body);
-  if (text === undefined) return { effort: null, outputCap: null };
+  const bytes = requestBodyBytes(body);
+  if (bytes === undefined) return { effort: null, outputCap: null };
   try {
-    const parsed: unknown = JSON.parse(text);
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
     return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? sentControls(parsed as Record<string, unknown>) : { effort: null, outputCap: null };
   } catch { return { effort: null, outputCap: null }; }
 }

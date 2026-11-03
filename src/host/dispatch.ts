@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { THINKING_LEVELS, type Model, type ModelCallOptions, type ThinkingLevel } from "../model/model.ts";
-import { dispatchRefusedError, hasRedirectRefusal, routeControlRefusedError, withProviderDispatch, type ProviderDispatch } from "../model/dispatch.ts";
+import { dispatchRefusedError, hasRedirectRefusal, requestBodyBytes, routeControlRefusedError, withProviderDispatch, type ProviderDispatch } from "../model/dispatch.ts";
 import type { HostAuthRoute } from "./auth-routes.ts";
 import type { HostEffortPin } from "./route-capabilities.ts";
 import type { HostProviderRequests } from "./index.ts";
@@ -164,12 +164,10 @@ export function createRunMeter(): RunMeter {
 }
 
 function exactBytes(body: unknown): Uint8Array {
-  if (typeof body === "string") return new TextEncoder().encode(body);
-  if (body instanceof Uint8Array) return body;
-  if (body instanceof ArrayBuffer) return new Uint8Array(body);
-  if (ArrayBuffer.isView(body)) return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+  const bytes = requestBodyBytes(body);
   // Without exact bytes the authorizer cannot judge the send, so it fails closed.
-  throw new Error("Request body bytes are not inspectable.");
+  if (bytes === undefined) throw new Error("Request body bytes are not inspectable.");
+  return bytes;
 }
 
 function isThenable(value: unknown): value is PromiseLike<unknown> {

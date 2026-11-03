@@ -534,7 +534,9 @@ evidence the adapter enforces: the accepted `levels`, whether `off` sends the
 provider's disable control (`offSendable`; otherwise `off` sends no control and
 the provider default applies), the provider-advertised `default` (null when the
 listing names none), and `evidence: "account-catalog"`. Listing reads the
-account catalog without inference, renewal or credential writes.
+account catalog without inference, renewal or credential writes. Codex evidence
+comes from the same parser the adapter applies to its raw catalog rows, so a row
+the adapter would not read widens nothing.
 `describeAuthRoute(selection).effort` is the static description, with
 `evidence: "none"`: without account evidence, subscription routes accept no
 explicit level, which is what the adapter enforces.
@@ -560,7 +562,11 @@ auth status. Malformed options share that code, so check `effort.levels` and
 before any I/O with an error `isRouteControlRefused` recognizes by identity.
 Each body is also checked before the authorizer runs, so a body without the
 pinned control is refused the same way. These refusals are never retried, and
-`submit` reports their stable message. Pins are opt-in: without `catalogModel`
+`submit` reports their stable message. `classifyAuthError` maps a route-control
+refusal, found by identity on the error or along its `cause` links, to
+`model-unavailable` with the refusal's own message as `nextAction`; a copied
+message is not a refusal. For the effort-conflict refusal, that status means the
+request disagreed with its own model's pin, not that the model is gone. Pins are opt-in: without `catalogModel`
 and `effort`, request bytes and behavior are unchanged, and the CLI/TUI path is
 unchanged. `submitWithRoute` takes no effort options, because its model has no
 account evidence. Use `createModel` with `submit` for pinned work; `submit`
