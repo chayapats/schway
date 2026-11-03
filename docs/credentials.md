@@ -180,13 +180,35 @@ store committed before the crash stays; Schway does not roll it back. Guarded
 host writes keep their own exact-value cleanup rules (see
 [device-code sign-in](host.md#device-code-sign-in)).
 
+
 **Bounded wait.** A contender polls every 10 ms for up to 2 seconds while another
 process holds the lock, without blocking the JavaScript event loop. If the
 holder outlasts the wait, the operation fails closed before contacting the
-secure store, with the usual sanitized error, for example `Cannot save credential
-in the OS secure store. …`. Nothing changes, and retrying is safe. A second
-acquisition inside one process waits out the same bound and fails closed rather
-than deadlocking.
+secure store, with the usual sanitized error, `Cannot save credential in the OS
+secure store. Unlock or allow access to your OS credential store; …`. Nothing
+changes, and retrying is safe. A second acquisition inside one process waits out
+the same bound and fails closed rather than deadlocking.
+
+**Refusals that waiting cannot clear.** These fail at once, before contacting the
+secure store, with a specific next action. Each message starts with `Cannot save
+credential in the OS secure store.` (or `Cannot delete …`) and ends with `No
+credential was changed.`, so existing recovery still treats it as a credential
+storage failure. Interactive API-key changes, logout and ChatGPT sign-in show
+the specific action (an API-key save shows it in F2 details); other surfaces,
+including host status, keep their credential-storage category. Paths under your
+home directory are shown with `~`.
+
+| Condition | Message after the prefix |
+| --- | --- |
+| Relative `SCHWAY_CREDENTIAL_LOCK_FILE` | `SCHWAY_CREDENTIAL_LOCK_FILE must be an absolute path. Set an absolute path or unset it, then retry.` |
+| Permission denied, read-only filesystem, a parent that is a regular file, or a lock file this user cannot read and write | `Schway cannot create or open its lock file at <path>. Make that location writable for this user, then retry.` |
+| Something other than a lock file at the path | `The file at <path> is not a Schway lock file. With no Schway running, delete it, then retry.` |
+| An earlier release's lock directory whose owner is provably stopped | `An older Schway's lock folder is at <path>. Close every older Schway, delete that folder, then retry.` |
+
+A lock file this user cannot write is refused rather than used: SQLite would
+open it read-only, and a read-only connection excludes no other writer. An
+earlier release's lock directory with a live, foreign or missing owner waits
+out the bound first, then shows the same older-Schway message.
 
 **Location.** The lock file is `~/.schway/credential-store.lock`, created once
 with mode `0600` and never removed; missing parent directories are created with
@@ -194,50 +216,112 @@ mode `0700`. Without a home directory, Schway uses
 `schway-credential-store-<uid>.lock` in the system temporary directory. The lock
 file must be on a local filesystem with POSIX advisory locks; network homes (NFS
 without a lock daemon, some SMB mounts) may not provide them. Do not delete or
-replace the file while any Schway process runs: a new file lets a later process
-lock a different inode than the current holder.
+replace the file while any current Schway process runs: a new file lets a later
+process lock a different inode than the current holder.
 
 **Override.** Set `SCHWAY_CREDENTIAL_LOCK_FILE` to an absolute file path to move
 the lock, for example for an isolated test root or a service identity whose
 home is read-only (systemd `ProtectHome=`). Point it at a writable local path
 such as one under the unit's `StateDirectory=`. Schway reads the variable on every
 save or deletion and creates missing parent directories. A blank value uses the
-default location. A relative value is refused: saves and deletions fail closed
-with the sanitized store error immediately, without contacting the store.
-Processes that should serialize must use the same path; processes with
-different paths do not exclude each other.
+default location. A relative value fails at once with its own message, without
+contacting the store. Processes that should serialize must use the same path;
+processes with different paths do not exclude each other.
 
-**Upgrading from earlier releases.** Earlier releases used a directory at the
-same path as their lock and removed a stopped owner's directory by path, which
-could admit two writers. A directory at the lock path is that older lock.
-Current Schway honors it for the bounded wait and never removes it. Once the
-older holder releases it, current Schway creates the lock file in its place.
-Earlier releases then cannot create their directory or read an owner from the
-file, so their saves and deletions fail closed until they are upgraded. Only one
-scheme can admit a writer. Stop or upgrade older Schway processes, including
-embedded copies, before relying on the new lock.
+### Upgrade note: earlier releases stop saving credentials
+
+After any current Schway process saves or deletes a credential under a user
+account, every earlier release under that account fails all credential saves
+and deletions. That covers sign-in, logout and API-key changes, and subscription
+token renewal, so earlier releases' subscription routes stop working once their
+current access token expires. It includes embedded copies, such as Jit's
+vendored Schway. The fence is permanent: it lasts until someone deletes the lock
+file by hand. Upgrade every Schway that shares the account, including embedded
+copies, before or together with the first current release.
+
+Why: earlier releases used a directory at the same path as their lock and
+removed a stopped owner's directory by path, which could admit two writers.
+Current Schway honors such a directory for the bounded wait and never removes
+it. Once the older holder releases it, current Schway creates the lock file in
+its place. Earlier releases then can neither create their directory nor read an
+owner from the file, so they fail closed instead of writing alongside current
+Schway. Only one scheme can admit a writer.
+
+To keep an earlier release working until it can be upgraded:
+
+1. Stop every current Schway process under that account, including applications
+   that embed a current Schway. Deleting the lock file is safe only while no
+   current Schway process runs: one that is saving holds the file, and a later
+   one would lock a new file while it still holds the old one.
+2. Delete the file: `rm ~/.schway/credential-store.lock`. Earlier releases only
+   use this default path, so an override path never fences them.
+3. Earlier releases can save and delete again. The next current Schway save or
+   deletion under that account recreates the file and fences them again, so do
+   not run current Schway sign-in, logout or subscription routes there until
+   every copy is upgraded.
+
+Do not point current Schway at another lock file to keep both working: the two
+releases would then write without excluding each other.
 
 If saves and deletions keep failing and `~/.schway/credential-store.lock` is a
 directory, an older Schway crashed while holding it. Confirm that no older Schway
 process is running, then remove that directory.
 
-While older Schway processes still run, they keep their own stale-removal race
-with each other. At the moment of upgrade, that race could also remove a
-just-created lock file and admit an older writer alongside a newer one. It needs
-a crashed older holder and two older contenders within microseconds. Stopping
-older processes before upgrading avoids it.
+**Upgrade residual.** While earlier releases still run, they keep their own
+stale-removal race. If an earlier holder crashed, two earlier contenders can both
+judge it stopped. One removes its directory, and a current Schway process R can
+create the lock file in that gap. The other earlier contender then runs
+`rmSync(path, { recursive: true, force: true })` from its stale reading, which
+removes R's file while R holds it. After that, an earlier contender can create
+its directory and write beside R. A second current process S can also create a
+fresh file and lock that different inode, so two current Schway writers run at
+once. The window is one earlier contender's read-then-remove gap: normally
+microseconds, longer if that process is descheduled inside it. Immediately
+before each mutation starts, current Schway checks that the path still names the
+inode it locked and retries if not. That catches a removal or replacement up to
+that point, but not one during the mutation. Stopping earlier releases before
+upgrading removes the race.
+
+### Lock limits and reuse
+
+**In-process file access on Linux.** POSIX record locks belong to a process and
+a file, so closing any descriptor for the lock file in the holding process
+releases that process's lock, even one SQLite holds. A Linux check in the
+`oven/bun:1.4.2` container showed it: a process holding the lock read the lock
+file with an ordinary file read, and another process then acquired the lock.
+On macOS the lock held. Schway's read, write and edit tools run inside the
+Schway process and have no sensitive-path policy. A session that reads, writes
+or edits `~/.schway/credential-store.lock` while a save or deletion is in flight
+in the same process can therefore drop the lock on Linux. Write and edit also
+replace the file, which the location rules forbid. Search (`rg`) and bash
+commands run in child processes and cannot affect it. The window is one
+in-flight mutation, normally milliseconds. Schway does not guard the path: a
+one-file deny would miss symbolic links, hard links, extensions and embedder
+code, and holding the lock in a helper process would add a process start and new
+failure modes to every save. Do not point tools at the lock file.
 
 **Reusing the primitive.** Embedders that build their own lock this way should
-follow the same rules. Create the file once with an exclusive create (`wx`).
-Never open an existing lock file outside SQLite in the locking process: under
-POSIX rules, closing any descriptor for that file can release all of the
-process's record locks on it. Never delete or replace the file. Use
-`PRAGMA busy_timeout = 0` and poll asynchronously, because a SQLite busy timeout
-blocks the thread, so an in-process holder could never release. A second
-connection in the same process contends exactly like another process. Close the
-connection to release the lock. Evidence is in `tests/credential-store-lock.test.ts`,
-which holds the lock in child processes, kills them with SIGKILL and races
-contenders after a crashed holder.
+follow the same rules:
+
+- Create the file once with an exclusive create (`wx`). Never delete or replace it.
+- Never open an existing lock file outside SQLite in the locking process: under
+  POSIX rules, closing any descriptor for that file can release all of the
+  process's record locks on it.
+- Check that the file is readable and writable before opening it. SQLite opens a
+  file it cannot write read-only, and a read-only `BEGIN IMMEDIATE` excludes
+  nobody.
+- Use `PRAGMA busy_timeout = 0` and poll asynchronously. A SQLite busy timeout
+  blocks the thread, so an in-process holder could never release.
+- Keep a strong reference to the holding connection until you close it. If the
+  garbage collector finalizes it, for example while the holder awaits a promise
+  nothing else references, the lock is dropped.
+- A second connection in the same process contends exactly like another process.
+  Close the connection to release the lock.
+
+Evidence is in `tests/credential-store-lock.test.ts`, which holds the lock in
+child processes, kills them with SIGKILL, and races contenders that start after
+a crashed holder or are already polling when it dies.
+
 
 ## ChatGPT catalog protocol compatibility
 

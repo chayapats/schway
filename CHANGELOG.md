@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- After any current Schway saves or deletes a credential under a user account,
+  every earlier release under that account fails all credential saves and
+  deletions, including sign-in, logout, API-key changes and subscription token
+  renewal. This includes embedded copies such as Jit's vendored Schway. The
+  cause is `~/.schway/credential-store.lock`, which stays until deleted by
+  hand. Upgrade every Schway that shares the account together. To keep an
+  earlier release working meanwhile, stop every current Schway process under
+  that account, then delete that file; the next current save or deletion
+  recreates it. See [upgrade note](docs/credentials.md#upgrade-note-earlier-releases-stop-saving-credentials)
+  (#428).
+
 ### Security
 
 - Block nonpublic and metadata destinations in `web_fetch` by default, including
@@ -16,11 +29,12 @@
   `BEGIN IMMEDIATE` lock that the operating system releases when its holder
   exits, even on SIGKILL. Concurrent contenders after a crashed holder can no
   longer remove a live holder's lock, so two Schway mutations never overlap.
-  The bounded wait still fails closed with a sanitized store error.
-  `SCHWAY_CREDENTIAL_LOCK_FILE` moves the lock to an absolute path. An earlier
-  release's lock directory is honored but never removed; once the lock file
-  exists, earlier releases fail closed on saves and deletions until upgraded
-  (#428).
+  A busy lock still fails closed after its bounded wait with the sanitized
+  store error. A relative `SCHWAY_CREDENTIAL_LOCK_FILE`, an unusable or damaged
+  lock file, and an earlier release's lock directory with a stopped owner fail
+  at once with a specific next action. `SCHWAY_CREDENTIAL_LOCK_FILE` moves the
+  lock to an absolute path. An earlier release's lock directory is honored but
+  never removed; see the upgrade note (#428).
 - Classify Grok subscription spending-limit denials as `quota-exceeded`, with
   a subscription usage link and no API-key billing fallback. Catalog, inference
   and host status agree; plan rejection remains distinct from transient
