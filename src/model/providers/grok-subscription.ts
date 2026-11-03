@@ -300,12 +300,14 @@ async function readSubscriptionLogin(store: CredentialStore, onCredential?: (raw
 type RefreshCaller = { onCredential?: (raw: string) => void };
 type CredentialLifecycle = {
   generation: number; writes: Promise<void>; callers: Set<RefreshCaller>;
+  // Sign-ins and sign-outs whose write landed; the generation moves before the write, so it cannot tell a failed one apart.
+  replaced: number;
   refresh?: { generation: number; promise: Promise<GrokTokens>; tracked: TrackedRenewal };
 };
 const credentialLifecycles = new WeakMap<CredentialStore, CredentialLifecycle>();
 function credentialLifecycle(store: CredentialStore): CredentialLifecycle {
   let state = credentialLifecycles.get(store);
-  if (!state) { state = { generation: 0, writes: Promise.resolve(), callers: new Set() }; credentialLifecycles.set(store, state); }
+  if (!state) { state = { generation: 0, writes: Promise.resolve(), callers: new Set(), replaced: 0 }; credentialLifecycles.set(store, state); }
   return state;
 }
 function serializeCredentialWrite<T>(state: CredentialLifecycle, operation: () => Promise<T>): Promise<T> {
@@ -321,6 +323,7 @@ async function writeTokens(store: CredentialStore, tokens: GrokTokens): Promise<
 export async function saveSubscriptionTokens(store: CredentialStore, tokens: GrokTokens): Promise<void> {
   const state = credentialLifecycle(store); state.generation++;
   await serializeCredentialWrite(state, () => writeTokens(store, tokens));
+  state.replaced++;
   forgetUnsavedRenewals("grok");
 }
 /** Invalidate pending refreshes and delete the login after earlier credential writes finish. */
@@ -330,6 +333,7 @@ export async function deleteSubscriptionTokens(store: CredentialStore): Promise<
     try { return await store.delete(grokSubscriptionIdentity()); }
     catch (error) { throw preserveRefusal("delete", error); }
   });
+  state.replaced++;
   forgetUnsavedRenewals("grok");
   return removed;
 }
@@ -373,7 +377,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
     if (refresh?.generation !== generation) {
       if (rejectedToken !== undefined ? tokens.accessToken !== rejectedToken : !subscriptionAccessExpired(tokens, (input.now ?? Date.now)())) return tokens.accessToken;
       if (!tokens.refreshToken) throw new Error("The Grok subscription session expired and has no refresh token. Sign in again in interactive mode with /login grok.");
-      const refreshToken = tokens.refreshToken, controller = new AbortController();
+      const refreshToken = tokens.refreshToken, controller = new AbortController(), replaced = state.replaced;
       // Every renewal keeps this safety ceiling; a caller's earlier cancellation or deadline detaches only its wait.
       const timer = setTimeout(() => controller.abort(new DOMException("Refresh timed out", "TimeoutError")), input.timeoutMs ?? 30_000);
       const promise = (async () => {
@@ -411,8 +415,8 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       void promise.catch(() => {});
       // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
       // the process from exiting before a rotated token is stored.
-      // A renewal that a sign-in or sign-out replaced leaves the sign-in the user chose, so it needs no warning.
-      refresh = { generation, promise, tracked: trackSentRenewal("grok", promise.then(() => true, () => state.generation !== generation)) };
+      // A renewal that a landed sign-in or sign-out replaced leaves the sign-in the user chose, so it needs no warning.
+      refresh = { generation, promise, tracked: trackSentRenewal("grok", promise.then(() => true, () => state.replaced !== replaced)) };
       state.refresh = refresh;
       onRenewal?.(promise.then(() => {}, () => {}));
     }

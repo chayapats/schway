@@ -1,6 +1,6 @@
 import { formatCount } from "../text/format.ts";
 import { MaskedCredentialEntry, removeStoredCredential } from "../auth/management.ts";
-import { codexSubscriptionIdentity, credentialIdentity, credentialStoreFailure, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
+import { credentialIdentity, credentialStoreFailure, type CredentialIdentity, type CredentialTarget } from "../auth/store.ts";
 import { credentialEnvironmentVariable } from "../auth/credentials.ts";
 import { filterXaiModels, reliableListedModel, xaiModelCapabilities, type ListedModel } from "../model/model-list.ts";
 import { validateThinking } from "../model/thinking.ts";
@@ -826,7 +826,9 @@ export abstract class CredentialsLayer extends ControllerCore {
       const wasActiveCodex = this.model?.provider === "codex-subscription" || this.openaiAuth === "codex";
       let deleted: boolean;
       try {
-        deleted = await this.credentials!.store.delete(codexSubscriptionIdentity());
+        // Through the Codex lifecycle, so a renewal still in flight is fenced off and its failure is not named at exit.
+        const { clearSubscriptionTokens } = await import("../model/providers/codex-subscription.ts");
+        deleted = await clearSubscriptionTokens(this.credentials!.store);
       } catch (error) {
         this.fail(credentialStoreFailure("delete", error));
         return false;

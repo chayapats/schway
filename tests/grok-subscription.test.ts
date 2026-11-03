@@ -425,3 +425,35 @@ test("a renewal that a sign-in or sign-out replaced leaves nothing for the exit 
   await saveSubscriptionTokens(store, { ...expired, accessToken: "fresh", expiresAt: 10_000 });
   expect(takeUnsavedRenewals()).toEqual([]);
 });
+
+test("a Grok sign-in whose write fails still leaves the replaced renewal for the exit notice", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const { saveSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const saved = fakeCredentialStore();
+  let refuseWrites = false;
+  const store = { ...saved, set: async (...args: Parameters<typeof saved.set>) => {
+    if (refuseWrites) throw new Error("secure store unavailable");
+    return saved.set(...args);
+  } };
+  await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 });
+  let release!: () => void;
+  const fetch: GrokFetch = async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return json({ access_token: "renewed", refresh_token: "rotated", expires_in: 3600 });
+  };
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+  const stop = new AbortController();
+  const stopped = refresher.getValidAccessToken(stop.signal);
+  while (!release) await flush();
+  stop.abort();
+  await expect(stopped).rejects.toThrow();
+  // The sign-in fences the renewal off, then fails to store its own login, so the rotated pair is lost after all.
+  refuseWrites = true;
+  await expect(saveSubscriptionTokens(store, { accessToken: "fresh", refreshToken: "fresh-refresh", expiresAt: 10_000, obtainedAt: 0 })).rejects.toThrow();
+  release();
+  for (let i = 0; i < 5; i++) await flush();
+  expect(takeUnsavedRenewals()).toEqual(["grok"]);
+});

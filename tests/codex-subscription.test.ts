@@ -2166,3 +2166,42 @@ test("a failed Codex renewal is left for the exit notice only when no waiting ca
   expect(takeUnsavedRenewals()).toEqual(["codex"]);
   expect(takeUnsavedRenewals()).toEqual([]);
 });
+
+test("a Codex renewal that a sign-out replaced leaves nothing for the exit notice", async () => {
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const store = fakeCredentialStore();
+  const expired = { accessToken: "old-token", refreshToken: "refresh-old", expiresAt: Date.now() - 1_000 };
+  let release!: () => void, fail = false;
+  const fetch = (async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return fail
+      ? Response.json({ error: "invalid_grant" }, { status: 400 })
+      : Response.json({ access_token: "renewed-token", refresh_token: "rotated", expires_in: 3600 });
+  }) satisfies CodexFetchLike;
+  const refresher = createSubscriptionTokenRefresher({ store, fetch });
+  const stoppedRenewal = async (during: () => Promise<unknown>) => {
+    release = undefined!;
+    const stop = new AbortController();
+    const stopped = refresher.getValidAccessToken(stop.signal);
+    while (!release) await flush();
+    stop.abort();
+    await expect(stopped).rejects.toThrow();
+    await during();
+    release();
+    for (let i = 0; i < 5; i++) await flush();
+  };
+
+  // Signing out while the stopped turn's renewal is in flight fences its write; that is the user's choice, not a loss.
+  await saveSubscriptionTokens(store, expired);
+  await stoppedRenewal(() => clearSubscriptionTokens(store));
+  expect(takeUnsavedRenewals()).toEqual([]);
+
+  // A failure recorded earlier stops mattering once the user signs out.
+  await saveSubscriptionTokens(store, expired);
+  fail = true;
+  await stoppedRenewal(async () => {});
+  await clearSubscriptionTokens(store);
+  expect(takeUnsavedRenewals()).toEqual([]);
+});

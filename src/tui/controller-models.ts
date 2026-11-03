@@ -186,7 +186,8 @@ export abstract class ModelsLayer extends CommandsLayer {
           if (!this.credentials?.listSubscriptionCatalog && !this.credentials?.listSubscriptionModels) {
             throw new Error("ChatGPT model discovery is unavailable. Restart Schway.");
           }
-          const models = await this.boundedPickerTask(signal, this.loadAccountCatalog(signal));
+          // Its failure shows only behind F2, like the route lists, so a renewal failure here is still named at exit.
+          const models = await this.boundedPickerTask(signal, withoutShowingRenewalFailures(() => this.loadAccountCatalog(signal)));
           if (!current()) return;
           this.subscriptionModels = models.map(model => model.id);
           this.subscriptionListUnavailable = false;
