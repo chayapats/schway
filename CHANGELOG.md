@@ -4,15 +4,20 @@
 
 ### Upgrade notes
 
-- After any current Schway saves or deletes a credential under a user account,
-  every earlier release under that account fails all credential saves and
-  deletions, including sign-in, logout, API-key changes and subscription token
-  renewal. This includes embedded copies such as Jit's vendored Schway. The
-  cause is `~/.schway/credential-store.lock`, which stays until deleted by
-  hand. Upgrade every Schway that shares the account together. To keep an
-  earlier release working meanwhile, stop every current Schway process under
-  that account, then delete that file; the next current save or deletion
-  recreates it. See [upgrade note](docs/credentials.md#upgrade-note-earlier-releases-stop-saving-credentials)
+- Builds with the credential lock directory (untagged, since #425, including
+  Jit's vendored `128b77a` and `697bf40`) are fenced. After any current Schway
+  saves or deletes a credential under a user account, every such build under
+  that account fails all credential saves and deletions, including sign-in,
+  logout, API-key changes and subscription token renewal. The cause is
+  `~/.schway/credential-store.lock`, which stays until deleted by hand.
+- Tagged releases through `v1.0.0-rc.2` take no credential lock. They are not
+  fenced, but their saves and deletions still run unserialized beside current
+  Schway.
+- Upgrade every Schway that shares the account together. To keep a
+  lock-directory build working meanwhile, stop every current Schway process
+  under that account, then delete that file; the next current save or deletion
+  recreates it. See the
+  [upgrade note](docs/credentials.md#upgrade-note-lock-directory-builds-stop-saving-credentials)
   (#428).
 
 ### Security
@@ -27,14 +32,16 @@
 
 - Serialize OS secure-store saves and deletions across processes with a SQLite
   `BEGIN IMMEDIATE` lock that the operating system releases when its holder
-  exits, even on SIGKILL. Concurrent contenders after a crashed holder can no
-  longer remove a live holder's lock, so two Schway mutations never overlap.
-  A busy lock still fails closed after its bounded wait with the sanitized
-  store error. A relative `SCHWAY_CREDENTIAL_LOCK_FILE`, an unusable or damaged
-  lock file, and an earlier release's lock directory with a stopped owner fail
-  at once with a specific next action. `SCHWAY_CREDENTIAL_LOCK_FILE` moves the
-  lock to an absolute path. An earlier release's lock directory is honored but
-  never removed; see the upgrade note (#428).
+  exits, even on SIGKILL. Concurrent contenders after a crashed holder no longer
+  remove a live holder's lock, which could let two Schway processes mutate at
+  once; remaining limits are documented in the credentials guide. Read-only
+  connections are refused instead of admitted beside a holder. A busy lock
+  still fails closed after its bounded wait with the sanitized store error.
+  Conditions that waiting cannot clear, such as a relative
+  `SCHWAY_CREDENTIAL_LOCK_FILE` or an unusable lock path, fail at once with a
+  specific next action. `SCHWAY_CREDENTIAL_LOCK_FILE` moves the lock to an
+  absolute path. A lock-directory build's lock is honored but never removed;
+  see the upgrade note (#428).
 - Classify Grok subscription spending-limit denials as `quota-exceeded`, with
   a subscription usage link and no API-key billing fallback. Catalog, inference
   and host status agree; plan rejection remains distinct from transient
