@@ -27,7 +27,7 @@ import {
   replaceCredential,
   type CredentialStore,
 } from "../../auth/store.ts";
-import { trackSentRenewal } from "../../auth/renewals.ts";
+import { trackSentRenewal, type TrackedRenewal } from "../../auth/renewals.ts";
 
 /** Public Codex CLI OAuth client shipped in the official Codex CLI binary, shared rather than private. */
 export const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -279,7 +279,7 @@ async function readSubscriptionLogin(store: CredentialStore): Promise<{ raw: str
 type CodexLifecycle = {
   generation: number;
   writes: Promise<void>;
-  refresh?: { generation: number; promise: Promise<CodexTokens> };
+  refresh?: { generation: number; promise: Promise<CodexTokens>; tracked: TrackedRenewal };
 };
 const codexLifecycles = new WeakMap<CredentialStore, CodexLifecycle>();
 function codexLifecycle(store: CredentialStore): CodexLifecycle {
@@ -607,14 +607,19 @@ export function createSubscriptionTokenRefresher(input: {
           });
         // Cancellation can happen before a caller begins awaiting this shared promise.
         void promise.catch(() => {});
-        refresh = { generation, promise };
-        state.refresh = refresh;
         // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
         // the process from exiting before a rotated token is stored.
-        trackSentRenewal("codex", promise.then(() => true, () => false));
+        refresh = { generation, promise, tracked: trackSentRenewal("codex", promise.then(() => true, () => false)) };
+        state.refresh = refresh;
         onRenewal?.(promise.then(() => {}, () => {}));
       }
-      const renewed = await raceWithAbort(refresh.promise, signal);
+      let renewed: CodexTokens;
+      try { renewed = await raceWithAbort(refresh.promise, signal); }
+      catch (error) {
+        // A caller still waiting reports the failure itself; a stopped one leaves it for the exit notice.
+        if (!signal?.aborted) refresh.tracked.shown();
+        throw error;
+      }
       input.onCredential?.(JSON.stringify(serializeSubscriptionTokens(renewed)));
       return { accessToken: renewed.accessToken, accountId: renewed.accountId ?? accountIdFromAccessToken(renewed.accessToken) };
     },

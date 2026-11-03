@@ -4,7 +4,7 @@ import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
 import { abortableCatalogOperation, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { GROK_CHALLENGE_ERROR, GROK_QUOTA_ERROR } from "../grok-errors.ts";
 import { isRefusedRedirect, redirectRefusal } from "../dispatch.ts";
-import { trackSentRenewal } from "../../auth/renewals.ts";
+import { trackSentRenewal, type TrackedRenewal } from "../../auth/renewals.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -140,8 +140,8 @@ async function refreshFailure(response: Response, signal?: AbortSignal): Promise
 }
 /** Longest error-body prefix read to find an OAuth JSON error, and how long to wait for it. */
 const ERROR_PREFIX_BYTES = 65_536, ERROR_PREFIX_MS = 5_000;
-/** Up to 64 KiB of an error body within 5 seconds, then release the rest; only the caller's signal aborts. */
-async function readErrorPrefix(response: Response, signal?: AbortSignal): Promise<Uint8Array> {
+/** Up to 64 KiB of an error body within 5 seconds, then release the rest; only the caller's signal aborts. @internal */
+export async function readErrorPrefix(response: Response, signal?: AbortSignal): Promise<Uint8Array> {
   const reader = response.body?.getReader();
   if (!reader) return new Uint8Array();
   const deadline = signal ? AbortSignal.any([signal, AbortSignal.timeout(ERROR_PREFIX_MS)]) : AbortSignal.timeout(ERROR_PREFIX_MS);
@@ -151,7 +151,9 @@ async function readErrorPrefix(response: Response, signal?: AbortSignal): Promis
     while (size < ERROR_PREFIX_BYTES) {
       const read = await abortableCatalogOperation(reader.read(), deadline);
       if (read.done) { done = true; break; }
-      chunks.push(read.value); size += read.value.byteLength;
+      // A single large chunk still keeps only the remaining budget.
+      const chunk = read.value.byteLength > ERROR_PREFIX_BYTES - size ? read.value.subarray(0, ERROR_PREFIX_BYTES - size) : read.value;
+      chunks.push(chunk); size += chunk.byteLength;
     }
   } catch { aborted(signal); }
   // A page larger than the prefix, or one that stalls, is never read further.
@@ -298,7 +300,7 @@ async function readSubscriptionLogin(store: CredentialStore, onCredential?: (raw
 type RefreshCaller = { onCredential?: (raw: string) => void };
 type CredentialLifecycle = {
   generation: number; writes: Promise<void>; callers: Set<RefreshCaller>;
-  refresh?: { generation: number; promise: Promise<GrokTokens> };
+  refresh?: { generation: number; promise: Promise<GrokTokens>; tracked: TrackedRenewal };
 };
 const credentialLifecycles = new WeakMap<CredentialStore, CredentialLifecycle>();
 function credentialLifecycle(store: CredentialStore): CredentialLifecycle {
@@ -404,14 +406,19 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       });
       // Cancellation can happen before a caller begins awaiting this shared promise.
       void promise.catch(() => {});
-      refresh = { generation, promise };
-      state.refresh = refresh;
       // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
       // the process from exiting before a rotated token is stored.
-      trackSentRenewal("grok", promise.then(() => true, () => false));
+      refresh = { generation, promise, tracked: trackSentRenewal("grok", promise.then(() => true, () => false)) };
+      state.refresh = refresh;
       onRenewal?.(promise.then(() => {}, () => {}));
     }
-    const renewed = await raceAbort(refresh.promise, signal);
+    let renewed: GrokTokens;
+    try { renewed = await raceAbort(refresh.promise, signal); }
+    catch (error) {
+      // A caller still waiting reports the failure itself; a stopped one leaves it for the exit notice.
+      if (!signal?.aborted) refresh.tracked.shown();
+      throw error;
+    }
     aborted(signal);
     input.onCredential?.(JSON.stringify(renewed));
     return renewed.accessToken;

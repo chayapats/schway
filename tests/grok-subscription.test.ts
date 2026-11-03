@@ -340,3 +340,49 @@ for (const phase of ["read rejects during abort", "read resolves before continua
     }
   });
 }
+
+test("an error body delivered in one large chunk keeps only the 64 KiB prefix", async () => {
+  const { readErrorPrefix } = await import("../src/model/providers/grok-subscription.ts");
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new Uint8Array(1_048_576).fill(0x7b)); },
+    cancel() { cancelled = true; },
+  });
+  const bytes = await readErrorPrefix(new Response(body, { status: 401 }));
+  expect(bytes.byteLength).toBe(65_536);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(cancelled).toBe(true);
+});
+
+test("a failed renewal is left for the exit notice only when no waiting caller received it", async () => {
+  const { fakeCredentialStore } = await import("./helpers/credential-store.ts");
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const { saveSubscriptionTokens, createSubscriptionTokenRefresher } = await import("../src/model/providers/grok-subscription.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const store = fakeCredentialStore();
+  await saveSubscriptionTokens(store, { accessToken: "old", refreshToken: "refresh-old", expiresAt: 1000, obtainedAt: 0 });
+  let release!: () => void;
+  const fetch: GrokFetch = async () => { await new Promise<void>(resolve => { release = resolve; }); return json({ error: "invalid_grant" }, 400); };
+  const refresher = createSubscriptionTokenRefresher({ store, now: () => 1000, fetch });
+
+  // A caller that is still waiting receives the failure and reports it, so exit stays quiet.
+  const waiting = refresher.getValidAccessToken();
+  while (!release) await flush();
+  release();
+  await expect(waiting).rejects.toThrow();
+  await flush();
+  expect(takeUnsavedRenewals()).toEqual([]);
+
+  // A stopped caller never sees the failure, so exit names it once.
+  release = undefined!;
+  const stop = new AbortController();
+  const stopped = refresher.getValidAccessToken(stop.signal);
+  while (!release) await flush();
+  stop.abort();
+  await expect(stopped).rejects.toThrow();
+  release();
+  for (let i = 0; i < 5; i++) await flush();
+  expect(takeUnsavedRenewals()).toEqual(["grok"]);
+  expect(takeUnsavedRenewals()).toEqual([]);
+});

@@ -2132,3 +2132,37 @@ test("empty and truncated subscription streams fail closed instead of completing
     expect(error, label).toMatchObject({ message: expect.stringContaining("ended before completion") });
   }
 });
+
+test("a failed Codex renewal is left for the exit notice only when no waiting caller received it", async () => {
+  const { takeUnsavedRenewals } = await import("../src/auth/renewals.ts");
+  const flush = () => new Promise<void>(resolve => setImmediate(resolve));
+  takeUnsavedRenewals();
+  const store = fakeCredentialStore();
+  await saveSubscriptionTokens(store, { accessToken: "old-token", refreshToken: "revoked-refresh", expiresAt: Date.now() - 1_000 });
+  let release!: () => void;
+  const fetch = (async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    return Response.json({ error: "invalid_grant" }, { status: 400 });
+  }) satisfies CodexFetchLike;
+  const refresher = createSubscriptionTokenRefresher({ store, fetch });
+
+  // A caller that is still waiting receives the failure and reports it, so exit stays quiet.
+  const waiting = refresher.getValidAccessToken();
+  while (!release) await flush();
+  release();
+  await expect(waiting).rejects.toThrow(/revoked/i);
+  await flush();
+  expect(takeUnsavedRenewals()).toEqual([]);
+
+  // A stopped caller never sees the failure, so exit names it once.
+  release = undefined!;
+  const stop = new AbortController();
+  const stopped = refresher.getValidAccessToken(stop.signal);
+  while (!release) await flush();
+  stop.abort();
+  await expect(stopped).rejects.toThrow();
+  release();
+  for (let i = 0; i < 5; i++) await flush();
+  expect(takeUnsavedRenewals()).toEqual(["codex"]);
+  expect(takeUnsavedRenewals()).toEqual([]);
+});

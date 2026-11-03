@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createRenewalExit, RENEWAL_EXIT_LIMIT_MS, RENEWAL_TERMINATE_LIMIT_MS, renewedSignInNotSaved, SAVING_RENEWED_SIGN_IN,
   SAVING_RENEWED_SIGN_IN_HINT, type RenewalExitOptions } from "../src/cli/renewal-exit.ts";
-import type { RenewalRoute, SentRenewal } from "../src/auth/renewals.ts";
+import { takeUnsavedRenewals, trackSentRenewal, type RenewalRoute, type SentRenewal } from "../src/auth/renewals.ts";
 
 const NOT_SAVED = "Renewed sign-in not saved · /login chatgpt sign in again if rejected";
 
@@ -20,7 +20,7 @@ function exitWait(options: Partial<RenewalExitOptions> & { pending?: boolean; ro
   }
   const { pending, routes: _routes, ...rest } = options;
   const exit = createRenewalExit({ stderr: { write: text => { lines.push(text); } }, interactive: false, limitMs: 60_000, terminateLimitMs: 60_000,
-    renewals: () => pending === false ? [] : [...live], ...rest });
+    renewals: () => pending === false ? [] : [...live], unsaved: () => [], ...rest });
   return { exit, lines, settle: (saved: boolean) => { for (const outcome of outcomes.values()) outcome.resolve(saved); },
     settleRoute: (route: RenewalRoute, saved: boolean) => outcomes.get(route)!.resolve(saved) };
 }
@@ -170,4 +170,28 @@ test("a renewal sent while the wait runs is waited for too", async () => {
   second.resolve(false);
   expect(await settling).toBe(0);
   expect(lines.at(-1)).toBe("Renewed sign-in not saved · /login grok sign in again if rejected\n");
+});
+
+test("a save that failed before the wait is still reported once at exit", async () => {
+  const wait = exitWait({ pending: false, unsaved: () => ["grok"] });
+  expect(await wait.exit.settle(3)).toBe(3);
+  expect(wait.lines).toEqual(["Renewed sign-in not saved · /login grok sign in again if rejected\n"]);
+});
+
+test("an earlier failed save is named beside a renewal that the wait saw saved", async () => {
+  const wait = exitWait({ unsaved: () => ["grok"] });
+  const status = wait.exit.settle(0);
+  wait.settle(true);
+  expect(await status).toBe(0);
+  expect(wait.lines.at(-1)).toBe("Renewed sign-in not saved · /login grok sign in again if rejected\n");
+});
+
+test("the registry keeps each failed save until it is reported, and only once", async () => {
+  takeUnsavedRenewals();
+  trackSentRenewal("codex", Promise.resolve(false));
+  trackSentRenewal("grok", Promise.resolve(true));
+  trackSentRenewal("grok", Promise.reject(new Error("settled with an error")));
+  await new Promise<void>(resolve => setImmediate(resolve));
+  expect(takeUnsavedRenewals().sort()).toEqual(["codex", "grok"]);
+  expect(takeUnsavedRenewals()).toEqual([]);
 });

@@ -1,4 +1,4 @@
-import { pendingRenewals, type RenewalRoute, type SentRenewal } from "../auth/renewals.ts";
+import { pendingRenewals, takeUnsavedRenewals, type RenewalRoute, type SentRenewal } from "../auth/renewals.ts";
 
 /** Status while the CLI waits, before exiting, for a renewed sign-in whose request already left. */
 export const SAVING_RENEWED_SIGN_IN = "Saving the renewed sign-in…";
@@ -11,6 +11,11 @@ export const RENEWED_SIGN_IN_NOT_SAVED = "Renewed sign-in not saved";
 export function renewedSignInNotSaved(routes: readonly RenewalRoute[]): string {
   const hints = routes.map(route => `/login ${route === "codex" ? "chatgpt" : "grok"} sign in again if rejected`);
   return [RENEWED_SIGN_IN_NOT_SAVED, ...hints].join(" · ");
+}
+
+/** Each route at most once, in a stable order. */
+function orderRoutes(routes: readonly RenewalRoute[]): RenewalRoute[] {
+  return (["codex", "grok"] as const).filter(route => routes.includes(route));
 }
 
 /** Longest exit wait: the 30-second refresh ceiling, the 2-second credential-lock wait, and a margin for the read and write. */
@@ -27,6 +32,8 @@ export interface RenewalExitOptions {
   readonly terminateLimitMs?: number;
   /** Renewals still settling; defaults to this process's sent renewals. */
   readonly renewals?: () => readonly SentRenewal[];
+  /** Routes whose renewal already settled without a saved sign-in and was not reported; defaults to this process's record. */
+  readonly unsaved?: () => readonly RenewalRoute[];
 }
 
 /** Signal handling around the wait for renewals that already left; `settle` returns the exit status to use. */
@@ -53,7 +60,13 @@ export function createRenewalExit(options: RenewalExitOptions): RenewalExit {
     },
     async settle(code) {
       const pending = options.renewals ?? pendingRenewals;
-      if (!pending().length) return code;
+      const takeUnsaved = options.unsaved ?? takeUnsavedRenewals;
+      // A save that failed before the wait, such as after a stopped TUI turn, is still reported once at exit.
+      if (!pending().length) {
+        const earlier = takeUnsaved();
+        if (earlier.length) options.stderr.write(`${renewedSignInNotSaved(orderRoutes(earlier))}\n`);
+        return code;
+      }
       // Each watched renewal's outcome, recorded as it settles; renewals sent during the wait are watched too.
       const outcomes = new Map<SentRenewal, boolean | undefined>();
       const watch = (): Promise<boolean>[] => {
@@ -67,10 +80,10 @@ export function createRenewalExit(options: RenewalExitOptions): RenewalExit {
       };
       watch();
       // Named when the wait ends: only routes whose renewal had not stored its sign-in by then.
-      const unsavedRoutes = (): RenewalRoute[] => {
-        const routes = new Set([...outcomes].filter(([, saved]) => saved !== true).map(([renewal]) => renewal.route));
-        return (["codex", "grok"] as const).filter(route => routes.has(route));
-      };
+      // Earlier failures are taken once, so a second look at the routes still includes them.
+      let earlier: readonly RenewalRoute[] | undefined;
+      const unsavedRoutes = (): RenewalRoute[] =>
+        orderRoutes([...[...outcomes].filter(([, saved]) => saved !== true).map(([renewal]) => renewal.route), ...(earlier ??= takeUnsaved())]);
       const notSaved = (status: number): number => { options.stderr.write(`${renewedSignInNotSaved(unsavedRoutes())}\n`); return status; };
       // Two interrupts or two terminations before the wait mean the user already asked to quit.
       if (interrupts >= 2) return notSaved(130);
