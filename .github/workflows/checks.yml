@@ -1,0 +1,60 @@
+name: checks
+# Typecheck and the full test suite run on GitHub-hosted runners, which are free for this
+# public repository, so long suites don't load a developer machine. Every push to a branch
+# in this repository runs once (its PR shows those checks); pull requests run only when
+# they come from forks. A newer push to the same ref cancels the older run.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  typecheck:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+  tests:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      # The search tool prefers ripgrep; tests that drive Git need a committer identity.
+      - run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ripgrep
+      - run: git config --global user.name "schway-ci" && git config --global user.email "schway-ci@users.noreply.github.com"
+      # Shared runners can exceed Bun's default 5 s per test under parallel load.
+      - run: bun test --timeout 30000 $(bun scripts/ci/test-shard.ts ${{ matrix.shard }} 8)
+  checks:
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
+    needs: [typecheck, tests]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - run: test "${{ needs.typecheck.result }}" = success && test "${{ needs.tests.result }}" = success
