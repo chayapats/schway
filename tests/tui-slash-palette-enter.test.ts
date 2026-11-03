@@ -264,7 +264,7 @@ test("after discovery removes the highlighted choice, Enter sends and the hint s
   await ui.type("/deploy");
   expect(ui.selected()).toContain("/deploy-alpha");
   expect(ui.hints.plainText).toContain("Enter insert");
-  await removeOwnedTree(root, join(root, ".agents/skills/deploy-alpha"));
+  await removeOwnedTree(root, join(root, ".agents/skills/deploy-alpha"), { force: false });
   await ui.controller.refreshCommands(); await ui.settle();
   expect(ui.selected()).toBeUndefined();
   expect(ui.hints.plainText).toBe("↑↓ select · Enter send · Esc keep editing");

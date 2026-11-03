@@ -123,7 +123,7 @@ async function occupancyStore(lockTimeoutMs?: number): Promise<{ store: import("
       let marked = false;
       try { mkdirSync(current.occupancy); marked = true; } catch { overlaps++; }
       await Bun.sleep(50);
-      if (marked) removeOwnedTreeSync(current.root, current.occupancy);
+      if (marked) removeOwnedTreeSync(current.root, current.occupancy, { force: false });
     },
     delete: async () => { calls++; return false; },
   };

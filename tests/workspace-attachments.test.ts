@@ -286,7 +286,7 @@ test("unavailable saved roots stay durable while usable primary and newly attach
     const valid = await makeDir(join(dir, "valid"));
     const directory = join(dir, "sessions");
     const session = await createJsonlSession({ directory, workspace: { root, launchCwd: root, extraRoots: [missing] } });
-    await removeOwnedTree(dir, missing);
+    await removeOwnedTree(dir, missing, { force: false });
     const resumed = await loadJsonlSession({ directory, id: session.header.id });
     const restored = await restoreWorkspace({ root, launchCwd: root, extraRoots: [...resumed.metadata.extraRoots] });
     expect(restored.diagnostics.join()).toContain("Saved attachment unavailable");
@@ -374,7 +374,7 @@ test("headless CLI validates attachment batches before model calls and preserves
     expect(captured?.context.find(section => section.name === "active-skill")?.content).toContain("ATTACHED_SKILL_BODY");
     expect(captured?.context[0]?.content).toContain(`Workspace root: ${root}`);
     expect((await loadJsonlSession({ directory, id: session.header.id })).metadata.extraRoots).toEqual([extra]);
-    await removeOwnedTree(dir, extra);
+    await removeOwnedTree(dir, extra, { force: false });
     io.model = createScriptedModel({ text: "still usable" });
     expect(await runCli(["--resume", session.header.id, "-p", "continue"], io)).toBe(0);
     expect(outputs.join()).toContain("Saved attachment unavailable");

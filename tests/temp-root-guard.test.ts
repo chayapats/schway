@@ -230,6 +230,7 @@ test("direct recursive removal and mkdtemp sites under tests/ match the allowlis
     const unknown = Object.keys(entry).filter(key => !["mkdtemp", "recursiveRemoval", "reason"].includes(key));
     if (unknown.length) problems.push(`${allowlistPath}: ${file} has unknown keys ${unknown.join(", ")}`);
     if (typeof entry.reason !== "string" || !entry.reason.trim() || entry.reason.includes("\n")) problems.push(`${allowlistPath}: ${file} needs a one-line reason`);
+    if (entry.mkdtemp === undefined && entry.recursiveRemoval === undefined) problems.push(`${allowlistPath}: ${file} lists no counts; remove the entry`);
   }
   for (const file of [...new Set([...Object.keys(counts), ...Object.keys(allowlist)])].sort()) {
     for (const kind of ["mkdtemp", "recursiveRemoval"] as const) {
@@ -244,4 +245,11 @@ test("direct recursive removal and mkdtemp sites under tests/ match the allowlis
     }
   }
   expect(problems).toEqual([]);
+});
+
+test("tests/helpers.ts imports only Node built-ins, so the credential-lock preload stays side-effect free", async () => {
+  const source = await Bun.file(join(repo, "tests/helpers.ts")).text();
+  const specifiers = [...source.matchAll(/^\s*import\s[^;]*?from\s+["']([^"']+)["']/gm)].map(match => match[1]!);
+  expect(specifiers.length).toBeGreaterThan(0);
+  expect(specifiers.filter(specifier => !specifier.startsWith("node:"))).toEqual([]);
 });

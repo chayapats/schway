@@ -418,7 +418,7 @@ test("picker resume of a missing workspace names the reason, shows details on F2
     const f = await fixture(home);
     const gone = join(home, "gone"); await mkdir(gone);
     const saved = await createJsonlSession({ directory: f.directory, workspace: { root: gone, launchCwd: gone, extraRoots: [] } }); saved.append(user("task in a removed folder"));
-    await removeOwnedTree(home, gone);
+    await removeOwnedTree(home, gone, { force: false });
     const ui = await pickerView(f, home, 80, 24);
     try {
       await ui.terminal.mockInput.pasteBracketedText("unsent draft"); await ui.settle();

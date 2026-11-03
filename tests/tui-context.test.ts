@@ -64,7 +64,7 @@ test("persisted summary write failure requires explicit resume before compaction
     expect(controller.inspectNoticeDetails()).toBe(true);
     expect(controller.snapshot().transcript.at(-1)?.text).toContain(`/resume ${session.header.id}`);
     expect(session.items).toEqual(history(12));
-    await removeOwnedTree(home, path);
+    await removeOwnedTree(home, path, { force: false });
     await rename(saved, path);
     expect(await controller.compact()).toBe(false); // Restoring storage does not un-fence the old handle.
     expect(await readFile(path, "utf8")).toBe(durable);

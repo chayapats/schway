@@ -178,7 +178,7 @@ test("failed disk writes fence every subsequent mutation until the session is re
     await mkdir(path);
     expect(() => session.append(user("failed"))).toThrow();
     expect(ids(session)).toEqual(["u", "a"]);
-    await removeOwnedTree(directory, path);
+    await removeOwnedTree(directory, path, { force: false });
     await rename(backup, path);
     expect(() => session.append(user("retry"))).toThrow("reload");
     expect(() => session.forkBranch("a")).toThrow("reload");

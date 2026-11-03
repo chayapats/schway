@@ -117,13 +117,13 @@ export function assertRemovableOwnedTree(root: string, path: string): string {
 }
 
 /** Recursively remove `path` strictly inside the owned temp root `root`; refuses anything else (see `assertRemovableOwnedTree`). */
-export async function removeOwnedTree(root: string, path: string): Promise<void> {
-  await rm(assertRemovableOwnedTree(root, path), { recursive: true, force: true });
+export async function removeOwnedTree(root: string, path: string, options: { force?: boolean } = {}): Promise<void> {
+  await rm(assertRemovableOwnedTree(root, path), { recursive: true, force: options.force ?? true });
 }
 
 /** Synchronous `removeOwnedTree`. */
-export function removeOwnedTreeSync(root: string, path: string): void {
-  rmSync(assertRemovableOwnedTree(root, path), { recursive: true, force: true });
+export function removeOwnedTreeSync(root: string, path: string, options: { force?: boolean } = {}): void {
+  rmSync(assertRemovableOwnedTree(root, path), { recursive: true, force: options.force ?? true });
 }
 
 /** Run `body`, then `cleanup`. A cleanup failure never hides the body's error: it becomes that error's cause. */

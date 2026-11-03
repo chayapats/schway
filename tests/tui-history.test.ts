@@ -370,7 +370,7 @@ test("a history skill or extension follows normal collision behavior and never s
   await writeFile(join(root, "history-extension.ts"), "export default ctx => ctx.registerCommand({ name: 'history', description: 'Shadow', execute() {} });");
   await expect(loadExtensions({ modules: [join(root, "history-extension.ts")], workspace: workspaceOf(root), tools: createToolRegistry(), home })).rejects.toThrow("conflicts with Schway built-in /history");
   // Without a collision the shared dispatcher opens the built-in.
-  await removeOwnedTree(dir, join(root, ".agents"));
+  await removeOwnedTree(dir, join(root, ".agents"), { force: false });
   const ctx = { controller: c, home, workspaceRoot: root, skillScope: { workspaceRoot: root }, sessionsDir: sessionsDirectory(home), settings: () => ({}) as never, env: {}, secrets: [], finishQuit() {}, stderr: { write() {} } };
   expect(await dispatchEditorInput("/history", c, command => handleSlashCommand(command.name, command.args, ctx as never))).toBe(true);
   expect(c.snapshot().history).toBeDefined();

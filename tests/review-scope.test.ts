@@ -321,7 +321,7 @@ test("tracking off and non-Git workspaces keep the turn list without reading cur
       expect(gitCalls).toBe(0);
       off.dispose();
     } finally { Bun.spawn = realSpawn; }
-    await removeOwnedTree(dir, join(dir, ".git"));
+    await removeOwnedTree(dir, join(dir, ".git"), { force: false });
     const plain = controller(dir, [write("w", "plain.txt", "plain\n"), { text: "done" }]);
     await plain.submit("write");
     await plain.openChangeReview();

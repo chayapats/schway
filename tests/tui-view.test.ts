@@ -2002,7 +2002,7 @@ test("dynamic skill refresh cannot transfer an active completion selection to it
     await ui.mockInput.pasteBracketedText("/al"); await settle(ui);
     expect(ui.captureCharFrame()).toContain("Unicode 日本語");
     ui.mockInput.pressArrow("down"); await settle(ui);
-    await removeOwnedTree(root, join(root, ".agents/skills/alpine"));
+    await removeOwnedTree(root, join(root, ".agents/skills/alpine"), { force: false });
     await ui.controller.refreshCommands(); await settle(ui);
     ui.mockInput.pressTab(); await settle(ui);
     expect(ui.editor.plainText).toBe("/al");

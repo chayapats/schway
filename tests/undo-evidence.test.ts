@@ -245,7 +245,7 @@ for (const failure of ["corrupt", "not-directory"] as const) test(`a ${failure} 
     await change(f.store, turn, join(f.work, "edited.txt"), "before", "after");
     const turnsDirectory = join(f.home, ".schway/undo", turn.sessionId, "turns");
     if (failure === "corrupt") await writeFile(join(turnsDirectory, "candidate.json"), "{invalid");
-    else { await removeOwnedTree(root, turnsDirectory); await writeFile(turnsDirectory, "not a directory"); }
+    else { await removeOwnedTree(root, turnsDirectory, { force: false }); await writeFile(turnsDirectory, "not a directory"); }
     const before = await inventory(root), c = f.controller();
     try {
       await expect(f.store.list(turn.sessionId)).rejects.toThrow();
@@ -505,7 +505,7 @@ test("a missing manifest reports no saved undo data and never claims expiry", as
     const ui = await rendered(root, [bash("generate", "printf 'x\\n' > gen.txt"), { text: "Generated." }]);
     try {
       await ui.send("Generate");
-      await removeOwnedTree(root, join(ui.home, ".schway/undo", ui.session.rootId, "turns"));
+      await removeOwnedTree(root, join(ui.home, ".schway/undo", ui.session.rootId, "turns"), { force: false });
       const before = await ui.state();
       await ui.undo();
       expect(ui.controller.snapshot().transcript.at(-1)?.text).toBe("No saved undo data · F2 details");
