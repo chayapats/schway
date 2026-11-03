@@ -1,6 +1,10 @@
 import type { Model } from "../model/model.ts";
 import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
-import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, findCredentialLockError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
+import { dispatchRouteModel, routeModelOptions, type HostRouteModelOptions, type RouteControls } from "./dispatch.ts";
+import { catalogCapability, effortSupport, exactEffort, outputCapSupport, routeOutputCap, type HostEffortSupport, type HostOutputCapSupport } from "./route-capabilities.ts";
+import { hasDispatchRefusal, hasRedirectRefusal, routeControlRefusal } from "../model/dispatch.ts";
+import { HostError } from "./index.ts";
 
 export { isCleanupUncertain, isCredentialWriteRefused };
 
@@ -66,7 +70,8 @@ export type HostAuthStatusCode =
   | "rejected"
   | "quota-exceeded"
   | "model-unavailable"
-  | "integration-unavailable";
+  | "integration-unavailable"
+  | "dispatch-refused";
 
 /** Selected-route readiness with safe next-action guidance and no secret payloads. */
 export interface HostAuthReadiness {
@@ -84,6 +89,10 @@ export interface HostAuthDescription {
   readonly model: string;
   readonly credential: HostCredentialReference;
   readonly supported: true;
+  /** Effort the adapter accepts without account evidence: none for subscription routes; list models for the real support. */
+  readonly effort: HostEffortSupport;
+  /** Whether this route sends a provider-enforced output cap, with its default and maximum. */
+  readonly outputCap: HostOutputCapSupport;
 }
 
 /** Terminal observation for a route-bound run with safe auth detail on failures. */
@@ -145,7 +154,17 @@ export function validateAuthSelection(input: unknown): HostAuthSelection {
 /** Describe the selected route statically without store, network, or provider loading. */
 export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescription {
   const valid = validateAuthSelection(selection);
-  return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), supported: true as const };
+  return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), supported: true as const,
+    effort: effortSupport(valid.route, valid.model, null), outputCap: outputCapSupport(valid.route, valid.model) };
+}
+
+// The process's OS secure store is one owner for every selection that names no store or lifecycle.
+const NATIVE_OWNER: object = Object.freeze({});
+
+/** Identity of the credentials a selection reads: a lifecycle's current route store (replaced on logout), the explicit store, or the OS store. @internal */
+export function credentialOwner(selection: HostAuthSelection): object {
+  if (selection.lifecycle) return credentialLifecycleStore(selection.lifecycle, selection.route);
+  return selection.store ?? NATIVE_OWNER;
 }
 
 const defaultNativeStores = new WeakMap<object, CredentialStore>();
@@ -240,8 +259,62 @@ function invalidStoreAction(route: HostAuthRoute): string {
     : "Stored Grok subscription login is invalid. Sign in again with /login grok.";
 }
 
-/** Check local store readiness without network or inference; only the selected route identity is read. */
-export async function checkAuthReadiness(selection: HostAuthSelection): Promise<HostAuthReadiness> {
+/** Safe status for a route run stopped before its secure-store read answered; no credential verdict exists. @internal */
+export function readinessInterrupted(selection: HostAuthSelection): HostAuthReadiness {
+  const valid = validateAuthSelection(selection);
+  return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), observedInference: "not-checked",
+    status: "store-unavailable",
+    nextAction: "The run stopped before the OS secure store returned the credential. Retry the turn; if the store keeps waiting, unlock or allow access to your OS credential store." };
+}
+
+/** Bounds for one local readiness check; omission keeps the unbounded local read. */
+export interface HostReadinessOptions {
+  /** Abort the check: it rejects with an `AbortError` and ignores the store read when it finally settles. */
+  readonly signal?: AbortSignal;
+  /** Bound the check in whole milliseconds (1–86,400,000): expiry rejects with a `TimeoutError`. */
+  readonly deadlineMs?: number;
+}
+
+const MAX_READINESS_DEADLINE_MS = 86_400_000;
+
+function readinessBounds(input: unknown): HostReadinessOptions {
+  if (input === undefined) return {};
+  if (typeof input !== "object" || input === null || Array.isArray(input) ||
+      Object.keys(input).some(key => key !== "signal" && key !== "deadlineMs")) throw new HostError("invalid-input");
+  const { signal, deadlineMs } = input as { signal?: unknown; deadlineMs?: unknown };
+  // Structural so a signal from another realm is accepted.
+  if (signal !== undefined && (typeof signal !== "object" || signal === null || typeof (signal as AbortSignal).aborted !== "boolean" ||
+      typeof (signal as AbortSignal).addEventListener !== "function" || typeof (signal as AbortSignal).removeEventListener !== "function")) throw new HostError("invalid-input");
+  if (deadlineMs !== undefined && (typeof deadlineMs !== "number" || !Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > MAX_READINESS_DEADLINE_MS)) throw new HostError("invalid-input");
+  return { ...(signal !== undefined ? { signal: signal as AbortSignal } : {}), ...(deadlineMs !== undefined ? { deadlineMs: deadlineMs as number } : {}) };
+}
+
+/** Check local store readiness without network or inference; only the selected route identity is read.
+ * With a signal or deadline, the check settles promptly on abort (`AbortError`) or expiry (`TimeoutError`);
+ * a store read that cannot be cancelled is ignored once it settles, and readiness never writes. */
+export async function checkAuthReadiness(selection: HostAuthSelection, options?: HostReadinessOptions): Promise<HostAuthReadiness> {
+  validateAuthSelection(selection);
+  const { signal, deadlineMs } = readinessBounds(options);
+  if (!signal && deadlineMs === undefined) return readiness(selection, () => false);
+  return new Promise<HostAuthReadiness>((resolve, reject) => {
+    let settled = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (settle: () => void): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      settle();
+    };
+    const onAbort = (): void => finish(() => reject(new DOMException("The readiness check was aborted.", "AbortError")));
+    if (signal?.aborted) { onAbort(); return; }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (deadlineMs !== undefined) timer = setTimeout(() => finish(() => reject(new DOMException("The readiness check timed out.", "TimeoutError"))), deadlineMs);
+    readiness(selection, () => settled).then(value => finish(() => resolve(value)), (error: unknown) => finish(() => reject(error)));
+  });
+}
+
+/** Read and parse the selected identity, stopping after the read once the caller has settled. */
+async function readiness(selection: HostAuthSelection, abandoned: () => boolean): Promise<HostAuthReadiness> {
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
   const base = { route: valid.route, model: valid.model, credential, observedInference: "not-checked" as const };
@@ -255,6 +328,8 @@ export async function checkAuthReadiness(selection: HostAuthSelection): Promise<
   } catch {
     return { ...base, status: "store-unavailable", nextAction: storeUnavailableAction() };
   }
+  // An abandoned check never parses, loads an adapter or acts on the late value; its caller already settled.
+  if (abandoned()) throw new DOMException("The readiness check was aborted.", "AbortError");
   if (!raw?.trim()) return { ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) };
   try {
     if (valid.route === "codex") {
@@ -272,20 +347,31 @@ export async function checkAuthReadiness(selection: HostAuthSelection): Promise<
   return { ...base, status: "configured-unverified", nextAction: "Run a route-bound request to observe inference; static configuration alone does not prove live access." };
 }
 
-/** Create only the selected subscription adapter; the unselected route and TUI never load. */
-export async function createAuthRouteModel(selection: HostAuthSelection): Promise<Model> {
-  return createAuthRouteModelForRun(selection);
+/** Create only the selected subscription adapter; the unselected route and TUI never load.
+ * `authorizeDispatch` runs before every physical inference send the model makes; omission keeps request bytes unchanged. */
+export async function createAuthRouteModel(selection: HostAuthSelection, options?: HostRouteModelOptions): Promise<Model> {
+  const valid = routeModelOptions(options);
+  return createAuthRouteModelForRun(selection, undefined, valid);
 }
 
 /** Bind an admitted run to its original route epoch and readiness participation. @internal */
-export async function createAuthRouteModelForRun(selection: HostAuthSelection, admitted?: CredentialLifecycleLease): Promise<Model> {
+export async function createAuthRouteModelForRun(selection: HostAuthSelection, admitted?: CredentialLifecycleLease, options: HostRouteModelOptions = {}): Promise<Model> {
   const valid = validateAuthSelection(selection);
+  // Route evidence and pins are settled before any store, adapter or network access; mismatches reject invalid-input.
+  const capability = options.catalogModel !== undefined ? catalogCapability(options.catalogModel, valid.route, valid.model, credentialOwner(valid)) : undefined;
+  const outputCap = routeOutputCap(valid.route, valid.model, options.maxOutputTokens, options.requireOutputCap === true);
+  const controls: RouteControls = { ...(options.effort ? { effort: exactEffort(valid.route, valid.model, capability ?? null, options.effort) } : {}),
+    ...(outputCap ? { outputCap } : {}) };
   const store = admitted?.store ?? effectiveStore(selection);
   const { loadProviderModel } = await import("../model/loader.ts");
+  // Only Grok sends a cap; an unset cap keeps the adapter's default, so bytes stay unchanged.
+  const evidence = { ...(capability ? { modelCapability: capability } : {}), ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}) };
   const model = valid.route === "codex"
-    ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store }, valid.fetch)
-    : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store }, valid.fetch);
-  return valid.lifecycle ? lifecycleModel(valid.lifecycle, valid.route, store, model, valid.credentialWriteGuard, admitted) : model;
+    ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store, ...evidence }, valid.fetch)
+    : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store, ...evidence }, valid.fetch);
+  const bound = valid.lifecycle ? lifecycleModel(valid.lifecycle, valid.route, store, model, valid.credentialWriteGuard, admitted) : model;
+  // Outermost, so a run's accounting attaches even when an inner layer refuses before sending.
+  return dispatchRouteModel(bound, valid.route, options.authorizeDispatch, controls);
 }
 
 function httpStatusOf(error: unknown): number | undefined {
@@ -310,13 +396,22 @@ function errorText(error: unknown): string {
 /** Map a route-bound failure to a stable safe category without leaking secrets or switching routes.
  * Classification is message- and category-based: provider adapters throw sanitized
  * plain messages (and the loop drops transport status), so status-less bodies must
- * still hit their documented category through these patterns. */
+ * still hit their documented category through these patterns. A dispatch refusal is
+ * recognized only by identity, directly or as a `cause`, so echoed refusal wording never reads as `dispatch-refused`;
+ * Schway's own refused-redirect failures are recognized the same way. */
 export function classifyAuthError(error: unknown, selection: HostAuthSelection): HostAuthReadiness {
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
   const base = { route: valid.route, model: valid.model, credential, observedInference: "not-checked" as const };
   const text = errorText(error);
   const status = httpStatusOf(error);
+  if (hasDispatchRefusal(error)) {
+    return { ...base, status: "dispatch-refused",
+      nextAction: "The embedding application refused a provider request. The refused request was not sent. Retry the turn after the application allows it." };
+  }
+  // Pinned effort or a required cap could not be sent exactly for this model; its stable message names the next step.
+  const controlRefusal = routeControlRefusal(error);
+  if (controlRefusal) return { ...base, status: "model-unavailable", nextAction: controlRefusal.message };
   if (isCredentialWriteRefused(error)) {
     // An uncertain cleanup never claims a clean fence: the late value may
     // still be visible, so the guidance says verify instead of retrying.
@@ -327,6 +422,13 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
     return { ...base, status: "store-unavailable",
       nextAction: "The embedding application's credential fence refused a credential write. No credential was changed. Retry the turn after the fence allows writes." };
   }
+  // A lock refusal already names its cause and next step; the generic store
+  // guidance (unlock the keychain, install libsecret) would point elsewhere.
+  // Recognized by brand only, so provider text that copies its wording never
+  // becomes guidance. An uncertain cleanup may hide a lock failure in its cause
+  // while its own write may have landed, so it never says nothing changed.
+  const lock = isCleanupUncertain(error) ? undefined : findCredentialLockError(error);
+  if (lock) return { ...base, status: "store-unavailable", nextAction: lock.message };
   if (/Cannot (read|save|delete) credential|secure store|Secret Service|libsecret/i.test(text)) {
     return { ...base, status: "store-unavailable", nextAction: storeUnavailableAction() };
   }
@@ -359,6 +461,13 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
       ((status === 400 || status === 404 || status === 422) && /model/i.test(text))) {
     return { ...base, status: "model-unavailable",
       nextAction: `Model ${valid.model} is not available on this subscription. Choose a listed model for this route.` };
+  }
+  // The endpoint answered, so this is not "could not reach". Identity only: echoed provider text never matches.
+  if (hasRedirectRefusal(error)) {
+    return { ...base, status: "integration-unavailable",
+      nextAction: valid.route === "codex"
+        ? "The ChatGPT subscription answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing."
+        : "The Grok subscription answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing." };
   }
   return { ...base, status: "integration-unavailable",
     nextAction: valid.route === "codex"

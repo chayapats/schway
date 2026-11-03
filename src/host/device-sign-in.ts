@@ -1,5 +1,5 @@
 import { DeviceFlowError, sleepDeviceFlow, withinDeviceFlow } from "../auth/device-flow.ts";
-import { createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, markCleanupUncertain, type CredentialStore } from "../auth/store.ts";
+import { createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialLockError, markCleanupUncertain, type CredentialStore } from "../auth/store.ts";
 import { effectiveStore, validateAuthSelection, type HostAuthFetch, type HostAuthRoute, type HostCredentialStore, type HostCredentialWriteGuard } from "./auth-routes.ts";
 import { HostError, type HostClock } from "./index.ts";
 
@@ -127,6 +127,8 @@ export async function beginDeviceSignIn(options: HostDeviceSignInOptions): Promi
       set: async (identity, value) => {
         try { await base.set(identity, value); }
         catch (error) {
+          // A credential-lock refusal means the save never ran, so there is nothing to remove.
+          if (isCredentialLockError(error)) throw error;
           try {
             if (base.compareAndDelete) await base.compareAndDelete(identity, value);
             else if (await base.get(identity) === value) await base.delete(identity);

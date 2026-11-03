@@ -173,7 +173,7 @@ export async function fetchModelCatalogResponse(input: { url: string | URL | Req
     return response;
   });
   try { return await abortableCatalogOperation(request, input.signal); }
-  catch { input.signal.throwIfAborted(); throw new Error(`Could not reach the ${input.label} model list.`); }
+  catch (error) { input.signal.throwIfAborted(); throw new Error(`Could not reach the ${input.label} model list.`, { cause: error }); }
 }
 
 /** Fetch a catalog under an existing total-operation deadline; no phase restarts the budget. */
@@ -241,7 +241,8 @@ export function parseModelListResult(payload: unknown, label: string, baseUrl?: 
     const contextWindow = positiveInt(row.context_window ?? row.contextWindow ?? row.context_length, 10_000_000);
     const maxOutput = positiveInt(row.max_output_tokens ?? row.max_completion_tokens ?? row.maxOutput, 1_000_000);
     const supportedThinking = thinkingLevels(row.supported_reasoning_levels ?? row.supportedThinking ?? reasoningEfforts(row));
-    const defaultThinking = oneThinkingLevel(row.default_reasoning_effort);
+    // Codex names its default `default_reasoning_level`, as the adapter's own catalog parser reads it; xAI uses `default_reasoning_effort`.
+    const defaultThinking = oneThinkingLevel(options.codex ? row.default_reasoning_level : row.default_reasoning_effort);
     const reasoningCapability = isOpenRouterEndpoint(baseUrl) ? openRouterCapability(id, row.reasoning) : undefined;
     models.set(id, {
       id,

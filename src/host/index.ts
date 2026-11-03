@@ -25,8 +25,14 @@ export type {
 /** Explicit Grok/Codex route lifecycle with opaque credential references and safe readiness. */
 export type {
   HostAuthDescription, HostAuthFetch, HostAuthReadiness, HostAuthRoute, HostAuthRunResult, HostAuthSelection, HostAuthStatusCode, HostCredentialReference, HostCredentialStore, HostCredentialWriteGuard,
+  HostReadinessOptions,
 } from "./auth-routes.ts";
 export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute, isCleanupUncertain, isCredentialWriteRefused } from "./auth-routes.ts";
+/** Synchronous per-send authorization with credential-free dispatch records and a stable refusal identity. */
+export type { HostAttemptEffort, HostDispatch, HostDispatchAuthorizer, HostDispatchEffort, HostDispatchOutputCap, HostRouteModelOptions } from "./dispatch.ts";
+export { isDispatchRefused, isRouteControlRefused } from "./dispatch.ts";
+/** Exact effort support from the adapter's own policy, and exact effort pins for route models. */
+export type { HostEffortPin, HostEffortSupport, HostOutputCapSupport } from "./route-capabilities.ts";
 /** Bounded device approval with opaque credential writes and secret-free terminal outcomes. */
 export type { HostDeviceSignInOptions, HostDeviceSignIn, HostDeviceSignInFailure, HostDeviceSignInOutcome, HostDeviceSignInStart } from "./device-sign-in.ts";
 export { beginDeviceSignIn } from "./device-sign-in.ts";
@@ -98,6 +104,14 @@ export interface HostCapabilities {
   readonly modelCatalog: "schway.host.model-catalog/v1";
   readonly imageInputContract: "schway.host.image-input/v1";
   readonly imageInputRoutes: readonly import("./image-input.ts").HostImageRouteCapability[];
+  /** Synchronous embedding-application veto before each physical route inference send, including auth-retry resends. */
+  readonly dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1";
+  /** Exact per-run provider-request counts on terminal results and abortable local readiness. */
+  readonly providerRequestsContract: "schway.host.provider-requests/v1";
+  /** Exact effort support before I/O, opt-in exact effort pins, and the effort requested, sent and reported per send and attempt. */
+  readonly effortContract: "schway.host.effort/v1";
+  /** Static output-cap support per route and model, opt-in exact or required caps, and the cap sent per send and attempt. */
+  readonly outputCapContract: "schway.host.output-cap/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -172,11 +186,31 @@ export interface HostRunOptions {
   readonly onProgress?: (event: HostProgressEvent) => void;
 }
 
+/** Run options for the bound route, adding a per-run dispatch authorizer to the shared run options. */
+export interface HostRouteRunOptions extends HostRunOptions {
+  /** Authorize every physical inference send this run makes: turns, transient retries, compaction and auth-retry resends. */
+  readonly authorizeDispatch?: import("./dispatch.ts").HostDispatchAuthorizer;
+}
+
 /** One reported usage sample with its completeness flag; null counters were unreported. */
 export interface HostRunAttemptUsage {
   readonly phase: "turn" | "compaction";
   readonly usage: ModelUsage;
   readonly complete: boolean;
+  /** Effort this attempt's last route send requested and carried, and what the response stated; null when it sent nothing observable. */
+  readonly effort: import("./dispatch.ts").HostAttemptEffort | null;
+  /** Output cap this attempt's last route send carried; null when it sent nothing observable. */
+  readonly outputCap: import("./dispatch.ts").HostDispatchOutputCap | null;
+}
+
+/** Exact physical provider requests one run started; summing runs never double-counts a shared renewal. */
+export interface HostProviderRequests {
+  /** First inference send of each model call: turns, transient retries and compaction summaries. */
+  readonly initialSends: number;
+  /** Inference resends after an auth rejection and credential renewal inside one model call. */
+  readonly authRetrySends: number;
+  /** Credential renewal requests this run started; a run that joins another run's renewal counts zero. */
+  readonly renewalRequests: number;
 }
 
 /** Honest run consumption; unknown counters stay null and never read as zero quota. */
@@ -184,6 +218,8 @@ export interface HostRunUsage {
   readonly attempts: readonly HostRunAttemptUsage[];
   readonly complete: boolean;
   readonly totalMs: number;
+  /** Exact requests when every model call reached a route model with `call` passed as-is or spread; null when a call was unobservable, such as a dropped or cloned `call`. */
+  readonly providerRequests: HostProviderRequests | null;
 }
 
 /** Sanitized failure detail preserving the effective route, policy and model. */
@@ -209,8 +245,8 @@ export interface HostSession {
   readonly reference: HostSessionReference;
   /** Persist input, run the native loop and return a durable reference only for committed completion. */
   submit(input: HostInput, model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostRunResult>;
-  /** Run the bound Grok/Codex route without caller-supplied credentials; auth failures carry safe status. */
-  submitWithRoute(input: HostInput, signalOrOptions?: AbortSignal | HostRunOptions): Promise<import("./auth-routes.ts").HostAuthRunResult>;
+  /** Run the bound Grok/Codex route without caller-supplied credentials; auth failures and dispatch refusals carry safe status. */
+  submitWithRoute(input: HostInput, signalOrOptions?: AbortSignal | HostRouteRunOptions): Promise<import("./auth-routes.ts").HostAuthRunResult>;
   /** Compact native history under the same current host policy without discovering an alternative instruction source. */
   compact(model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostCompactionResult>;
   /** Read one assistant entry from this exact native ancestry without calling models or tools. */
@@ -238,10 +274,10 @@ export interface HostAuthBinding {
   readonly route: import("./auth-routes.ts").HostAuthRoute;
   readonly model: string;
   readonly credential: import("./auth-routes.ts").HostCredentialReference;
-  /** Check local store readiness without network or inference; only the selected identity is read. */
-  checkReadiness(): Promise<import("./auth-routes.ts").HostAuthReadiness>;
-  /** Create only the selected subscription adapter; the unselected route and TUI never load. */
-  createModel(): Promise<Model>;
+  /** Check local store readiness without network or inference; abort rejects `AbortError`, deadline expiry `TimeoutError`. */
+  checkReadiness(options?: import("./auth-routes.ts").HostReadinessOptions): Promise<import("./auth-routes.ts").HostAuthReadiness>;
+  /** Create only the selected adapter, optionally authorizing each physical send; a wrapper keeps run counts only by passing `call` as-is or spread. */
+  createModel(options?: import("./dispatch.ts").HostRouteModelOptions): Promise<Model>;
 }
 
 /** Headless composition of native loop, context and persistence without CLI or provider construction. */
@@ -303,6 +339,10 @@ const capabilities: HostCapabilities = Object.freeze({
   modelCatalog: "schway.host.model-catalog/v1",
   imageInputContract: "schway.host.image-input/v1",
   imageInputRoutes: imageRouteCapabilities([]),
+  dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1",
+  providerRequestsContract: "schway.host.provider-requests/v1",
+  effortContract: "schway.host.effort/v1",
+  outputCapContract: "schway.host.output-cap/v1",
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */

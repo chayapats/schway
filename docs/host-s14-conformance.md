@@ -101,8 +101,75 @@ continuations until absent, preserve deleted tombstones as management metadata, 
 keep corrupt/busy recovery unresolved. Discovery's `main` reference is for
 id-wide management; it must not replace an app's saved execution branch.
 
-[#428](https://github.com/chayapats/schway/issues/428) remains the cross-process
-credential-lock follow-up, including lock-location override. This work shares
-the existing lock boundary without replacing it. [#415](https://github.com/chayapats/schway/issues/415)
-still owns abortable local readiness and exact provider-request accounting;
-neither is claimed here. Do not add Jit-owned refresh or retry protocols.
+The cross-process credential lock is now an OS-released SQLite lock with a
+`SCHWAY_CREDENTIAL_LOCK_FILE` location override
+([#428](https://github.com/chayapats/schway/issues/428); see
+[the credentials guide](credentials.md#credential-store-lock)). This work shares
+that lock boundary; it does not add a second one. Abortable local readiness and
+exact provider-request accounting ([#415](https://github.com/chayapats/schway/issues/415))
+now ship in the S15 slice below. Do not add Jit-owned refresh or retry protocols.
+
+## S15 dispatch authorization and provider requests
+
+Two more additive slices remain under `schway.host.release/v2`:
+
+| Capability property | Exact version |
+| --- | --- |
+| `dispatchAuthorizationContract` | `schway.host.dispatch-authorization/v1` |
+| `providerRequestsContract` | `schway.host.provider-requests/v1` |
+| `effortContract` | `schway.host.effort/v1` |
+| `outputCapContract` | `schway.host.output-cap/v1` |
+
+Require both before reporting governed model dispatch as guarded. Pass a
+synchronous `authorizeDispatch` to `submitWithRoute(input, { authorizeDispatch })`
+or to `host.auth.createModel({ authorizeDispatch })` for `submit` and `compact`.
+It runs once per physical inference send, immediately before the request starts,
+including transient retries, compaction and the Grok auth-retry resend; throw to
+refuse. Check each `HostDispatch` (`route`, `provider`, `model`, `kind`,
+`sequence`, `bodySha256`, `bodyBytes`) against the app's recipient, budget and
+revocation policy at that moment. A refusal sends nothing, is never retried, and
+reports `auth.status: "dispatch-refused"` on route runs; `isDispatchRefused`
+recognizes it on direct streams.
+
+Read `result.usage.providerRequests` to reconcile admitted work with physical
+requests: inference requests are `initialSends + authRetrySends`, and
+`renewalRequests` counts the token refreshes this run started. A shared renewal
+counts once, for the run that started it, so totals across runs are exact.
+`null` means a model call was not observable (a host-supplied model or a wrapper
+that drops `call`); treat it as unknown, never zero. Bound local readiness with
+`checkReadiness({ signal, deadlineMs })`; it rejects `AbortError` or
+`TimeoutError` and never writes. `submitWithRoute` reads readiness inside its run
+bound, so the run's signal, `cancel()` and `deadlineMs` interrupt a blocked store
+read. A wrapping model keeps counts only by passing `call` as-is or spread, and
+must rethrow a refusal or chain it as `cause`. `isDispatchRefused` checks only
+the object it is given, by identity per installed Schway copy and never by
+message; the loop and `classifyAuthError` also follow `cause`. Route sends refuse
+redirects and report `integration-unavailable` without retrying; Codex and Grok
+token refreshes never follow redirects. A deadline with no unrecovered provider
+failure reports the admission verdict.
+
+To pin effort, list the route's models in the same process and with the same
+store or lifecycle, pass the chosen `HostModelChoice` as `catalogModel` with
+`effort: { level, mode: "exact" }` to `createModel`, and read
+`HostDispatch.effort` and each attempt's `effort` (`requested`, `sent`,
+`reported`). Check `effort.levels` and `effort.offSendable` first: a pin Schway
+cannot send exactly rejects `invalid-input` before any request, the same code as
+malformed options. Re-list after logout, sign-in or an account change. Use
+`createModel` with `submit`, not `submitWithRoute`, for pinned or capped work.
+`reported` is provider metadata, not proof of internal computation.
+
+To bound output, read `outputCap.enforced` from the route description or a listed
+model. On Grok, pass `maxOutputTokens` (at most `outputCap.maximum`) and
+`requireOutputCap: true` to `createModel`; on Codex, `requireOutputCap` rejects
+`invalid-input` because the endpoint accepts no cap. Read `HostDispatch.outputCap`
+and each attempt's `outputCap.sent`. Grok's 16,384 default is Schway's
+conservative catalog fallback, not a provider limit. Caps are not monetary
+bounds; subscription spend stays unknown.
+
+| Seam | Coverage |
+| --- | --- |
+| `tests/host-dispatch-authorization.test.ts` | Fake fetch and stores with promise barriers: Grok 401 resend authorized twice and refusable on the second call with one request sent; revocation during a blocked credential read or renewal; Codex renewal before one authorized send; retries, compaction and compaction inside a route run; refused redirects against a local server; a survived compaction refusal never masking a later failure; echoed refusal wording still retried; exact body hashes; no-authorizer byte identity; secret sentinels; option validation. |
+| `tests/host-provider-requests.test.ts` | Exact counts per run, shared renewal attributed once across lifecycle-sharing hosts, bounded retries, `null` for unobservable models, readiness abort and deadline that never use the late value, and route runs settled by cancel, signal or deadline during blocked admission and post-`max_turns` reads. |
+| `tests/host-effort.test.ts` | Listed effort support compared level by level with what the adapter accepts and sends, static description, exact pins rejected before any request when refused or dropped, exact pins sent on turns, compaction and auth-retry resends, requested/sent/reported per send and attempt, conflicting requests refused by identity, unchanged bytes without the options. |
+| `tests/host-output-cap.test.ts` | Static cap support without network, Codex required or explicit caps rejected before any request, invalid Grok caps rejected at `createModel`, exact caps on turns, compaction and auth-retry resends, default caps observed per send and attempt, unchanged bytes without the options, and a body missing the required cap refused before the authorizer. |
+| `tests/host-release.test.ts` | The packed consumer advertises the capabilities, authorizes the Grok initial and auth-retry sends with matching hashes, refuses the resend, reads exact counts and bounds readiness, pins an exact effort from a listed model, and sends an exact output cap while Codex reports none, importing only `schway/host`. |

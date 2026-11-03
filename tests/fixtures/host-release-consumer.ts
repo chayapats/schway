@@ -7,6 +7,8 @@ import {
   createWebSearchTool,
   type SearchProvider,
   hostCapabilities,
+  describeAuthRoute,
+  isDispatchRefused,
   listRouteModels,
   credentialReferenceForRoute,
   validateSnapshotShape,
@@ -14,6 +16,7 @@ import {
   RELEASE_CONTRACT,
   SNAPSHOT_CONTRACT,
   type ExecutionBackend,
+  type HostDispatch,
   type HostOptions,
   type Model,
 } from "schway/host";
@@ -29,6 +32,7 @@ type Input =
   | { action: "codex-route" | "grok-route"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "inventory"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
+  | { action: "dispatch"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "core-tools" | "web-tools"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
 
 function fakeStore() {
@@ -529,6 +533,101 @@ if (input.action === "capabilities") {
   const run = await session.submit({ text: "Read the web" }, model);
   await session.close(); await host.close();
   console.log(JSON.stringify({ outcome: run.outcome, calls, results, contract: hostCapabilities().webToolsContract }));
+} else if (input.action === "dispatch") {
+  // Every physical Grok send is authorized with exact body hashes, the auth-retry resend included.
+  const store = fakeStore();
+  const account = "grok-subscription:xai";
+  await store.set({ account }, JSON.stringify({ accessToken: "dispatch-old-token", refreshToken: "dispatch-refresh", obtainedAt: Date.now(), expiresAt: Date.now() + 3_600_000 }));
+  const bodies: string[] = [];
+  let renewals = 0, rejectNext = true;
+  const fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url).includes("auth.x.ai")) {
+      renewals++;
+      return Response.json({ access_token: "dispatch-new-token", refresh_token: "dispatch-refresh", expires_in: 3600 });
+    }
+    if (init?.method === "GET") return Response.json({ data: [{ id: "grok-4.7", supported_reasoning_levels: ["low", "high"], default_reasoning_effort: "high" }] });
+    bodies.push(typeof init?.body === "string" ? init.body : "");
+    if (rejectNext) { rejectNext = false; return new Response("expired", { status: 401 }); }
+    return grokOk();
+  }) as never;
+  const sha256 = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
+  const host = await createHost({
+    workspaceRoot: input.workspaceRoot, homeDirectory: input.homeDirectory, sessionDirectory: input.sessionDirectory,
+    context: { policy: "strict", systemPrompt: "release dispatch probe", sections: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
+    limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 },
+    auth: { route: "grok", model: "grok-4.7", store, fetch, env: { XAI_API_KEY: "dispatch-bait-key" } },
+  } as unknown as HostOptions);
+  const session = await host.createSession();
+  const seen: HostDispatch[] = [];
+  const completed = await session.submitWithRoute({ text: "dispatch probe" }, { authorizeDispatch: dispatch => { seen.push(dispatch); } });
+  if (completed.outcome !== "completed") throw new Error(`Expected completion, got ${completed.outcome}`);
+  const hashesMatch = seen.length === bodies.length && seen.every((dispatch, index) => dispatch.bodySha256 === sha256(bodies[index]!));
+
+  rejectNext = true;
+  const before = bodies.length;
+  const refusedRun = await session.submitWithRoute({ text: "refused probe" }, { authorizeDispatch: dispatch => {
+    if (dispatch.kind === "auth-retry") throw new Error("budget exhausted");
+  } });
+  if (!("auth" in refusedRun)) throw new Error("Expected refusal detail");
+  const refusedInferences = bodies.length - before;
+
+  const model = await host.auth!.createModel({ authorizeDispatch: () => { throw new Error("revoked"); } });
+  let directRefused = false;
+  try { for await (const _event of model.stream({ systemPrompt: "s", context: [], items: [{ type: "user", id: "u", content: [{ type: "text", text: "x" }] }] })) { /* drain */ } }
+  catch (error) { directRefused = isDispatchRefused(error); }
+
+  const readinessName = async (options: { signal?: AbortSignal; deadlineMs?: number }) => {
+    try { await host.auth!.checkReadiness(options); return "resolved"; } catch (error) { return (error as Error).name; }
+  };
+  const blocked = await createHost({
+    workspaceRoot: input.workspaceRoot, homeDirectory: input.homeDirectory, sessionDirectory: `${input.sessionDirectory}-blocked`,
+    context: { policy: "strict", systemPrompt: "release readiness probe", sections: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
+    limits: { maxTurns: 1, maxConcurrentTools: 1, contextWindow: 1024, maxInputChars: 64 },
+    auth: { route: "grok", model: "grok-4.7", store: { get: () => new Promise<string | null>(() => {}), set: async () => { throw new Error("unexpected write"); }, delete: async () => false } },
+  } as unknown as HostOptions);
+  let timedOut = "resolved";
+  try { await blocked.auth!.checkReadiness({ deadlineMs: 20 }); } catch (error) { timedOut = (error as Error).name; }
+
+  // Effort: read support from the listing, pin an exact level, and observe it per send and attempt.
+  const listing = await listRouteModels({ route: "grok", store, fetch });
+  const choice = listing.status === "listed" ? listing.models.find(model => model.id === "grok-4.7") : undefined;
+  if (!choice) throw new Error("Expected a listed grok model");
+  const pinnedSeen: HostDispatch[] = [];
+  const pinned = await host.auth!.createModel({ catalogModel: choice, effort: { level: "low", mode: "exact" }, authorizeDispatch: dispatch => { pinnedSeen.push(dispatch); } });
+  const pinnedRun = await session.submit({ text: "pinned probe" }, pinned);
+  if (pinnedRun.outcome !== "completed") throw new Error(`Expected pinned completion, got ${pinnedRun.outcome}`);
+  let invalidPin = "accepted";
+  try { await host.auth!.createModel({ catalogModel: choice, effort: { level: "off", mode: "exact" } }); }
+  catch (error) { invalidPin = (error as { code?: string }).code ?? "unknown"; }
+  const lastBody = JSON.parse(bodies.at(-1) ?? "{}") as { reasoning?: { effort?: string } };
+
+  // Output caps: Codex declares none; Grok sends exactly the requested cap and rejects one above its maximum.
+  const cappedSeen: HostDispatch[] = [];
+  const capped = await host.auth!.createModel({ maxOutputTokens: 2048, requireOutputCap: true, authorizeDispatch: dispatch => { cappedSeen.push(dispatch); } });
+  const cappedRun = await session.submit({ text: "capped probe" }, capped);
+  if (cappedRun.outcome !== "completed") throw new Error(`Expected capped completion, got ${cappedRun.outcome}`);
+  const cappedBody = JSON.parse(bodies.at(-1) ?? "{}") as { max_output_tokens?: number };
+  let invalidCap = "accepted";
+  try { await host.auth!.createModel({ maxOutputTokens: choice.outputCap.maximum! + 1 }); }
+  catch (error) { invalidCap = (error as { code?: string }).code ?? "unknown"; }
+  const result = {
+    caps: { dispatch: hostCapabilities().dispatchAuthorizationContract, providerRequests: hostCapabilities().providerRequestsContract },
+    kinds: seen.map(dispatch => `${dispatch.kind}:${dispatch.sequence}`), hashesMatch,
+    completed: completed.usage.providerRequests,
+    refused: { status: refusedRun.auth.status, inferences: refusedInferences, providerRequests: refusedRun.usage.providerRequests },
+    directRefused, renewals,
+    readiness: { aborted: await readinessName({ signal: AbortSignal.abort() }), timedOut },
+    effort: { contract: hostCapabilities().effortContract, support: choice.effort, dispatch: pinnedSeen.map(dispatch => dispatch.effort),
+      attempts: pinnedRun.usage.attempts.map(attempt => attempt.effort), body: lastBody.reasoning?.effort ?? null, invalidPin },
+    outputCap: { contract: hostCapabilities().outputCapContract, codex: describeAuthRoute({ route: "codex", model: "gpt-5.4" }).outputCap, grok: choice.outputCap,
+      dispatch: cappedSeen.map(dispatch => dispatch.outputCap), attempts: cappedRun.usage.attempts.map(attempt => attempt.outputCap), body: cappedBody.max_output_tokens ?? null, invalidCap },
+  };
+  const text = JSON.stringify([result, seen, completed, refusedRun]);
+  for (const secret of ["dispatch-old-token", "dispatch-new-token", "dispatch-refresh", "dispatch-bait-key"]) if (text.includes(secret)) throw new Error("Secret leaked into dispatch evidence");
+  await session.close(); await host.close(); await blocked.close();
+  console.log(JSON.stringify(result));
 } else {
   throw new Error(`Unknown action: ${(input as { action: string }).action}`);
 }

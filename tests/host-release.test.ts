@@ -97,6 +97,10 @@ test("packed release artifact installs without private source access and adverti
       runContract: "schway.host.run-control/v1",
       dataContract: "schway.host.managed-session-data/v1",
       snapshotContract: "schway.host.session-snapshot/v1",
+      dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1",
+      providerRequestsContract: "schway.host.provider-requests/v1",
+      effortContract: "schway.host.effort/v1",
+      outputCapContract: "schway.host.output-cap/v1",
       observedInference: "not-checked",
     });
   } finally {
@@ -233,6 +237,38 @@ test("packed release consumer proves grok route isolation without fallback", asy
   }
 }, 120_000);
 
+test("packed release consumer authorizes each grok dispatch and reads exact provider requests", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
+  try {
+    const { consumer } = await packAndInstall(dir);
+    const workspaceRoot = join(consumer, "work-dispatch"), homeDirectory = join(consumer, "home-dispatch"), sessionDirectory = join(consumer, "sessions-dispatch");
+    await mkdir(workspaceRoot, { recursive: true }); await mkdir(homeDirectory, { recursive: true });
+    const result = await packedConsumer(consumer, { action: "dispatch", workspaceRoot, homeDirectory, sessionDirectory },
+      `await Bun.plugin({name:'release-dispatch-guard',setup(builder){
+        builder.onLoad({filter:/providers[/\\\\]codex-subscription/},()=>{throw new Error('unselected codex loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai\\.ts/},()=>{throw new Error('native openai loaded');});
+        builder.onLoad({filter:/providers[/\\\\]openai-compatible/},()=>{throw new Error('unselected compatible loaded');});
+        builder.onLoad({filter:/[/\\\\]tui[/\\\\]/},()=>{throw new Error('TUI loaded');});
+        builder.onLoad({filter:/@opentui/},()=>{throw new Error('renderer loaded');});
+      }});`);
+    expect(result).toEqual({
+      caps: { dispatch: "schway.host.dispatch-authorization/v1", providerRequests: "schway.host.provider-requests/v1" },
+      kinds: ["initial:1", "auth-retry:2"], hashesMatch: true,
+      completed: { initialSends: 1, authRetrySends: 1, renewalRequests: 1 },
+      refused: { status: "dispatch-refused", inferences: 1, providerRequests: { initialSends: 1, authRetrySends: 0, renewalRequests: 1 } },
+      directRefused: true, renewals: 2,
+      readiness: { aborted: "AbortError", timedOut: "TimeoutError" },
+      effort: { contract: "schway.host.effort/v1",
+        support: { levels: ["low", "high"], offSendable: false, default: "high", evidence: "account-catalog" },
+        dispatch: [{ requested: "low", sent: "low" }], attempts: [{ requested: "low", sent: "low", reported: null }], body: "low", invalidPin: "invalid-input" },
+      outputCap: { contract: "schway.host.output-cap/v1", codex: { enforced: false, default: null, maximum: null }, grok: { enforced: true, default: 16384, maximum: 16384 },
+        dispatch: [{ sent: 2048 }], attempts: [{ sent: 2048 }], body: 2048, invalidCap: "invalid-input" },
+    });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 120_000);
+
 for (const route of ["codex", "grok"] as const) {
   test(`packed release consumer shares one ${route} renewal without cross-route reads`, async () => {
     const dir = await realpath(await mkdtemp(join(tmpdir(), "schway-release-")));
@@ -328,8 +364,12 @@ test("packed catalog consumer uses only the public API and selected subscription
         `await Bun.plugin({name:'catalog-guard',setup(builder){
           builder.onLoad({filter:/(?:tui|@opentui|providers[/\\\\](?:${unselected}|xai\\.ts|openai\\.ts|openai-compatible))/},()=>{throw new Error('catalog loaded unrelated runtime');});
         }});`);
+      // Rows without reasoning metadata: Codex accepts no explicit effort and sends no cap; Grok accepts off only as a no-op and sends its default cap.
+      const effort = route === "codex" ? { levels: [], offSendable: false, default: null, evidence: "account-catalog" }
+        : { levels: ["off"], offSendable: false, default: null, evidence: "account-catalog" };
+      const outputCap = route === "codex" ? { enforced: false, default: null, maximum: null } : { enforced: true, default: 16384, maximum: 16384 };
       expect(result).toEqual({ result: { route, status: "listed", containsNoSecrets: true,
-        models: [{ id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: true, contextWindow: 64000 }] }, requests: 1, writes: 0 });
+        models: [{ id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: true, contextWindow: 64000, effort, outputCap }] }, requests: 1, writes: 0 });
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
 }, 120_000);

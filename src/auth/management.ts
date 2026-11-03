@@ -1,5 +1,5 @@
 import { credentialEnvironmentVariable } from "./credentials.ts";
-import { credentialIdentity, credentialStoreError, type CredentialIdentity, type CredentialStore, type CredentialTarget } from "./store.ts";
+import { credentialIdentity, credentialStoreFailure, type CredentialIdentity, type CredentialStore, type CredentialTarget } from "./store.ts";
 
 /** Secret-free result of an explicit credential mutation. */
 export type CredentialMutationResult = { ok: boolean; message: string };
@@ -70,9 +70,9 @@ export class MaskedCredentialEntry {
       await this.#store.set(this.#identity, key);
       this.#phase = "saved";
       return { ok: true, message: `Saved API key for ${this.#identity.label} in the OS secure store.` };
-    } catch {
+    } catch (error) {
       this.#phase = "failed";
-      return { ok: false, message: credentialStoreError("save") };
+      return { ok: false, message: credentialStoreFailure("save", error) };
     }
   }
 }
@@ -89,7 +89,7 @@ export async function removeStoredCredential(input: CredentialTarget & {
   catch { return { ok: false, message: "Select a valid HTTP(S) base URL before managing OpenAI-compatible credentials." }; }
   let deleted: boolean;
   try { deleted = await input.store.delete(identity); }
-  catch { return { ok: false, message: credentialStoreError("delete") }; }
+  catch (error) { return { ok: false, message: credentialStoreFailure("delete", error) }; }
   const variable = input.provider === "openai-compatible" && input.credentialEnv
     ? input.credentialEnv : credentialEnvironmentVariable(input.provider);
   const remaining: string[] = [];

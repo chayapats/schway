@@ -2,8 +2,30 @@
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- Builds with the credential lock directory (untagged, since #425, including
+  Jit's vendored `128b77a` and `697bf40`) are fenced. After any current Schway
+  saves or deletes a credential under a user account, every such build under
+  that account fails all credential saves and deletions, including sign-in,
+  logout, API-key changes and subscription token renewal. The cause is
+  `~/.schway/credential-store.lock`, which stays until deleted by hand.
+- Tagged releases through `v1.0.0-rc.2` take no credential lock. They are not
+  fenced, but their saves and deletions still run unserialized beside current
+  Schway.
+- Upgrade every Schway that shares the account together. To keep a
+  lock-directory build working meanwhile, stop every current Schway process
+  under that account, then delete that file; the next current save or deletion
+  recreates it. See the
+  [upgrade note](docs/credentials.md#upgrade-note-lock-directory-builds-stop-saving-credentials)
+  (#428).
+
 ### Security
 
+- Codex and Grok subscription token refreshes no longer follow HTTP redirects,
+  so a refresh token is never resent to a redirect target. A redirected
+  refresh fails with a fixed message on every path, the CLI included, and host
+  route requests refuse inference redirects without retrying (#444).
 - Block nonpublic and metadata destinations in `web_fetch` by default, including
   every redirect's resolved DNS answers. Pin connections to checked addresses to
   prevent DNS rebinding; refused calls return `blocked-address` without resolved
@@ -12,6 +34,26 @@
 
 ### Fixed
 
+- Serialize OS secure-store saves and deletions across processes with a SQLite
+  `BEGIN IMMEDIATE` lock that the operating system releases when its holder
+  exits, even on SIGKILL. Concurrent contenders after a crashed holder no longer
+  remove a live holder's lock, which could let two Schway processes mutate at
+  once; remaining limits are documented in the credentials guide. Read-only
+  connections are refused instead of admitted beside a holder, and a non-empty
+  file at the lock path, such as an existing database, is refused without being
+  opened. A busy lock still fails closed after its bounded wait with the
+  sanitized store error. Conditions that waiting cannot clear, such as a
+  relative `SCHWAY_CREDENTIAL_LOCK_FILE` or an unusable lock path, fail at once
+  with a specific next action. `SCHWAY_CREDENTIAL_LOCK_FILE` moves the lock to
+  an absolute path. A lock-directory build's lock is honored but never removed;
+  see the upgrade note (#428).
+- Report credential-lock refusals with the lock's own next action. Route
+  results keep `store-unavailable` but no longer show keychain or libsecret
+  guidance; the failure is recognized by identity, never by copied text. Device
+  sign-in and shared credential lifecycles no longer attempt cleanup after a
+  lock refusal or report `cleanupUncertain: true`, because a refused lock means
+  nothing was written. A lifecycle route therefore stays usable once the lock
+  is fixed instead of staying blocked until logout (#428).
 - Classify Grok subscription spending-limit denials as `quota-exceeded`, with
   a subscription usage link and no API-key billing fallback. Catalog, inference
   and host status agree; plan rejection remains distinct from transient
@@ -19,6 +61,34 @@
 
 ### Added
 
+- Add an optional synchronous dispatch authorizer for host route models,
+  advertised by `dispatchAuthorizationContract:
+  "schway.host.dispatch-authorization/v1"`. `createModel({ authorizeDispatch })`,
+  `createAuthRouteModel(selection, options)` and `submitWithRoute(input,
+  { authorizeDispatch })` call it immediately before every physical inference
+  request, including the xAI 401 refresh resend, with a frozen credential-free
+  `HostDispatch` (route, provider, model, kind, sequence, body SHA-256 and byte
+  length). A throw refuses that send: nothing leaves, the loop never retries it,
+  `isDispatchRefused` and the `dispatch-refused` status identify it, and no
+  route, model or billing fallback happens (#444).
+- Report exact provider requests per run as `HostRunUsage.providerRequests`
+  (`initialSends`, `authRetrySends`, `renewalRequests`), advertised by
+  `providerRequestsContract: "schway.host.provider-requests/v1"`. A renewal
+  shared across hosts is counted once, for the run that started it. Readiness
+  accepts `{ signal, deadlineMs }`, and `submitWithRoute` readiness reads honor
+  the run's signal, `cancel()` and deadline (#415).
+- Report exact reasoning-effort support per listed model and in the static
+  route description, built by the adapter's own policy, advertised by
+  `effortContract: "schway.host.effort/v1"`. `createModel({ catalogModel,
+  effort: { level, mode: "exact" } })` pins an effort, refused before any
+  request when the adapter would drop or change it. `HostDispatch.effort` and
+  per-attempt usage record the effort requested, sent and reported. Listed
+  evidence is bound to the credential owner that listed it (#445).
+- Declare whether each route enforces an output-token cap, advertised by
+  `outputCapContract: "schway.host.output-cap/v1"`. Grok accepts
+  `maxOutputTokens` and `requireOutputCap`; Codex, whose endpoint rejects caps,
+  refuses them before any request. `HostDispatch.outputCap` and per-attempt
+  usage record the cap sent. Token caps are not monetary bounds (#446).
 - Export `SearchProvider`, `createWebSearchTool(provider, options?)` and
   `createWebFetchTool(options?)` through `schway/host`, advertised by
   `webToolsContract: "schway.host.web-tools/v1"`. Explicit read-only tools keep

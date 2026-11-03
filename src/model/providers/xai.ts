@@ -4,6 +4,7 @@ import { assertThinking } from "../thinking.ts";
 import { lookupModel } from "../catalog.ts";
 import type { Model, ModelCallOptions, ModelRequest, ThinkingLevel } from "../model.ts";
 import { isPromptCacheKey } from "../prompt-cache-key.ts";
+import { controlsFromBody, isRefusedRedirect, providerDispatch, redirectRefusedError, reportedEffort, type ProviderSendKind } from "../dispatch.ts";
 import { assembleResponsesStream, buildResponsesRequest, type ResponsesReasoning } from "./responses-stream.ts";
 
 /** Public xAI Responses API origin used when tests do not inject a base URL. */
@@ -42,9 +43,10 @@ function requiredModelId(model: string | undefined): string {
 
 /** Create an xAI Responses adapter with per-request credentials, namespaced reasoning and no SDK retries. */
 export function createXaiModel(options: {
-  apiKey: string | ((signal?: AbortSignal) => Promise<string>);
+  /** Static key, or a resolver that reports each renewal request it starts through `onRenewal`. */
+  apiKey: string | ((signal?: AbortSignal, onRenewal?: () => void) => Promise<string>);
   /** Renew a rejected subscription token once without entering the agent retry loop. */
-  refreshCredential?: (rejectedToken: string, signal?: AbortSignal) => Promise<string>;
+  refreshCredential?: (rejectedToken: string, signal?: AbortSignal, onRenewal?: () => void) => Promise<string>;
   /** Map subscription authorization failures without changing API-key transport errors. */
   authError?: (status: number) => Error;
   model?: string;
@@ -63,12 +65,12 @@ export function createXaiModel(options: {
   const defaultThinking = options.thinking;
   const capability = options.modelCapability;
   const replayHostedItems = options.replayHostedItems ?? XAI_HOSTED_ITEM_REPLAY[options.authRoute ?? "api-key"];
-  const clientFor = (token: string) => new OpenAI({
+  const clientFor = (token: string, fetchFn: FetchLike | undefined) => new OpenAI({
     apiKey: token,
     baseURL: options.baseUrl ?? XAI_BASE_URL,
     maxRetries: 0,
     logLevel: "off",
-    fetch: options.fetch,
+    fetch: fetchFn,
   });
 
   return {
@@ -84,26 +86,47 @@ export function createXaiModel(options: {
         // `x-grok-conv-id` header is documented only for Chat Completions and gRPC, so it is not sent.
         ...(isPromptCacheKey(cacheKey) ? { prompt_cache_key: cacheKey } : {}),
       };
-      let token = typeof options.apiKey === "function" ? await options.apiKey(request.signal) : options.apiKey;
+      const dispatch = providerDispatch(call);
+      let token = typeof options.apiKey === "function" ? await options.apiKey(request.signal, dispatch?.renewal) : options.apiKey;
       const tokens = [token];
       const safeError = (error: unknown): unknown => {
         if (!options.refreshCredential) return error;
         const message = tokens.reduce((text, secret) => secret ? text.replaceAll(secret, "[redacted]") : text, error instanceof Error ? error.message : "Grok request failed.");
         return Object.assign(new Error(message), error instanceof OpenAI.APIError ? { status: error.status, headers: error.headers } : {});
       };
+      // The SDK wraps fetch failures as connection errors, so a refusal is kept here and rethrown unchanged.
+      let refusal: unknown;
+      // Authorization runs inside the SDK's single fetch call: after every SDK await, on the exact serialized body.
+      // Host route sends refuse redirects, authorizer or not, so a 3xx never becomes a second, uncounted send.
+      // Controls come from the bytes the SDK actually sends, so no SDK transform can make them diverge from the hash.
+      const authorizedFetch = (kind: ProviderSendKind): FetchLike | undefined => dispatch ? (input, init) => {
+        try { dispatch.send(kind, init?.body, controlsFromBody(init?.body)); }
+        catch (error) { refusal = error; throw error; }
+        return (options.fetch ?? fetch)(input, { ...init, redirect: "error" });
+      } : options.fetch;
       // The xAI catalog may advertise efforts beyond OpenAI SDK enums; preserve them exactly.
-      const send = () => clientFor(token).responses.create(body as OpenAI.Responses.ResponseCreateParamsStreaming, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
+      const send = (kind: ProviderSendKind) => clientFor(token, authorizedFetch(kind)).responses.create(body as OpenAI.Responses.ResponseCreateParamsStreaming, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });
+      // The SDK reports a refused redirect as a connection error; the server did answer, so it is not retried.
+      const redirected = (error: unknown) => dispatch !== undefined && isRefusedRedirect(error);
+      const label = options.authRoute === "grok" ? "Grok subscription" : "xAI API";
       let stream;
-      try { stream = await send(); }
+      try { stream = await send("initial"); }
       catch (error) {
+        if (refusal !== undefined) throw refusal;
+        if (redirected(error)) throw redirectRefusedError(label);
         if (error instanceof OpenAI.APIError && error.status === 401 && options.refreshCredential) {
-          token = await options.refreshCredential(token, request.signal); tokens.push(token);
-          try { stream = await send(); }
-          catch (retryError) { if (retryError instanceof OpenAI.APIError && [401, 403].includes(retryError.status ?? 0) && options.authError) throw options.authError(retryError.status!); throw safeError(retryError); }
+          token = await options.refreshCredential(token, request.signal, dispatch?.renewal); tokens.push(token);
+          try { stream = await send("auth-retry"); }
+          catch (retryError) {
+            if (refusal !== undefined) throw refusal;
+            if (redirected(retryError)) throw redirectRefusedError(label);
+            if (retryError instanceof OpenAI.APIError && [401, 403].includes(retryError.status ?? 0) && options.authError) throw options.authError(retryError.status!);
+            throw safeError(retryError);
+          }
         } else if (error instanceof OpenAI.APIError && error.status === 403 && options.authError) throw options.authError(403);
         else throw safeError(error);
       }
-      try { yield* assembleResponsesStream({ stream, namespace: "xai", label: "xAI" }); }
+      try { yield* assembleResponsesStream({ stream, namespace: "xai", label: "xAI", ...(dispatch ? { onTerminal: (response: unknown) => dispatch.reported({ effort: reportedEffort(response) }) } : {}) }); }
       catch (error) { throw safeError(error); }
     },
   };

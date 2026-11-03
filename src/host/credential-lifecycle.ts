@@ -1,4 +1,4 @@
-import { createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, markCleanupUncertain, type CredentialStore } from "../auth/store.ts";
+import { createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialLockError, markCleanupUncertain, type CredentialStore } from "../auth/store.ts";
 import type { Model } from "../model/model.ts";
 import type { HostAuthRoute, HostCredentialStore, HostCredentialWriteGuard } from "./auth-routes.ts";
 import { credentialReferenceForRoute } from "./auth-routes.ts";
@@ -102,6 +102,8 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
           await state.base.set(identity, value);
           await authorize();
         } catch (error) {
+          // A credential-lock refusal means the backend write never ran: nothing to remove, and the route stays usable.
+          if (isCredentialLockError(error)) throw error;
           // A backend can commit then reject. Remove only this write, under the route chain.
           try {
             if (state.base.compareAndDelete) await state.base.compareAndDelete(identity, value);
