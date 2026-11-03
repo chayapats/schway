@@ -354,8 +354,12 @@ test("hosts sharing one lifecycle accept each other's listing until logout repla
 test("send controls are read from the exact bytes", async () => {
   const { controlsFromBody } = await import("../src/model/dispatch.ts");
   const body = JSON.stringify({ reasoning: { effort: "high" }, max_output_tokens: 512 });
-  expect(controlsFromBody(body)).toEqual({ effort: "high", outputCap: 512 });
-  expect(controlsFromBody(new TextEncoder().encode(body))).toEqual({ effort: "high", outputCap: 512 });
+  const bytes = new TextEncoder().encode(body);
+  // Every body form the dispatch hash accepts: string, ArrayBuffer and any ArrayBufferView, offsets included.
+  const padded = new Uint8Array(bytes.byteLength + 4); padded.set(bytes, 2);
+  for (const form of [body, bytes, bytes.buffer.slice(0), new DataView(bytes.buffer.slice(0)), new Int8Array(bytes.buffer.slice(0)), new Uint8Array(padded.buffer, 2, bytes.byteLength), new DataView(padded.buffer, 2, bytes.byteLength)]) {
+    expect(controlsFromBody(form)).toEqual({ effort: "high", outputCap: 512 });
+  }
   for (const unreadable of ["not json", "[1]", undefined, 42]) expect(controlsFromBody(unreadable)).toEqual({ effort: null, outputCap: null });
 });
 
@@ -379,4 +383,74 @@ test("submit reports a route-control refusal that ends overflow recovery, not th
     expect(wire.bodies).toHaveLength(1);
     await session.close(); await host.close();
   });
+});
+
+test("codex evidence comes from the adapter's own catalog parser, so non-standard rows widen nothing", async () => {
+  const rows = [
+    { slug: "bare-levels", visibility: "list", supported_reasoning_levels: ["low", "high"], default_reasoning_level: "low" },
+    { slug: "camel-levels", visibility: "list", supportedThinking: ["low"] },
+    { slug: "capability-levels", visibility: "list", capabilities: { reasoning_effort: ["high"] } },
+    { slug: "standard", visibility: "list", supported_reasoning_levels: [{ effort: "none" }, { effort: "high" }], default_reasoning_level: "high", contextWindow: 1000, max_completion_tokens: 100 },
+  ];
+  const store = await seededStore("codex");
+  const wire = rowsTransport("codex", rows);
+  const listing = await listRouteModels({ route: "codex", store, fetch: wire.fetch });
+  if (listing.status !== "listed") throw new Error("expected listing");
+  // The adapter's catalog path, as the CLI and TUI use it, over the same rows.
+  const { fetchSubscriptionCatalog } = await import("../src/model/providers/codex-subscription.ts");
+  const adapter = await fetchSubscriptionCatalog({ store, fetch: wire.fetch });
+  for (const row of rows) {
+    const host = listing.models.find(model => model.id === row.slug)!;
+    expect(host.effort).toEqual(effortSupport("codex", row.slug, adapter.find(capability => capability.id === row.slug)!));
+  }
+  expect(listing.models.find(model => model.id === "bare-levels")!.effort).toEqual({ levels: [], offSendable: false, default: null, evidence: "account-catalog" });
+  expect(listing.models.find(model => model.id === "standard")!.effort).toEqual({ levels: ["off", "high"], offSendable: true, default: "high", evidence: "account-catalog" });
+});
+
+test("a logout during listing keeps the choice bound to the account that was listed", async () => {
+  await withTempDir(async dir => {
+    const base = await seededStore("grok");
+    const lifecycle = createHostCredentialLifecycle({ store: base });
+    const listing = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+    const fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === "GET") { listing.resolve(); await release.promise; return Response.json({ data: [{ id: MODEL.grok, supported_reasoning_levels: ["low", "high"] }] }); }
+      return answer("grok");
+    }) as never;
+    const pending = listRouteModels({ route: "grok", lifecycle, fetch });
+    await listing.promise;
+    await lifecycle.logout("grok");
+    // Another account signs in while the old catalog is still in flight.
+    await base.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "next-account", refreshToken: "next-refresh", obtainedAt: Date.now(), expiresAt: Date.now() + 3_600_000 }));
+    release.resolve();
+    const result = await pending;
+    if (result.status !== "listed") throw new Error(`expected listing, got ${result.status}`);
+    const host = await createHost(await options(dir, { route: "grok", model: MODEL.grok, lifecycle, fetch }));
+    await expect(host.auth!.createModel({ catalogModel: result.models[0]!, effort: { level: "high", mode: "exact" } })).rejects.toMatchObject({ code: "invalid-input" });
+    await host.close(); await lifecycle.close();
+  });
+});
+
+test("classifyAuthError maps each route-control refusal to model-unavailable with its own next step", async () => {
+  const { dispatchRouteModel } = await import("../src/host/dispatch.ts");
+  const { providerDispatch } = await import("../src/model/dispatch.ts");
+  const { classifyAuthError } = await import("schway/host");
+  const sending = (controls: { effort: string | null; outputCap: number | null }): Model => ({ provider: "xai", id: MODEL.grok, async *stream(_request, call) {
+    providerDispatch(call)!.send("initial", "{}", controls);
+  } });
+  const failure = (model: Model, thinking?: ThinkingLevel) => drain(model, thinking).then(() => { throw new Error("expected refusal"); }, (error: unknown) => error as Error);
+  const conflict = await failure(dispatchRouteModel(sending({ effort: "high", outputCap: null }), "grok", undefined, { effort: { level: "high", sent: "high" } }), "low");
+  const effortNotSent = await failure(dispatchRouteModel(sending({ effort: "low", outputCap: null }), "grok", undefined, { effort: { level: "high", sent: "high" } }));
+  const capNotSent = await failure(dispatchRouteModel(sending({ effort: null, outputCap: 9 }), "grok", undefined, { outputCap: { exact: 10, required: true } }));
+  const selection = { route: "grok" as const, model: MODEL.grok };
+  for (const [refusal, message] of [
+    [conflict, "The request asked for a reasoning effort other than the model's pinned effort, so it was not sent. Leave the request's thinking unset or match the pin."],
+    [effortNotSent, "The pinned reasoning effort could not be sent exactly, so the request was not sent. Pin a level this model lists."],
+    [capNotSent, "The required output cap could not be sent exactly, so the request was not sent. Retry with a cap this route supports."],
+  ] as const) {
+    expect(isRouteControlRefused(refusal)).toBe(true);
+    expect(classifyAuthError(refusal, selection)).toMatchObject({ status: "model-unavailable", nextAction: message });
+    // Identity follows `cause`; a copied message is not a refusal.
+    expect(classifyAuthError(new Error("wrapped", { cause: refusal }), selection)).toMatchObject({ status: "model-unavailable", nextAction: message });
+    expect(classifyAuthError(new Error(message), selection).status).toBe("integration-unavailable");
+  }
 });
