@@ -122,7 +122,8 @@ function expressionsIn(text: string): string[] {
 /**
  * Context references in one expression body, outside its single-quoted strings: any use of `secrets`, and any
  * use of the workflow token, which is `github.token`, `github['token']`, a computed `github[…]`, or the whole
- * `github` context (as in `toJSON(github)`), which contains the token.
+ * `github` context (as in `toJSON(github)`), which contains the token. Deeper properties named token, such as
+ * `github.event.inputs.token`, are workflow inputs, not the workflow token, so they pass.
  */
 function contextUses(expression: string): { secrets: boolean; token: boolean } {
   let secrets = false, token = false;

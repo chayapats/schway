@@ -7,7 +7,7 @@ import {
   assertRemovableOwnedTree, assertRemovableTempRoot, makeTempRoot, makeTempRootSync, removeOwnedTree, removeOwnedTreeSync,
   removeTempRoot, removeTempRootSync, withIsolatedCliDirs, withTempDir,
 } from "./helpers.ts";
-import { countTempSites, findTempSites, scanTempSites, type TempSiteKind } from "./helpers/temp-root-sites.ts";
+import { countTempSites, findTempSites, scanTempSites, statementStarts, type TempSiteKind } from "./helpers/temp-root-sites.ts";
 
 const repo = resolve(import.meta.dir, "..");
 const exists = (path: string) => stat(path).then(() => true, () => false);
@@ -171,15 +171,40 @@ test("shared fixture helpers remove their roots through the guard", async () => 
 
 test("the scanner finds direct recursive removals and mkdtemp calls, including aliases, argv lists and shell forms", async () => {
   const source = await Bun.file(join(import.meta.dir, "fixtures/temp-root-sites.txt")).text();
-  expect(findTempSites("tests/x.test.ts", source).map(site => `${site.line}:${site.kind}`)).toEqual([
+  const sites = findTempSites("tests/x.test.ts", source);
+  expect(sites.map(site => `${site.line}:${site.kind}`)).toEqual([
     "2:recursiveRemoval", "4:recursiveRemoval", "7:recursiveRemoval", "9:mkdtemp", "10:mkdtemp", "11:recursiveRemoval",
     "12:recursiveRemoval", "16:recursiveRemoval", "18:mkdtemp", "19:mkdtemp", "20:recursiveRemoval", "21:recursiveRemoval",
     "22:recursiveRemoval", "24:recursiveRemoval", "25:recursiveRemoval", "26:recursiveRemoval", "27:recursiveRemoval",
+    "29:recursiveRemoval", "30:recursiveRemoval", "39:recursiveRemoval", "40:recursiveRemoval", "41:recursiveRemoval",
+    "42:recursiveRemoval", "44:recursiveRemoval", "45:recursiveRemoval", "46:recursiveRemoval", "47:recursiveRemoval",
   ]);
-  // Every line the fixture marks as counted is found, and nothing else.
+  // Every line the fixture marks as counted holds exactly one site, and no other line holds any.
   const marked = source.split("\n").flatMap((line, index) => / \/\/ counted/.test(line) ? [index + 1] : []);
-  expect([...new Set(findTempSites("tests/x.test.ts", source).map(site => site.line))]).toEqual(marked);
+  expect(sites.map(site => site.line)).toEqual(marked);
 });
+
+test("a spawn site is found after regex literals with quotes and URL strings in real test files", async () => {
+  // The files where a hand-written tokenizer lost track of strings; the probe goes before every sampled
+  // statement, so it follows each earlier regex literal and URL in the file.
+  const probe = "Bun.spawnSync([\"rm\", \"-rf\", probeDir]);\n";
+  for (const file of ["tests/cli-help.test.ts", "tests/cli-launch.test.ts", "tests/coding-eval.test.ts", "tests/copy-guide.test.ts",
+    "tests/credential-store-lock.test.ts", "tests/docs-links.test.ts", "tests/hint-liveness.test.ts", "tests/host-release.test.ts", "tests/packaging.test.ts"]) {
+    const source = await Bun.file(join(repo, file)).text();
+    const baseline = findTempSites(file, source).length;
+    const starts = statementStarts(file, source);
+    expect(starts.length, file).toBeGreaterThan(10);
+    const step = Math.max(1, Math.floor(starts.length / 40));
+    for (let index = 0; index < starts.length; index += step) {
+      const at = starts[index]!;
+      const probed = source.slice(0, at) + probe + source.slice(at);
+      const line = source.slice(0, at).split("\n").length;
+      const found = findTempSites(file, probed);
+      expect(found.length, `${file} before line ${line}`).toBe(baseline + 1);
+      expect(found.some(site => site.line === line && site.kind === "recursiveRemoval"), `${file} line ${line}`).toBe(true);
+    }
+  }
+}, 60_000);
 
 test("direct recursive removal and mkdtemp sites under tests/ match the allowlist exactly", async () => {
   // Existing sites are allowlisted until they move to makeTempRoot, removeTempRoot and removeOwnedTree.

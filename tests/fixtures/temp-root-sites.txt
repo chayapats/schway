@@ -26,8 +26,8 @@ execSync(`rm --force --recursive ${dir}`); // counted
 execSync(`find ${dir} -name '*.tmp' -delete`); // counted
 Bun.spawn(["find", dir, "-type", "f", "-delete"]); // counted
 Bun.spawn(["find", dir, "-type", "f"]); // not counted
-rm(dir, options); // escapes: options held in a variable
-fs["rm"](dir, { recursive: true }); // escapes: computed access
+rm(dir, options); // counted: options in a variable aren't statically known
+fs["rm"](dir, { recursive: true }); // counted through string element access
 const tool = "rm"; // not counted: no flag in this statement
 spawnSync("grep", ["-r", pattern, dir]); // not counted: grep, and the "rm" above is another statement
 // await rm(dir, { recursive: true }); a commented-out call doesn't count
@@ -36,3 +36,13 @@ const mocked = (rm as unknown as Mock);
 await root(dir, { recursive: true }); // not counted: that alias is only in a comment
 unknown(dir, { recursive: true }); // not counted: a cast is not an import alias
 run("rm", options); search(["-r"]); // not counted: the flag is in another call
+const quote = /["'`]/; Bun.spawnSync(["rm", "-rf", dir]); // counted after a regex with quotes
+const url = "https://example.test/a//b"; Bun.spawnSync(["rm", "-rf", dir]); // counted after a URL
+run({ cmd: "rm", args: ["-rf", dir] }); // counted in an object literal
+const text = `${Bun.spawnSync(["rm", "-rf", dir])}`; // counted inside a template substitution
+rm(dir, { recursive: false }); // not counted: recursion is off
+rm(dir, { ...options }); // counted: a spread isn't statically known
+spawn("sh", ["-c", "rm -rf build"]); // counted in sh -c text
+Bun.spawn(["bash", "-c", "find . -name '*.tmp' -delete"]); // counted once in bash -c text
+Bun.spawn([process.execPath, "-e", `import { rm } from "node:fs/promises"; await rm(dir, { recursive: true });`]); // counted inside an embedded script
+const erase = fs.rm; await erase(dir, { recursive: true }); // escapes: a removal function held in a variable

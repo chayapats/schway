@@ -61,8 +61,9 @@ recursive removal (`rm`/`rmSync` and their aliases, `rm -r` in shell text or arg
 lists, `find … -delete`) or `mkdtemp` under `tests/`. Existing sites are listed with
 their exact counts in `tests/fixtures/temp-root-allowlist.json` until they move to
 the helpers. The counts must match: lower or remove an entry when you migrate a site,
-and never raise one. `tests/helpers/temp-root-sites.ts` lists what the scanner can't
-see, such as options held in a variable.
+and never raise one. The scanner parses each file with the TypeScript 5 compiler that
+`@microsoft/api-extractor` installs; `tests/helpers/temp-root-sites.ts` lists what it
+counts and what it can't see, such as destructuring renames.
 
 ## Tarball for Jit
 
