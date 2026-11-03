@@ -16,6 +16,12 @@ export interface HostDispatchEffort {
   readonly sent: string | null;
 }
 
+/** Output cap one body carries. */
+export interface HostDispatchOutputCap {
+  /** Exact `max_output_tokens` value in the body; null when the body carries no cap. */
+  readonly sent: number | null;
+}
+
 /** Effort for one attempt's sends, plus what the provider response stated; metadata, not proof of internal computation. */
 export interface HostAttemptEffort extends HostDispatchEffort {
   /** Effort a terminal provider response states it applied; null when it names none, never inferred from `sent`. */
@@ -40,6 +46,8 @@ export interface HostDispatch {
   readonly bodyBytes: number;
   /** Effort requested and the exact effort control this body carries. */
   readonly effort: HostDispatchEffort;
+  /** Exact output cap this body carries. */
+  readonly outputCap: HostDispatchOutputCap;
 }
 
 /**
@@ -57,16 +65,22 @@ export interface HostRouteModelOptions {
   readonly catalogModel?: import("./route-models.ts").HostModelChoice;
   /** Exact effort for every call, compaction and auth-retry included; needs `catalogModel` that lists a sendable level. */
   readonly effort?: HostEffortPin;
+  /** Output cap every call sends exactly: a positive safe integer at or below the route's maximum, on a route that sends caps. */
+  readonly maxOutputTokens?: number;
+  /** Refuse unless every call sends a provider-enforced output cap; rejects `invalid-input` on a route that sends none. */
+  readonly requireOutputCap?: boolean;
 }
 
-const ROUTE_MODEL_OPTION_KEYS = ["authorizeDispatch", "catalogModel", "effort"];
+const ROUTE_MODEL_OPTION_KEYS = ["authorizeDispatch", "catalogModel", "effort", "maxOutputTokens", "requireOutputCap"];
 
 /** Validate route-model option shapes without reading credentials or loading an adapter; route evidence is checked later. @internal */
 export function routeModelOptions(input: unknown): HostRouteModelOptions {
   if (input === undefined) return {};
   if (typeof input !== "object" || input === null || Array.isArray(input) ||
       Object.keys(input).some(key => !ROUTE_MODEL_OPTION_KEYS.includes(key))) throw new HostError("invalid-input");
-  const { authorizeDispatch, catalogModel, effort } = input as Record<string, unknown>;
+  const { authorizeDispatch, catalogModel, effort, maxOutputTokens, requireOutputCap } = input as Record<string, unknown>;
+  if (maxOutputTokens !== undefined && (typeof maxOutputTokens !== "number" || !Number.isSafeInteger(maxOutputTokens) || maxOutputTokens < 1)) throw new HostError("invalid-input");
+  if (requireOutputCap !== undefined && typeof requireOutputCap !== "boolean") throw new HostError("invalid-input");
   if (authorizeDispatch !== undefined && typeof authorizeDispatch !== "function") throw new HostError("invalid-input");
   if (catalogModel !== undefined && (typeof catalogModel !== "object" || catalogModel === null)) throw new HostError("invalid-input");
   if (effort !== undefined) {
@@ -78,6 +92,8 @@ export function routeModelOptions(input: unknown): HostRouteModelOptions {
     ...(authorizeDispatch !== undefined ? { authorizeDispatch: authorizeDispatch as HostDispatchAuthorizer } : {}),
     ...(catalogModel !== undefined ? { catalogModel: catalogModel as import("./route-models.ts").HostModelChoice } : {}),
     ...(effort !== undefined ? { effort: Object.freeze({ level: (effort as HostEffortPin).level, mode: "exact" as const }) } : {}),
+    ...(maxOutputTokens !== undefined ? { maxOutputTokens: maxOutputTokens as number } : {}),
+    ...(requireOutputCap !== undefined ? { requireOutputCap: requireOutputCap as boolean } : {}),
   };
 }
 
@@ -85,14 +101,18 @@ export function routeModelOptions(input: unknown): HostRouteModelOptions {
 export interface RouteControls {
   /** Pinned level and the exact wire value each body must carry. */
   readonly effort?: { readonly level: ThinkingLevel; readonly sent: string };
+  /** A cap each body must carry, exactly `exact` when set. */
+  readonly outputCap?: { readonly exact?: number; readonly required: boolean };
 }
 
 /** Stable text for a call whose own thinking conflicts with the model's exact pin. */
 const EFFORT_CONFLICT = "The request asked for a reasoning effort other than the model's pinned effort, so it was not sent. Leave the request's thinking unset or match the pin.";
 /** Stable text for a body that does not carry the pinned effort exactly. */
 const EFFORT_NOT_SENT = "The pinned reasoning effort could not be sent exactly, so the request was not sent. Pin a level this model lists.";
+/** Stable text for a body that does not carry the required output cap exactly. */
+const CAP_NOT_SENT = "The required output cap could not be sent exactly, so the request was not sent. Retry with a cap this route supports.";
 
-type Observation = { effort: { requested: ThinkingLevel | null; sent: string | null; reported: string | null } };
+type Observation = { effort: { requested: ThinkingLevel | null; sent: string | null; reported: string | null }; outputCap: { sent: number | null } };
 
 type RunState = { initialSends: number; authRetrySends: number; renewalRequests: number; unobserved: boolean; lastSendRefused: boolean; lastRedirectRefused: boolean };
 type CallMeter = { attached: boolean; observation: Observation | null; readonly state: RunState };
@@ -103,8 +123,8 @@ type MeteredCall = ModelCallOptions & { readonly [RUN_METER]?: CallMeter };
 export interface RunMeter {
   /** Attach this run to one model call; settle marks the run unobserved when no route model saw the call. */
   begin(call: ModelCallOptions | undefined): { readonly call: ModelCallOptions; settle(): void; tag(usage: object): void };
-  /** Effort observed for the call whose usage object this is; null when that call sent nothing observable. */
-  attempt(usage: object): { readonly effort: HostAttemptEffort | null };
+  /** Effort and output cap observed for the call whose usage object this is; null when that call sent nothing observable. */
+  attempt(usage: object): { readonly effort: HostAttemptEffort | null; readonly outputCap: HostDispatchOutputCap | null };
   /** Frozen exact counts, or null when any model call bypassed a Schway route model. */
   snapshot(): HostProviderRequests | null;
   /** True when the most recent model call ended on a refused dispatch; each new call clears it. */
@@ -129,7 +149,7 @@ export function createRunMeter(): RunMeter {
     },
     attempt(usage) {
       const observed = tagged.get(usage)?.observation;
-      return { effort: observed ? Object.freeze({ ...observed.effort }) : null };
+      return { effort: observed ? Object.freeze({ ...observed.effort }) : null, outputCap: observed ? Object.freeze({ ...observed.outputCap }) : null };
     },
     snapshot() {
       return state.unobserved ? null : Object.freeze({ initialSends: state.initialSends, authRetrySends: state.authRetrySends, renewalRequests: state.renewalRequests });
@@ -173,13 +193,16 @@ export function dispatchRouteModel(model: Model, route: HostAuthRoute, authorize
         sequence += 1;
         // Control checks run before the authorizer: a body that cannot honor the pin never reaches it or the network.
         if (controls.effort && sent.effort !== controls.effort.sent) throw routeControlRefusedError(EFFORT_NOT_SENT);
+        const cap = controls.outputCap;
+        if (cap && (cap.exact !== undefined ? sent.outputCap !== cap.exact : sent.outputCap === null || sent.outputCap < 1)) throw routeControlRefusedError(CAP_NOT_SENT);
         const effort = Object.freeze({ requested, sent: sent.effort });
+        const outputCap = Object.freeze({ sent: sent.outputCap });
         if (authorize) {
           let verdict: unknown;
           try {
             const bytes = exactBytes(body);
             verdict = authorize(Object.freeze({ route, provider, model: id, kind, sequence,
-              bodySha256: createHash("sha256").update(bytes).digest("hex"), bodyBytes: bytes.byteLength, effort }));
+              bodySha256: createHash("sha256").update(bytes).digest("hex"), bodyBytes: bytes.byteLength, effort, outputCap }));
           } catch (error) { refuse(error); }
           if (isThenable(verdict)) {
             try { (verdict as PromiseLike<unknown>).then(undefined, () => {}); } catch { /* Refused either way. */ }
@@ -191,7 +214,7 @@ export function dispatchRouteModel(model: Model, route: HostAuthRoute, authorize
         if (kind === "initial") meter.state.initialSends++;
         else meter.state.authRetrySends++;
         // The attempt reports its last send; an auth-retry carries the same controls as its initial send.
-        meter.observation = { effort: { requested, sent: sent.effort, reported: meter.observation?.effort.reported ?? null } };
+        meter.observation = { effort: { requested, sent: sent.effort, reported: meter.observation?.effort.reported ?? null }, outputCap: { sent: sent.outputCap } };
       },
       renewal() { if (meter) meter.state.renewalRequests++; },
       reported(applied) { if (meter?.observation) meter.observation.effort.reported = applied.effort; },

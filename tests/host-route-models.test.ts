@@ -46,9 +46,11 @@ for (const route of ["codex", "grok"] as const) {
     const effort = route === "codex"
       ? { levels: [], offSendable: false, default: null, evidence: "account-catalog" as const }
       : { levels: ["off" as const], offSendable: true, default: null, evidence: "account-catalog" as const };
+    // Codex sends no output cap; Grok sends the catalog maximum unless the embedder sets a smaller cap.
+    const outputCap = route === "codex" ? { enforced: false, default: null, maximum: null } : { enforced: true, default: 16384, maximum: 16384 };
     expect(result).toEqual({ status: "listed", route, containsNoSecrets: true, models: [
-      { id: route === "codex" ? "account-choice" : "grok-account-choice", recommended: true, contextWindow: 64000, effort },
-      { id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: false, effort },
+      { id: route === "codex" ? "account-choice" : "grok-account-choice", recommended: true, contextWindow: 64000, effort, outputCap },
+      { id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: false, effort, outputCap },
     ] });
     expect(requests).toBe(1); expect(guards).toBe(0);
     expect(containsNoSecrets(result, ["catalog-access-sentinel", "catalog-refresh-sentinel", "billing-bait", "unused-guard-sentinel"])).toBe(true);

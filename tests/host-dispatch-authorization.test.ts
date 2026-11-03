@@ -91,7 +91,7 @@ test("grok 401 refresh resend authorizes initial then auth-retry with exact body
     expect(sent).toHaveLength(2);
     expect(seen.map(dispatch => dispatch.bodySha256)).toEqual(sent.map(entry => sha256(entry.body)));
     expect(seen.map(dispatch => dispatch.bodyBytes)).toEqual(sent.map(entry => Buffer.byteLength(entry.body)));
-    expect(Object.keys(seen[0]!).sort()).toEqual(["bodyBytes", "bodySha256", "effort", "kind", "model", "provider", "route", "sequence"]);
+    expect(Object.keys(seen[0]!).sort()).toEqual(["bodyBytes", "bodySha256", "effort", "kind", "model", "outputCap", "provider", "route", "sequence"]);
     // No pin and no requested thinking: nothing requested and no effort control in either body.
     expect(seen.map(dispatch => dispatch.effort)).toEqual([{ requested: null, sent: null }, { requested: null, sent: null }]);
     expect(seen[0]).toMatchObject({ route: "grok", provider: "xai", model: "grok-4.7" });

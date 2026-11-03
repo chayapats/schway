@@ -7,6 +7,7 @@ import {
   createWebSearchTool,
   type SearchProvider,
   hostCapabilities,
+  describeAuthRoute,
   isDispatchRefused,
   listRouteModels,
   credentialReferenceForRoute,
@@ -601,6 +602,16 @@ if (input.action === "capabilities") {
   try { await host.auth!.createModel({ catalogModel: choice, effort: { level: "off", mode: "exact" } }); }
   catch (error) { invalidPin = (error as { code?: string }).code ?? "unknown"; }
   const lastBody = JSON.parse(bodies.at(-1) ?? "{}") as { reasoning?: { effort?: string } };
+
+  // Output caps: Codex declares none; Grok sends exactly the requested cap and rejects one above its maximum.
+  const cappedSeen: HostDispatch[] = [];
+  const capped = await host.auth!.createModel({ maxOutputTokens: 2048, requireOutputCap: true, authorizeDispatch: dispatch => { cappedSeen.push(dispatch); } });
+  const cappedRun = await session.submit({ text: "capped probe" }, capped);
+  if (cappedRun.outcome !== "completed") throw new Error(`Expected capped completion, got ${cappedRun.outcome}`);
+  const cappedBody = JSON.parse(bodies.at(-1) ?? "{}") as { max_output_tokens?: number };
+  let invalidCap = "accepted";
+  try { await host.auth!.createModel({ maxOutputTokens: choice.outputCap.maximum! + 1 }); }
+  catch (error) { invalidCap = (error as { code?: string }).code ?? "unknown"; }
   const result = {
     caps: { dispatch: hostCapabilities().dispatchAuthorizationContract, providerRequests: hostCapabilities().providerRequestsContract },
     kinds: seen.map(dispatch => `${dispatch.kind}:${dispatch.sequence}`), hashesMatch,
@@ -610,6 +621,8 @@ if (input.action === "capabilities") {
     readiness: { aborted: await readinessName({ signal: AbortSignal.abort() }), timedOut },
     effort: { contract: hostCapabilities().effortContract, support: choice.effort, dispatch: pinnedSeen.map(dispatch => dispatch.effort),
       attempts: pinnedRun.usage.attempts.map(attempt => attempt.effort), body: lastBody.reasoning?.effort ?? null, invalidPin },
+    outputCap: { contract: hostCapabilities().outputCapContract, codex: describeAuthRoute({ route: "codex", model: "gpt-5.4" }).outputCap, grok: choice.outputCap,
+      dispatch: cappedSeen.map(dispatch => dispatch.outputCap), attempts: cappedRun.usage.attempts.map(attempt => attempt.outputCap), body: cappedBody.max_output_tokens ?? null, invalidCap },
   };
   const text = JSON.stringify([result, seen, completed, refusedRun]);
   for (const secret of ["dispatch-old-token", "dispatch-new-token", "dispatch-refresh", "dispatch-bait-key"]) if (text.includes(secret)) throw new Error("Secret leaked into dispatch evidence");

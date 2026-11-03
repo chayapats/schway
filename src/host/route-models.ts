@@ -3,7 +3,7 @@ import { checkAuthReadiness, classifyAuthError, credentialReferenceForRoute, eff
 import { credentialWriteRefusedError } from "../auth/store.ts";
 import type { ModelCapability } from "../model/catalog.ts";
 import type { ListedModel } from "../model/model-list.ts";
-import { effortSupport, registerCatalogEvidence, type HostEffortSupport } from "./route-capabilities.ts";
+import { effortSupport, outputCapSupport, registerCatalogEvidence, type HostEffortSupport, type HostOutputCapSupport } from "./route-capabilities.ts";
 
 /** One selectable account model with the shared route recommendation, observed context limit and exact effort support. */
 export interface HostModelChoice {
@@ -12,6 +12,8 @@ export interface HostModelChoice {
   readonly contextWindow?: number;
   /** Effort the adapter accepts for this model given this listing; pass the choice as `catalogModel` to use it. */
   readonly effort: HostEffortSupport;
+  /** Whether this route sends a provider-enforced output cap for this model, with its default and maximum. */
+  readonly outputCap: HostOutputCapSupport;
 }
 
 /** Route capability for one listed model, built the way the adapter's own catalog path builds it. */
@@ -93,6 +95,7 @@ export async function listRouteModels(selection: Omit<HostAuthSelection, "model"
       id: model.id, recommended: model.id === recommended,
       ...(model.contextWindow !== undefined ? { contextWindow: model.contextWindow } : {}),
       effort: effortSupport(valid.route, model.id, capability),
+      outputCap: outputCapSupport(valid.route, model.id),
     });
     // Only a choice Schway listed can widen a route model; the capability stays private.
     registerCatalogEvidence(choice, valid.route, capability);

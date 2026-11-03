@@ -2,7 +2,7 @@ import type { Model } from "../model/model.ts";
 import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 import { dispatchRouteModel, routeModelOptions, type HostRouteModelOptions, type RouteControls } from "./dispatch.ts";
-import { catalogCapability, effortSupport, exactEffort, type HostEffortSupport } from "./route-capabilities.ts";
+import { catalogCapability, effortSupport, exactEffort, outputCapSupport, routeOutputCap, type HostEffortSupport, type HostOutputCapSupport } from "./route-capabilities.ts";
 import { hasDispatchRefusal, hasRedirectRefusal } from "../model/dispatch.ts";
 import { HostError } from "./index.ts";
 
@@ -91,6 +91,8 @@ export interface HostAuthDescription {
   readonly supported: true;
   /** Effort the adapter accepts without account evidence: none for subscription routes; list models for the real support. */
   readonly effort: HostEffortSupport;
+  /** Whether this route sends a provider-enforced output cap, with its default and maximum. */
+  readonly outputCap: HostOutputCapSupport;
 }
 
 /** Terminal observation for a route-bound run with safe auth detail on failures. */
@@ -153,7 +155,7 @@ export function validateAuthSelection(input: unknown): HostAuthSelection {
 export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescription {
   const valid = validateAuthSelection(selection);
   return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), supported: true as const,
-    effort: effortSupport(valid.route, valid.model, null) };
+    effort: effortSupport(valid.route, valid.model, null), outputCap: outputCapSupport(valid.route, valid.model) };
 }
 
 const defaultNativeStores = new WeakMap<object, CredentialStore>();
@@ -348,10 +350,13 @@ export async function createAuthRouteModelForRun(selection: HostAuthSelection, a
   const valid = validateAuthSelection(selection);
   // Route evidence and pins are settled before any store, adapter or network access; mismatches reject invalid-input.
   const capability = options.catalogModel !== undefined ? catalogCapability(options.catalogModel, valid.route, valid.model) : undefined;
-  const controls: RouteControls = options.effort ? { effort: exactEffort(valid.route, valid.model, capability ?? null, options.effort) } : {};
+  const outputCap = routeOutputCap(valid.route, valid.model, options.maxOutputTokens, options.requireOutputCap === true);
+  const controls: RouteControls = { ...(options.effort ? { effort: exactEffort(valid.route, valid.model, capability ?? null, options.effort) } : {}),
+    ...(outputCap ? { outputCap } : {}) };
   const store = admitted?.store ?? effectiveStore(selection);
   const { loadProviderModel } = await import("../model/loader.ts");
-  const evidence = capability ? { modelCapability: capability } : {};
+  // Only Grok sends a cap; an unset cap keeps the adapter's default, so bytes stay unchanged.
+  const evidence = { ...(capability ? { modelCapability: capability } : {}), ...(options.maxOutputTokens !== undefined ? { maxTokens: options.maxOutputTokens } : {}) };
   const model = valid.route === "codex"
     ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store, ...evidence }, valid.fetch)
     : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store, ...evidence }, valid.fetch);

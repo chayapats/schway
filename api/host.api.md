@@ -251,6 +251,7 @@ export interface HostAuthDescription {
     readonly effort: HostEffortSupport;
     // (undocumented)
     readonly model: string;
+    readonly outputCap: HostOutputCapSupport;
     // (undocumented)
     readonly route: HostAuthRoute;
     // (undocumented)
@@ -349,6 +350,7 @@ export interface HostCapabilities {
     readonly modelCatalog: "schway.host.model-catalog/v1";
     // (undocumented)
     readonly observedInference: "not-checked";
+    readonly outputCapContract: "schway.host.output-cap/v1";
     readonly providerRequestsContract: "schway.host.provider-requests/v1";
     // (undocumented)
     readonly releaseContract: "schway.host.release/v2";
@@ -490,6 +492,7 @@ export interface HostDispatch {
     readonly effort: HostDispatchEffort;
     readonly kind: "initial" | "auth-retry";
     readonly model: string;
+    readonly outputCap: HostDispatchOutputCap;
     readonly provider: string;
     readonly route: HostAuthRoute;
     readonly sequence: number;
@@ -502,6 +505,11 @@ export type HostDispatchAuthorizer = (dispatch: HostDispatch) => void;
 export interface HostDispatchEffort {
     readonly requested: ThinkingLevel | null;
     readonly sent: string | null;
+}
+
+// @public
+export interface HostDispatchOutputCap {
+    readonly sent: number | null;
 }
 
 // @public
@@ -624,6 +632,7 @@ export interface HostModelChoice {
     readonly effort: HostEffortSupport;
     // (undocumented)
     readonly id: string;
+    readonly outputCap: HostOutputCapSupport;
     // (undocumented)
     readonly recommended: boolean;
 }
@@ -664,6 +673,13 @@ export interface HostOptions {
     };
     // (undocumented)
     workspaceRoot: string;
+}
+
+// @public
+export interface HostOutputCapSupport {
+    readonly default: number | null;
+    readonly enforced: boolean;
+    readonly maximum: number | null;
 }
 
 // @public
@@ -721,6 +737,8 @@ export interface HostRouteModelOptions {
     readonly authorizeDispatch?: HostDispatchAuthorizer;
     readonly catalogModel?: HostModelChoice;
     readonly effort?: HostEffortPin;
+    readonly maxOutputTokens?: number;
+    readonly requireOutputCap?: boolean;
 }
 
 // @public
@@ -746,6 +764,7 @@ export interface HostRunAttemptUsage {
     // (undocumented)
     readonly complete: boolean;
     readonly effort: HostAttemptEffort | null;
+    readonly outputCap: HostDispatchOutputCap | null;
     // (undocumented)
     readonly phase: "turn" | "compaction";
     // (undocumented)

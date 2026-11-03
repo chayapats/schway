@@ -100,6 +100,7 @@ test("packed release artifact installs without private source access and adverti
       dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1",
       providerRequestsContract: "schway.host.provider-requests/v1",
       effortContract: "schway.host.effort/v1",
+      outputCapContract: "schway.host.output-cap/v1",
       observedInference: "not-checked",
     });
   } finally {
@@ -260,6 +261,8 @@ test("packed release consumer authorizes each grok dispatch and reads exact prov
       effort: { contract: "schway.host.effort/v1",
         support: { levels: ["low", "high"], offSendable: false, default: "high", evidence: "account-catalog" },
         dispatch: [{ requested: "low", sent: "low" }], attempts: [{ requested: "low", sent: "low", reported: null }], body: "low", invalidPin: "invalid-input" },
+      outputCap: { contract: "schway.host.output-cap/v1", codex: { enforced: false, default: null, maximum: null }, grok: { enforced: true, default: 16384, maximum: 16384 },
+        dispatch: [{ sent: 2048 }], attempts: [{ sent: 2048 }], body: 2048, invalidCap: "invalid-input" },
     });
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -361,11 +364,12 @@ test("packed catalog consumer uses only the public API and selected subscription
         `await Bun.plugin({name:'catalog-guard',setup(builder){
           builder.onLoad({filter:/(?:tui|@opentui|providers[/\\\\](?:${unselected}|xai\\.ts|openai\\.ts|openai-compatible))/},()=>{throw new Error('catalog loaded unrelated runtime');});
         }});`);
-      // Rows without reasoning metadata: Codex accepts no explicit effort; Grok accepts off as its disable control.
+      // Rows without reasoning metadata: Codex accepts no explicit effort and sends no cap; Grok accepts off and sends its default cap.
       const effort = route === "codex" ? { levels: [], offSendable: false, default: null, evidence: "account-catalog" }
         : { levels: ["off"], offSendable: true, default: null, evidence: "account-catalog" };
+      const outputCap = route === "codex" ? { enforced: false, default: null, maximum: null } : { enforced: true, default: 16384, maximum: 16384 };
       expect(result).toEqual({ result: { route, status: "listed", containsNoSecrets: true,
-        models: [{ id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: true, contextWindow: 64000, effort }] }, requests: 1, writes: 0 });
+        models: [{ id: route === "codex" ? "gpt-6-astra" : "grok-4.7", recommended: true, contextWindow: 64000, effort, outputCap }] }, requests: 1, writes: 0 });
     }
   } finally { await rm(dir, { recursive: true, force: true }); }
 }, 120_000);
