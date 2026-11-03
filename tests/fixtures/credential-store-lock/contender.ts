@@ -7,7 +7,12 @@
 // acting on an earlier stale read is preempted inside its read-then-remove window.
 // CONTENDER_LOCK_TIMEOUT_MS (default 30 s) widens the native store's 2 s lock
 // bound, so machine load turns into a longer wait rather than a refusal.
+// `DONE` and `FAILED` report the mutation's own elapsed time, excluding startup.
+// CONTENDER_SQLITE injects a connection fault: `readonly` opens every
+// connection read-only (as a sandbox that denies open(O_RDWR) would), and
+// `vanish-once` deletes the lock file just before the first open.
 import { mock } from "bun:test";
+import * as sqlite from "bun:sqlite";
 import * as filesystem from "node:fs";
 
 const real = { ...filesystem };
@@ -52,6 +57,24 @@ mock.module("node:fs", () => ({
   renameSync: watched(real.renameSync),
 }));
 
+const sqliteFault = process.env.CONTENDER_SQLITE ?? "";
+if (sqliteFault) {
+  const RealDatabase = sqlite.Database;
+  let vanished = false;
+  /** Database that applies the requested connection fault before opening. */
+  class FaultyDatabase extends RealDatabase {
+    constructor(path: string, options?: ConstructorParameters<typeof RealDatabase>[1]) {
+      if (sqliteFault === "vanish-once" && !vanished) {
+        vanished = true;
+        real.unlinkSync(path);
+        say("VANISHED");
+      }
+      super(path, sqliteFault === "readonly" ? { readonly: true } : options);
+    }
+  }
+  mock.module("bun:sqlite", () => ({ ...sqlite, Database: FaultyDatabase }));
+}
+
 const { createNativeCredentialStore } = await import("../../../src/auth/store.ts");
 const backend = {
   async get() { return null; },
@@ -77,13 +100,14 @@ const backend = {
   async delete() { return false; },
 };
 
+const store = createNativeCredentialStore(backend as never, { lockTimeoutMs });
+say("STARTED");
+const startedAt = Date.now();
 try {
-  const store = createNativeCredentialStore(backend as never, { lockTimeoutMs });
-  say("STARTED");
   await store.set({ account: "lock-fixture", label: "Lock fixture" }, "value");
-  say("DONE");
+  say("DONE", JSON.stringify({ elapsedMs: Date.now() - startedAt }));
   process.exit(0);
 } catch (error) {
-  say("FAILED", JSON.stringify(String((error as Error)?.message ?? error)));
+  say("FAILED", JSON.stringify({ message: String((error as Error)?.message ?? error), elapsedMs: Date.now() - startedAt }));
   process.exit(1);
 }

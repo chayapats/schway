@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { withCredentialStoreLock } from "./store-lock.ts";
+import { validLockTimeoutMs, withCredentialStoreLock } from "./store-lock.ts";
 
 /** Stable account identifier and safe display label for one provider credential. */
 export interface CredentialIdentity {
@@ -138,27 +138,27 @@ export function credentialStoreFailure(operation: "save" | "delete", error: unkn
   return isCredentialLockError(error) ? error.message : credentialStoreError(operation);
 }
 
-/** Preserve a fence refusal unchanged; convert any other write failure to a sanitized store error.
- * A cleanup-uncertain error is preserved, never sanitized into a clean
- * refusal: callers must be able to tell "maybe still visible" apart from
- * "no credential was changed". A credential-lock failure is preserved too:
- * it is already sanitized and names a next action the generic text lacks. */
+/** Return fence refusals, cleanup-uncertain errors and credential-lock failures unchanged; turn any other write failure into the generic sanitized store error. */
 export function preserveRefusal(operation: "save" | "delete", error: unknown): Error {
   if (isCredentialWriteRefused(error)) return error;
+  // Never sanitize a cleanup-uncertain error into a clean refusal: callers
+  // must tell "maybe still visible" apart from "no credential was changed".
   if (isCleanupUncertain(error)) return error instanceof Error ? error : new Error(credentialStoreError(operation));
+  // A lock failure is already sanitized and names a next action the generic text lacks.
   if (isCredentialLockError(error)) return error;
   return new Error(credentialStoreError(operation));
 }
 
 /** Native-store construction seams; production callers pass none. */
 export interface NativeCredentialStoreOptions {
-  /** Bounded wait for the cross-process credential lock, defaulting to 2000 ms; tests widen it for load margin. */
+  /** Bounded wait for the cross-process credential lock: whole milliseconds from 1 to 300000, defaulting to 2000; tests widen it for load margin. */
   readonly lockTimeoutMs?: number;
 }
 
 /** Adapt Bun's OS secure storage without exposing native errors or enabling unrestricted access. */
 export function createNativeCredentialStore(native?: typeof Bun.secrets, options: NativeCredentialStoreOptions = {}): CredentialStore {
-  const lock = (operation: "save" | "delete") => ({ operation, ...(options.lockTimeoutMs === undefined ? {} : { timeoutMs: options.lockTimeoutMs }) });
+  const lockTimeoutMs = options.lockTimeoutMs === undefined ? undefined : validLockTimeoutMs(options.lockTimeoutMs, "lockTimeoutMs");
+  const lock = (operation: "save" | "delete") => ({ operation, ...(lockTimeoutMs === undefined ? {} : { timeoutMs: lockTimeoutMs }) });
   const address = (identity: CredentialIdentity) => ({ service: "schway", name: identity.account });
   const backend = native ?? Bun.secrets;
   return {
