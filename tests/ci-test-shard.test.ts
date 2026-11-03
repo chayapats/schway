@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { assignShards, defaultWeight, loadTimings, shardFiles, testFiles, TIMINGS_PATH, type TestTimings } from "../scripts/ci/test-shard.ts";
+import { assignShards, defaultWeight, loadTimings, SHARD_COUNT, shardFiles, testFiles, TIMINGS_PATH, type TestTimings } from "../scripts/ci/test-shard.ts";
 import { mergeTimings, parseJunit } from "../scripts/ci/test-timings.ts";
 import { withTempDir } from "./helpers.ts";
 
@@ -121,4 +121,21 @@ test("tracked test discovery lists only tracked test files in sorted order", asy
     git("add", "tests/z.test.ts", "tests/nested/a.test.tsx", "tests/helper.ts");
     expect(testFiles(dir)).toEqual(["tests/nested/a.test.tsx", "tests/z.test.ts"]);
   });
+});
+
+test("the CI matrix lists exactly SHARD_COUNT shards and every step fails on a broken shard list", async () => {
+  type Step = { name?: string; run?: string };
+  type Workflow = { defaults?: { run?: { shell?: string } }; jobs: Record<string, { strategy?: { matrix?: Record<string, unknown> }; steps: Step[] }> };
+  const workflow = Bun.YAML.parse(await Bun.file(join(import.meta.dir, "../.github/workflows/checks.yml")).text()) as Workflow;
+  const tests = workflow.jobs.tests!;
+  expect(tests.strategy?.matrix?.shard).toEqual(Array.from({ length: SHARD_COUNT }, (_, index) => index));
+  // GitHub's `bash` shell runs with pipefail, so a failing test-shard.ts can't hide behind `tee`.
+  expect(workflow.defaults?.run?.shell).toBe("bash");
+  const list = tests.steps.find(step => step.run?.includes("scripts/ci/test-shard.ts"))!.run!;
+  // The count comes from SHARD_COUNT alone, and an empty list fails before bun test would run everything.
+  expect(list).toMatch(/scripts\/ci\/test-shard\.ts \$\{\{ matrix\.shard \}\} \|/);
+  expect(list).toContain('test -s "$RUNNER_TEMP/shard-files.txt"');
+  // Every shard of the real table's files gets work; the table lists the tracked files without needing Git.
+  const table = await loadTimings();
+  for (let index = 0; index < SHARD_COUNT; index++) expect(shardFiles(Object.keys(table), index, SHARD_COUNT, table).length).toBeGreaterThan(0);
 });

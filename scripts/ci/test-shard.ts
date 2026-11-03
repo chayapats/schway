@@ -3,6 +3,9 @@ import { join } from "node:path";
 /** Seconds each tracked test file took in CI, keyed by repository-relative path. */
 export type TestTimings = Readonly<Record<string, number>>;
 
+/** Shards per architecture in CI; `.github/workflows/checks.yml` lists one matrix entry per shard. */
+export const SHARD_COUNT = 4;
+
 /** Checked-in timing table that `test-timings.ts` regenerates from CI JUnit reports. */
 export const TIMINGS_PATH = join(import.meta.dir, "test-timings.json");
 
@@ -56,7 +59,9 @@ export function shardFiles(files: readonly string[], index: number, total: numbe
 }
 
 if (import.meta.main) {
-  const [index, total] = process.argv.slice(2).map(Number);
+  const [index, total = SHARD_COUNT] = process.argv.slice(2).map(Number);
+  const files = shardFiles(testFiles(), index!, total, await loadTimings());
+  if (files.length === 0) throw new Error(`Shard ${index} of ${total} has no test files.`);
   // The leading ./ makes bun treat each entry as a path, not a substring filter.
-  console.log(shardFiles(testFiles(), index!, total!, await loadTimings()).map(file => `./${file}`).join("\n"));
+  console.log(files.map(file => `./${file}`).join("\n"));
 }

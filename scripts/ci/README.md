@@ -4,17 +4,19 @@ These scripts back `.github/workflows/checks.yml`.
 
 ## Test shards
 
-`test-shard.ts <index> <total>` prints one shard's test files. Every tracked
-`*.test.ts(x)` file lands in exactly one shard. The script assigns files with a
-deterministic greedy bin-pack: heaviest file first, each to the lightest shard so
-far. Weights come from `test-timings.json`, which records seconds per file from CI
+`test-shard.ts <index> [total]` prints one shard's test files; `total` defaults to
+`SHARD_COUNT`. Every tracked `*.test.ts(x)` file lands in exactly one shard. The
+script assigns files with a deterministic greedy bin-pack: heaviest file first, each
+to the lightest shard so far. Weights come from `test-timings.json`, which records seconds per file from CI
 JUnit reports. A file missing from the table, such as a new test, gets the table's
 90th-percentile weight, so it is never assumed to be cheap.
 
-The workflow runs 4 shards per architecture. The slowest file
+The workflow runs `SHARD_COUNT` (4) shards per architecture. The slowest file
 (`tests/screen-catalog.test.ts`, about 4 minutes) sets the floor for the slowest
 shard. More shards wouldn't finish sooner; they would only leave the other shards
-idle. Change the count in both the matrix and the `test-shard.ts` argument.
+idle. To change the count, change `SHARD_COUNT` and the `shard` list in the
+workflow matrix together; `tests/ci-test-shard.test.ts` fails when they disagree.
+An empty shard list fails its step rather than letting `bun test` run everything.
 
 ### Refresh the timing table
 
@@ -37,11 +39,25 @@ tracked. Commit the updated table with the change that needs it.
 ## Runs from a copy without `.git`
 
 On x64, `no-git-copy.sh prepare` copies the checkout without `.git` to
-`/tmp/schway-no-git`. The shard runs there, and `no-git-copy.sh verify` then fails
-if anything that existed before the run is gone: paths in the copy, entries the
-runner user owns in `/tmp`, entries in `$HOME`, or the planted sentinels. Tests
-may create files; they must remove only what they created, under their own
-`mkdtemp` roots (see `makeTempRoot` and `removeTempRoot` in `tests/helpers.ts`).
+`/tmp/schway-no-git` and records what exists. The shard runs there, and
+`no-git-copy.sh verify` then fails if anything recorded is gone: paths in the copy,
+entries the runner user owns in `/tmp`, entries in `$HOME`, or the planted sentinels.
+Tests may create files. The script's header lists what it records and what it can't
+see, such as removals below the top level of `node_modules`, `/tmp` and `$HOME`.
+
+The `tests (no-git container)` job repeats the #450 report's run: the whole suite in
+one `bun test -t ""` process in `oven/bun:1.4.2` as uid 1000, without git or network,
+from a copy without `.git` mounted at `/tmp/rv428`. `no-git-container.sh` records
+inside the container, after the host's `chown`, and the job fails only on removals;
+test failures from the missing git and network are expected. It runs on pushes to
+`main`, manual runs and weekly, so branch checks stay short.
+
+Tests must remove only what they created, under their own `mkdtemp` roots. Use
+`withTempDir`, `makeTempRoot`, `removeTempRoot` and `removeOwnedTree` from
+`tests/helpers.ts`. `tests/temp-root-guard.test.ts` fails on any new direct
+recursive `rm` or `mkdtemp` under `tests/`; existing sites are listed with their
+counts in `tests/fixtures/temp-root-allowlist.json` until they move to the helpers.
+Lower or remove an entry when you migrate a site; never raise one.
 
 ## Tarball for Jit
 
@@ -50,6 +66,9 @@ tarball to `schway-<version>-<short-sha>.tgz` and writes a matching `.sha256` fi
 It then installs that exact tarball in the packed-consumer test
 (`tests/host-release.test.ts`, through `SCHWAY_PACKED_TARBALL`). The `package` job
 runs it on pushes to `main` and on manual runs, after typecheck and tests pass,
-and uploads both files as a workflow artifact. It uses no secrets and pushes
-nothing to a registry. To download and verify the artifact, see
+and uploads both files as a workflow artifact. The job uses no secrets and pushes
+nothing to a registry. Uploads use `overwrite: true`, so re-running a job replaces
+its artifact instead of adding a second one with the same name.
+`SCHWAY_PACKED_TARBALL` must name a tarball whose version and short SHA match the
+checkout, or the packed-consumer test fails. To download and verify the artifact, see
 [the Jit vendoring steps](../../docs/host-s14-conformance.md#pack-and-vendor-for-jit).

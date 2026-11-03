@@ -102,6 +102,44 @@ test("only shipped extension surfaces are present in the base harness", async ()
   }
 });
 
+type Permissions = string | Record<string, unknown> | null | undefined;
+
+/** Credential problems in one workflow: non-read token permissions, any secrets, or the workflow token. */
+function workflowCredentialProblems(text: string): string[] {
+  const workflow = Bun.YAML.parse(text) as { permissions?: Permissions; jobs?: Record<string, { permissions?: Permissions }> };
+  const problems: string[] = [];
+  // Only read (or none) scopes, as a mapping; `write-all`, `read-all` and write scopes are rejected.
+  const readOnly = (permissions: Permissions) => typeof permissions === "object" && permissions !== null &&
+    Object.values(permissions).every(level => level === "read" || level === "none");
+  if (!readOnly(workflow.permissions)) problems.push(`top-level permissions ${JSON.stringify(workflow.permissions ?? null)}`);
+  for (const [job, body] of Object.entries(workflow.jobs ?? {})) {
+    if (body.permissions !== undefined && !readOnly(body.permissions)) problems.push(`job ${job} permissions ${JSON.stringify(body.permissions)}`);
+  }
+  // Parsed values only, so comments and step names can't trip the check.
+  const values = JSON.stringify(workflow).toLowerCase();
+  for (const pattern of [/\bsecrets\s*\./, /\bsecrets\s*\[/, /"secrets":/, /\bgithub\.token\b/, /npm_token|node_auth_token/]) {
+    if (pattern.test(values)) problems.push(`credential reference ${pattern}`);
+  }
+  return problems;
+}
+
+test("the workflow credential scan rejects tokens and secrets, not ordinary words", () => {
+  const base = (jobs: string, permissions = "permissions:\n  contents: read\n") => `on: push\n${permissions}jobs:\n${jobs}`;
+  const job = (body: string) => `  build:\n    runs-on: ubuntu-latest\n${body}    steps:\n      - run: echo ok\n`;
+  expect(workflowCredentialProblems(base(job("") + "      # note: write-only\n      - name: Write the shard list\n        run: echo write\n"))).toEqual([]);
+  expect(workflowCredentialProblems(base(job("    permissions:\n      contents: read\n      actions: none\n")))).toEqual([]);
+  for (const bad of [
+    base(job(""), "permissions: write-all\n"),
+    base(job(""), "permissions: read-all\n"),
+    base(job(""), ""),
+    base(job("    permissions:\n      contents: write\n")),
+    base("  call:\n    uses: ./.github/workflows/other.yml\n    secrets: inherit\n"),
+    base(job("    env:\n      TOKEN: ${{ github.token }}\n")),
+    base(job("    env:\n      TOKEN: ${{ secrets[\"npm\"] }}\n")),
+    base(job("    env:\n      TOKEN: ${{ secrets.NPM }}\n")),
+  ]) expect(workflowCredentialProblems(bad), bad).not.toEqual([]);
+});
+
 test("validating the release artifact does not publish it", async () => {
   const pkg = (await Bun.file("package.json").json()) as {
     scripts: Record<string, string>;
@@ -110,16 +148,16 @@ test("validating the release artifact does not publish it", async () => {
   expect(scriptText.includes("npm publish")).toBe(false);
   expect(scriptText.includes("release")).toBe(false);
   // GitHub Actions validates with typecheck and tests and packs a workflow artifact; no registry publish or
-  // release step, in any workflow or the CI scripts they run. URLs are stripped first so a pinned toolchain
-  // download cannot trip the check.
+  // release step, in any workflow or the CI scripts they run, and no credentials. URLs are stripped first so a
+  // pinned toolchain download cannot trip the word check.
   const workflows = (await readdir(join(import.meta.dir, "../.github/workflows"))).filter(name => /\.ya?ml$/.test(name));
   expect(workflows).toContain("checks.yml");
   for (const name of workflows) {
-    const lowered = (await source(`.github/workflows/${name}`)).toLowerCase().replace(/https?:\/\/\S+/g, "");
+    const text = await source(`.github/workflows/${name}`);
+    const lowered = text.toLowerCase().replace(/https?:\/\/\S+/g, "");
     expect(/\bpublish\b/.test(lowered), name).toBe(false);
     expect(/\brelease\b/.test(lowered), name).toBe(false);
-    // The packed artifact needs no credentials: no secrets, registry tokens or write permissions.
-    expect(lowered, name).not.toMatch(/\bsecrets\.|npm_token|node_auth_token|:\s*write\b/);
+    expect(workflowCredentialProblems(text), name).toEqual([]);
   }
   for (const name of await readdir(join(import.meta.dir, "../scripts/ci"))) {
     const script = (await source(`scripts/ci/${name}`)).toLowerCase();
