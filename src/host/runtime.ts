@@ -24,7 +24,7 @@ import { SESSION_FORMAT_VERSION } from "../session/jsonl.ts";
 import { MAX_SNAPSHOT_ARTIFACT_BYTES, MAX_SNAPSHOT_SESSIONS, MAX_SNAPSHOT_TOTAL_BYTES, SNAPSHOT_CONTRACT, SNAPSHOT_NATIVE_FORMAT_VERSION, hashSnapshotBytes, snapshotGuidance, validateSnapshotShape,
   type HostSessionSnapshot, type HostSnapshotArtifact, type HostSnapshotOptions, type HostSnapshotQuarantineReason, type HostSnapshotRestoreOptions,
   type HostSnapshotRestoreResult, type HostSnapshotSession, type HostSnapshotValidation } from "./snapshot.ts";
-import type { Model, ModelRequest } from "../model/model.ts";
+import type { Model, ModelRequest, ModelStreamEvent } from "../model/model.ts";
 import type { RuntimeEvent } from "../agent/events.ts";
 import { getEffectiveConversation } from "../context/compaction.ts";
 import { HostImageError, MAX_IMAGE_BYTES, inputImages, requestImages, validateImageBytes } from "../conversation/images.ts";
@@ -339,8 +339,21 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         check();
         // Each model call carries this run's meter; a call no route model observed makes the run's count null.
         const metered = meter.begin(call);
-        try { for await (const event of stream(detached, metered.call)) yield structuredClone(event); }
-        finally { metered.settle(); }
+        // Every call reports exactly one usage object it yielded, so its attempt sample carries this call's observation.
+        // An unreported attempt gets null counters, the same values the loop's own placeholder holds.
+        let reported = false;
+        const placeholder = (): ModelStreamEvent => { const usage = { inputTokens: null, outputTokens: null }; metered.tag(usage); return { type: "usage", usage }; };
+        try {
+          for await (const event of stream(detached, metered.call)) {
+            const copy = structuredClone(event);
+            if (copy.type === "usage") { reported = true; metered.tag(copy.usage); }
+            yield copy;
+          }
+          if (!reported) yield placeholder();
+        } catch (error) {
+          if (!reported) yield placeholder();
+          throw error;
+        } finally { metered.settle(); }
       } } as Model);
     };
     let disposed = false, busy = false;
@@ -410,10 +423,10 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         runAbort = previous;
       }
     }
-    const observe = (event: RuntimeEvent, report: (progress: HostProgressEvent) => void, collect: (usage: HostRunAttemptUsage) => void): { reason?: "completed" | "error" | "cancelled" | "max_turns"; message?: string; category?: unknown } => {
+    const observe = (event: RuntimeEvent, report: (progress: HostProgressEvent) => void, collect: (usage: HostRunAttemptUsage) => void, meter: RunMeter): { reason?: "completed" | "error" | "cancelled" | "max_turns"; message?: string; category?: unknown } => {
       const progress = toProgress(event);
       if (progress) report(progress);
-      if (event.type === "model.usage") collect({ phase: event.phase, usage: structuredClone(event.usage), complete: event.complete });
+      if (event.type === "model.usage") collect({ phase: event.phase, usage: structuredClone(event.usage), complete: event.complete, ...meter.attempt(event.usage) });
       if (event.type === "agent.finished") return { reason: event.reason };
       if (event.type === "error") return { message: event.message, category: (event as { category?: unknown }).category };
       return {};
@@ -454,7 +467,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
               maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, maxAttempts: options.limits.maxAttempts,
               signal, webSearch: "off", exactTools: true, clock })) {
-              const seen = observe(event, report, collect);
+              const seen = observe(event, report, collect, meter);
               if (seen.reason) terminal = seen.reason;
               if (seen.message !== undefined) message = seen.message;
             }
@@ -553,7 +566,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
               maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, maxAttempts: options.limits.maxAttempts,
               signal, webSearch: "off", exactTools: true, clock })) {
-              const seen = observe(event, report, collect);
+              const seen = observe(event, report, collect, meter);
               if (seen.reason) reason = seen.reason;
               // A retried provider failure is evidence too, even when the deadline ends its backoff,
               // until a later attempt streams or completes and shows the route answering again.
@@ -648,7 +661,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           let noopBoundary = false;
           const bounded = await runBounded(async (signal, report, collect, _clock) => {
             for (const entry of context.takeUsage()) {
-              const sample = { phase: "compaction" as const, usage: structuredClone(entry.usage), complete: entry.complete };
+              const sample = { phase: "compaction" as const, usage: structuredClone(entry.usage), complete: entry.complete, ...meter.attempt(entry.usage) };
               collect(sample);
               report({ type: "usage", phase: "compaction", usage: structuredClone(entry.usage), complete: entry.complete, transient: true as const });
             }
@@ -661,7 +674,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               return { reason: signal.aborted ? "cancelled" as const : "error" as const };
             }
             for (const entry of context.takeUsage()) {
-              const sample = { phase: "compaction" as const, usage: structuredClone(entry.usage), complete: entry.complete };
+              const sample = { phase: "compaction" as const, usage: structuredClone(entry.usage), complete: entry.complete, ...meter.attempt(entry.usage) };
               collect(sample);
               report({ type: "usage", phase: "compaction", usage: structuredClone(entry.usage), complete: entry.complete, transient: true as const });
             }

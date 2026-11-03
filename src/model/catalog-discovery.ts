@@ -43,6 +43,8 @@ export interface CatalogOutcome { catalog: ModelCatalog; error?: string }
 export interface CatalogDiscoveryDeps {
   store?: CredentialStore;
   fetch?: ModelListFetch;
+  /** Receive the parsed listed models, with the reasoning metadata the public catalog row omits; output is unchanged. */
+  onListed?: (models: readonly ListedModel[]) => void;
   startDeadline?: (milliseconds: number) => { signal: AbortSignal; clear(): void };
 }
 
@@ -212,7 +214,9 @@ export async function discoverModels(input: CatalogConnection & {
       if (input.provider === "xai") result.models = requireXaiModels(result.models);
     }
     signal.throwIfAborted();
-    catalog.models = result.models.filter(model => !secrets.some(secret => secret.length > 0 && model.id.includes(secret))).map(publicModel);
+    const listed = result.models.filter(model => !secrets.some(secret => secret.length > 0 && model.id.includes(secret)));
+    catalog.models = listed.map(publicModel);
+    deps.onListed?.(listed);
     catalog.status = result.partial ? "partial" : "complete";
     catalog.warnings = result.warnings;
     if (catalog.models.length !== result.models.length) {

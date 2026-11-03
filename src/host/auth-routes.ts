@@ -1,7 +1,8 @@
 import type { Model } from "../model/model.ts";
 import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
-import { dispatchRouteModel, routeModelOptions, type HostRouteModelOptions } from "./dispatch.ts";
+import { dispatchRouteModel, routeModelOptions, type HostRouteModelOptions, type RouteControls } from "./dispatch.ts";
+import { catalogCapability, effortSupport, exactEffort, type HostEffortSupport } from "./route-capabilities.ts";
 import { hasDispatchRefusal, hasRedirectRefusal } from "../model/dispatch.ts";
 import { HostError } from "./index.ts";
 
@@ -88,6 +89,8 @@ export interface HostAuthDescription {
   readonly model: string;
   readonly credential: HostCredentialReference;
   readonly supported: true;
+  /** Effort the adapter accepts without account evidence: none for subscription routes; list models for the real support. */
+  readonly effort: HostEffortSupport;
 }
 
 /** Terminal observation for a route-bound run with safe auth detail on failures. */
@@ -149,7 +152,8 @@ export function validateAuthSelection(input: unknown): HostAuthSelection {
 /** Describe the selected route statically without store, network, or provider loading. */
 export function describeAuthRoute(selection: HostAuthSelection): HostAuthDescription {
   const valid = validateAuthSelection(selection);
-  return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), supported: true as const };
+  return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), supported: true as const,
+    effort: effortSupport(valid.route, valid.model, null) };
 }
 
 const defaultNativeStores = new WeakMap<object, CredentialStore>();
@@ -342,14 +346,18 @@ export async function createAuthRouteModel(selection: HostAuthSelection, options
 /** Bind an admitted run to its original route epoch and readiness participation. @internal */
 export async function createAuthRouteModelForRun(selection: HostAuthSelection, admitted?: CredentialLifecycleLease, options: HostRouteModelOptions = {}): Promise<Model> {
   const valid = validateAuthSelection(selection);
+  // Route evidence and pins are settled before any store, adapter or network access; mismatches reject invalid-input.
+  const capability = options.catalogModel !== undefined ? catalogCapability(options.catalogModel, valid.route, valid.model) : undefined;
+  const controls: RouteControls = options.effort ? { effort: exactEffort(valid.route, valid.model, capability ?? null, options.effort) } : {};
   const store = admitted?.store ?? effectiveStore(selection);
   const { loadProviderModel } = await import("../model/loader.ts");
+  const evidence = capability ? { modelCapability: capability } : {};
   const model = valid.route === "codex"
-    ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store }, valid.fetch)
-    : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store }, valid.fetch);
+    ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store, ...evidence }, valid.fetch)
+    : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store, ...evidence }, valid.fetch);
   const bound = valid.lifecycle ? lifecycleModel(valid.lifecycle, valid.route, store, model, valid.credentialWriteGuard, admitted) : model;
   // Outermost, so a run's accounting attaches even when an inner layer refuses before sending.
-  return dispatchRouteModel(bound, valid.route, options.authorizeDispatch);
+  return dispatchRouteModel(bound, valid.route, options.authorizeDispatch, controls);
 }
 
 function httpStatusOf(error: unknown): number | undefined {
