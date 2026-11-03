@@ -208,7 +208,7 @@ export interface HostRunUsage {
   readonly attempts: readonly HostRunAttemptUsage[];
   readonly complete: boolean;
   readonly totalMs: number;
-  /** Exact provider requests when every model call went through a Schway route model; null when any call was unobservable. */
+  /** Exact requests when every model call reached a route model with `call` passed as-is or spread; null when a call was unobservable, such as a dropped or cloned `call`. */
   readonly providerRequests: HostProviderRequests | null;
 }
 
@@ -266,7 +266,7 @@ export interface HostAuthBinding {
   readonly credential: import("./auth-routes.ts").HostCredentialReference;
   /** Check local store readiness without network or inference; abort rejects `AbortError`, deadline expiry `TimeoutError`. */
   checkReadiness(options?: import("./auth-routes.ts").HostReadinessOptions): Promise<import("./auth-routes.ts").HostAuthReadiness>;
-  /** Create only the selected subscription adapter, optionally authorizing each physical send; the unselected route and TUI never load. */
+  /** Create only the selected adapter, optionally authorizing each physical send; a wrapper keeps run counts only by passing `call` as-is or spread. */
   createModel(options?: import("./dispatch.ts").HostRouteModelOptions): Promise<Model>;
 }
 

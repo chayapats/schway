@@ -97,10 +97,11 @@ export function createXaiModel(options: {
       // The SDK wraps fetch failures as connection errors, so a refusal is kept here and rethrown unchanged.
       let refusal: unknown;
       // Authorization runs inside the SDK's single fetch call: after every SDK await, on the exact serialized body.
+      // Redirects are refused so a 3xx can never become a second, unauthorized physical send.
       const authorizedFetch = (kind: ProviderSendKind): FetchLike | undefined => dispatch ? (input, init) => {
         try { dispatch.send(kind, init?.body); }
         catch (error) { refusal = error; throw error; }
-        return (options.fetch ?? fetch)(input, init);
+        return (options.fetch ?? fetch)(input, { ...init, redirect: "error" });
       } : options.fetch;
       // The xAI catalog may advertise efforts beyond OpenAI SDK enums; preserve them exactly.
       const send = (kind: ProviderSendKind) => clientFor(token, authorizedFetch(kind)).responses.create(body as OpenAI.Responses.ResponseCreateParamsStreaming, { signal: request.signal, headers: { Authorization: `Bearer ${token}` } });

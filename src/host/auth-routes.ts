@@ -243,6 +243,14 @@ function invalidStoreAction(route: HostAuthRoute): string {
     : "Stored Grok subscription login is invalid. Sign in again with /login grok.";
 }
 
+/** Safe status for a route run stopped before its secure-store read answered; no credential verdict exists. @internal */
+export function readinessInterrupted(selection: HostAuthSelection): HostAuthReadiness {
+  const valid = validateAuthSelection(selection);
+  return { route: valid.route, model: valid.model, credential: credentialReferenceForRoute(valid.route), observedInference: "not-checked",
+    status: "store-unavailable",
+    nextAction: "The run stopped before the OS secure store returned the credential. Retry the turn; if the store keeps waiting, unlock or allow access to your OS credential store." };
+}
+
 /** Bounds for one local readiness check; omission keeps the unbounded local read. */
 export interface HostReadinessOptions {
   /** Abort the check: it rejects with an `AbortError` and ignores the store read when it finally settles. */
@@ -365,7 +373,8 @@ function errorText(error: unknown): string {
 /** Map a route-bound failure to a stable safe category without leaking secrets or switching routes.
  * Classification is message- and category-based: provider adapters throw sanitized
  * plain messages (and the loop drops transport status), so status-less bodies must
- * still hit their documented category through these patterns. */
+ * still hit their documented category through these patterns. A dispatch refusal is
+ * recognized only by identity, so echoed refusal wording never reads as `dispatch-refused`. */
 export function classifyAuthError(error: unknown, selection: HostAuthSelection): HostAuthReadiness {
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
@@ -374,7 +383,7 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
   const status = httpStatusOf(error);
   if (isDispatchRefused(error)) {
     return { ...base, status: "dispatch-refused",
-      nextAction: "The embedding application refused this provider request before it was sent. No request left this process. Retry the turn after the application allows it." };
+      nextAction: "The embedding application refused a provider request. The refused request was not sent. Retry the turn after the application allows it." };
   }
   if (isCredentialWriteRefused(error)) {
     // An uncertain cleanup never claims a clean fence: the late value may

@@ -16,7 +16,7 @@ import type { ToolDefinition } from "../tools/types.ts";
 import { HostError, hostCapabilities, type HostClock, type HostOptions, type HostProgressEvent, type HostProviderRequests, type HostRouteRunOptions,
   type HostRunAttemptUsage, type HostRunError, type HostRunOptions, type HostRunResult, type HostRunUsage, type HostSessionDeletion,
   type HostRuntime, type HostSession, type HostSessionReference, type HostEntryReference } from "./index.ts";
-import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, createAuthRouteModelForRun, credentialReferenceForRoute, validateAuthSelection,
+import { checkAuthReadiness, classifyAuthError, createAuthRouteModel, createAuthRouteModelForRun, credentialReferenceForRoute, readinessInterrupted, validateAuthSelection,
   type HostAuthReadiness, type HostAuthRunResult, type HostAuthSelection } from "./auth-routes.ts";
 import { acquireSessionLease, type SessionLease } from "./lease.ts";
 import { deleteManagedSession, isManagedRetired, isManagedRetiredSync, markManagedRetired, readManagedHeader } from "./managed-data.ts";
@@ -32,7 +32,7 @@ import { imageProbeRecords, type HostImageRoute } from "./image-input.ts";
 import { managedSessionInventory, type HostSessionInventoryOptions } from "./session-inventory.ts";
 import { acquireCredentialLifecycle, type CredentialLifecycleLease } from "./credential-lifecycle.ts";
 import { createRunMeter, type HostDispatchAuthorizer, type RunMeter } from "./dispatch.ts";
-import { dispatchRefusedError } from "../model/dispatch.ts";
+import { DISPATCH_REFUSED_MESSAGE, dispatchRefusedError } from "../model/dispatch.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
 const ownedSessions = new Set<string>();
@@ -478,8 +478,10 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             return { outcome: reason, input: inputReference, result: ref(message.id), message: structuredClone(message),
               usage: usageSummary(usages, totalMs, true, meter), model: identity };
           }
+          // A refused last send explains the failure even when the loop's final message names a consequence, such as overflow.
+          const refused = reason === "error" && meter.lastSendRefused;
           return { outcome: reason, input: inputReference, usage: usageSummary(usages, totalMs, false, meter),
-            model: identity, error: failureDetail(lastMessage ?? terminalMessage(reason), identity) };
+            model: identity, error: failureDetail(refused ? DISPATCH_REFUSED_MESSAGE : lastMessage ?? terminalMessage(reason), identity) };
         } finally { release(); busy = false; }
       },
       readResult(result) {
@@ -517,28 +519,34 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
           const inputReference = ref(id);
           const meter = createRunMeter();
-          const emptyUsage = (totalMs: number): HostRunUsage => usageSummary([], totalMs, false, meter);
-          let readiness: HostAuthReadiness;
-          try { readiness = await checkAuthReadiness(authSelection); }
-          catch { readiness = classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection); }
-          if (readiness.status !== "configured-unverified") {
-            return { outcome: "error", input: inputReference, auth: readiness, usage: emptyUsage(0) };
-          }
-          let route: Model;
-          try {
-            route = snapshotModel(await createAuthRouteModelForRun(authSelection, credentials,
-              runArgs.authorizeDispatch ? { authorizeDispatch: runArgs.authorizeDispatch } : {}), meter, authSelection.route);
-          }
-          catch (error) {
-            if (error instanceof HostError) throw error;
-            return { outcome: "error", input: inputReference, auth: classifyAuthError(error, authSelection), usage: emptyUsage(0) };
-          }
           let terminal: HostRunResult["outcome"] = "error";
           let lastError: unknown;
           let lastCategory: unknown;
           let usages: HostRunAttemptUsage[] = [];
           let totalMs = 0;
+          // Admission readiness, model creation and the settling readiness read all run inside the bound,
+          // so the caller's signal, session cancel() and the deadline interrupt a blocked store read too.
+          let admitted: HostAuthReadiness | undefined;
+          let admissionFailure: HostAuthReadiness | undefined;
+          let settledReadiness: HostAuthReadiness | undefined;
           const bounded = await runBounded(async (signal, report, collect, clock) => {
+            let readiness: HostAuthReadiness;
+            try { readiness = await checkAuthReadiness(authSelection, { signal }); }
+            catch {
+              if (signal.aborted) return { reason: "cancelled" as const };
+              readiness = classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection);
+            }
+            if (readiness.status !== "configured-unverified") { admissionFailure = readiness; return { reason: "error" as const }; }
+            admitted = readiness;
+            let route: Model;
+            try {
+              route = snapshotModel(await createAuthRouteModelForRun(authSelection, credentials,
+                runArgs.authorizeDispatch ? { authorizeDispatch: runArgs.authorizeDispatch } : {}), meter, authSelection.route);
+            } catch (error) {
+              if (error instanceof HostError) throw error;
+              admissionFailure = classifyAuthError(error, authSelection);
+              return { reason: "error" as const };
+            }
             let reason: "completed" | "error" | "cancelled" | "max_turns" = "error";
             for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
               maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, maxAttempts: options.limits.maxAttempts,
@@ -556,11 +564,21 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
                 }
               }
             }
+            if (reason === "cancelled" || reason === "max_turns") {
+              // The run settles only after this read; an abort first settles it as cancelled (or limit_exceeded).
+              try { settledReadiness = await checkAuthReadiness(authSelection, { signal }); }
+              catch { if (signal.aborted) return { reason: "cancelled" as const }; }
+            }
             return { reason };
           }, runArgs, admittedAbort);
           terminal = bounded.reason;
           usages = bounded.usages;
           totalMs = bounded.totalMs;
+          if (admissionFailure) return { outcome: "error", input: inputReference, auth: admissionFailure, usage: usageSummary([], totalMs, false, meter) };
+          if (!admitted && (terminal === "cancelled" || terminal === "limit_exceeded")) {
+            // Stopped before the secure store answered: no credential verdict exists, and nothing was sent.
+            return { outcome: terminal, input: inputReference, auth: readinessInterrupted(authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+          }
           try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
           if (conflict) throw new HostError("conflict");
           const imageFailure = getImageFailure();
@@ -580,7 +598,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               const auth = classifyAuthError(lastError ?? new Error("Run deadline elapsed."), authSelection);
               return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter) };
             }
-            const current = await checkAuthReadiness(authSelection).catch(() => classifyAuthError(lastError ?? new Error("cancelled"), authSelection));
+            // Without a settling read (aborted, or it failed), the admission verdict is the latest one observed.
+            const current = settledReadiness ?? admitted!;
             return { outcome: terminal, input: inputReference,
               auth: current.status === "configured-unverified" ? current : classifyAuthError(lastError ?? new Error(String(terminal)), authSelection),
               usage: usageSummary(usages, totalMs, false, meter) };

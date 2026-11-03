@@ -1165,6 +1165,8 @@ export function createCodexSubscriptionModel(options: {
           headers: codexRequestHeaders(credential.accessToken, credential.accountId),
           body: serialized,
           signal: request.signal,
+          // An authorized host send refuses redirects, so a 3xx cannot resend the body unauthorized.
+          ...(dispatch ? { redirect: "error" as const } : {}),
         });
       } catch (error) {
         throwIfAborted(request.signal, secrets);

@@ -38,18 +38,20 @@ export function countingRenewalFetch<F extends (input: string | URL | Request, i
   }) as F;
 }
 
-const REFUSED_MESSAGE = "Provider request refused by the embedding application's dispatch authorizer. No request was sent.";
+/** Stable, credential-free text of a dispatch refusal; it describes only the refused request. */
+export const DISPATCH_REFUSED_MESSAGE = "Provider request refused by the embedding application's dispatch authorizer. The refused request was not sent.";
+
+// Identity, not text: a provider error that echoes the refusal wording must stay an ordinary, retryable failure.
+const refusals = new WeakSet<Error>();
 
 /** Credential-free refusal for a send the embedding application vetoed; the authorizer's error is kept as its cause. */
 export function dispatchRefusedError(cause?: unknown): Error {
-  const error = new Error(REFUSED_MESSAGE, cause === undefined ? undefined : { cause });
-  (error as { code?: unknown }).code = "dispatch-refused";
+  const error = new Error(DISPATCH_REFUSED_MESSAGE, cause === undefined ? undefined : { cause });
+  refusals.add(error);
   return error;
 }
 
-/** True when an error is a dispatch-authorizer refusal; brand-first, with a message fallback that survives the loop's plain-message errors. */
+/** True only for the refusal error object Schway threw; a copied message or a look-alike error never matches. */
 export function isDispatchRefused(error: unknown): error is Error {
-  if (!(error instanceof Error)) return false;
-  if ((error as { code?: unknown }).code === "dispatch-refused") return true;
-  return error.message.includes("refused by the embedding application's dispatch authorizer");
+  return error instanceof Error && refusals.has(error);
 }

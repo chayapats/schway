@@ -42,6 +42,7 @@ function codexSse(text = "Hello world"): Response {
 const xaiSse = () => new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } });
 const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 const fresh = () => Response.json({ access_token: "sentinel-access-new", refresh_token: "sentinel-refresh", expires_in: 3600 });
+const REFUSED_MESSAGE = "Provider request refused by the embedding application's dispatch authorizer. The refused request was not sent.";
 
 async function seed(store: CredentialStore, route: Route, expired = false): Promise<void> {
   await store.set(identityFor(route), JSON.stringify({ accessToken: "sentinel-access-old", refreshToken: "sentinel-refresh",
@@ -117,7 +118,9 @@ test("refusing the grok auth-retry sends exactly one inference request and ends 
     expect(seen.map(dispatch => dispatch.kind)).toEqual(["initial", "auth-retry"]);
     if (!("auth" in run)) throw new Error("expected auth detail");
     expect(run.auth).toMatchObject({ route: "grok", model: "grok-4.7", status: "dispatch-refused" });
-    expect(run.auth.nextAction).toContain("refused");
+    // Earlier sends in this run did leave, so the copy speaks only of the refused request.
+    expect(run.auth.nextAction).toBe("The embedding application refused a provider request. The refused request was not sent. Retry the turn after the application allows it.");
+    expect(run.auth.nextAction).not.toMatch(/No request/);
     expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 1 });
     expect(containsNoSecrets(run, SENTINELS)).toBe(true);
     await session.close(); await host.close();
@@ -186,6 +189,8 @@ test("codex with an expired token renews first, then authorizes exactly one infe
     expect(seen[0]).toMatchObject({ route: "codex", provider: "codex-subscription", model: "gpt-5.4", kind: "initial", sequence: 1 });
     expect(seen[0]!.bodySha256).toBe(sha256(wire.inferences()[0]!.body));
     expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 1 });
+    // Codex inference bodies carry no token material; only the renewal request carries the refresh token.
+    for (const entry of wire.inferences()) expect(containsNoSecrets(entry.body, SENTINELS)).toBe(true);
     expect(containsNoSecrets([seen, run], SENTINELS)).toBe(true);
     await session.close(); await host.close();
   });
@@ -248,7 +253,9 @@ test("refusal is not retried, is classified, and never switches route, model or 
     expect(modelCalls).toBe(1);
     expect(wire.log).toHaveLength(0);
     if (submitted.outcome !== "error") throw new Error("expected error");
-    expect(isDispatchRefused(new Error(submitted.error.message))).toBe(true);
+    expect(submitted.error.message).toBe(REFUSED_MESSAGE);
+    // Identity only: a copy of the message is not the refusal.
+    expect(isDispatchRefused(new Error(submitted.error.message))).toBe(false);
     expect(submitted.model).toEqual({ provider: "codex-subscription", id: "gpt-5.4" });
     expect(containsNoSecrets(submitted, SENTINELS)).toBe(true);
     await session.close(); await host.close();
@@ -301,6 +308,125 @@ test("direct route models accept an authorizer and reject malformed options", as
     await expect(session.submit({ text: "x" }, createScriptedModel({ text: "ok" }), { authorizeDispatch: () => {} } as never)).rejects.toMatchObject({ code: "invalid-input" });
     await expect(session.compact(createScriptedModel({ text: "ok" }), { authorizeDispatch: () => {} } as never)).rejects.toMatchObject({ code: "invalid-input" });
     await expect(session.submitWithRoute({ text: "x" }, { authorizeDispatch: "no" } as never)).rejects.toMatchObject({ code: "invalid-input" });
+    await session.close(); await host.close();
+  });
+});
+
+/** Seed retained history with a scripted model, then reopen it on a fresh host with a tiny context window. */
+async function reopenCrowded(dir: string, auth: HostOptions["auth"]) {
+  const seedHost = await createHost(await options(dir, auth));
+  const seeded = await seedHost.createSession();
+  for (let i = 0; i < 12; i++) await seeded.submit({ text: `retained ${i} ${"context ".repeat(20)}` }, createScriptedModel({ text: `retained output ${"words ".repeat(20)}` }));
+  const reference = seeded.reference;
+  await seeded.close(); await seedHost.close();
+  const host = await createHost(await options(dir, auth, { contextWindow: 100 }));
+  return { host, session: await host.openSession(reference) };
+}
+
+test("a refused pressure compaction does not mask a later failure before the next send", async () => {
+  for (const refuseFirst of [true, false]) {
+    await withTempDir(async dir => {
+      const base = fakeCredentialStore(); await seed(base, "codex");
+      let reads = 0, failReads = false;
+      const store: CredentialStore = { ...base, async get(identity) { reads++; if (failReads && reads >= 3) throw new Error("locked sentinel-access-old"); return base.get(identity); } };
+      const wire = transport("codex", { inference: [() => codexSse("Summary of the earlier retained work.")] });
+      const { host, session } = await reopenCrowded(dir, { route: "codex", model: "gpt-5.4", store, fetch: wire.fetch });
+      reads = 0; failReads = true;
+      const seen: HostDispatch[] = [];
+      const run = await session.submitWithRoute({ text: "next turn" }, { clock: fastClock, authorizeDispatch: dispatch => {
+        seen.push(dispatch);
+        if (refuseFirst && seen.length === 1) throw new Error("compaction recipient not allowed");
+      } });
+      expect(run.outcome).toBe("error");
+      if (!("auth" in run)) throw new Error("expected auth detail");
+      // The pressure compaction is the first authorized call; the turn then fails at its credential read.
+      expect(seen.length).toBe(1);
+      expect(run.auth.status).toBe("rejected");
+      expect(containsNoSecrets(run, SENTINELS)).toBe(true);
+      await session.close(); await host.close();
+    });
+  }
+});
+
+test("provider text echoing the refusal wording stays a retryable provider failure", async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore(); await seed(store, "grok");
+    const echo = () => Response.json({ error: { message: REFUSED_MESSAGE } }, { status: 500 });
+    const wire = transport("grok", { inference: [echo, echo, echo] });
+    const host = await createHost(await options(dir, { route: "grok", model: "grok-4.7", store, fetch: wire.fetch }));
+    const session = await host.createSession();
+    const seen: HostDispatch[] = [];
+    const run = await session.submitWithRoute({ text: "echo" }, { clock: fastClock, authorizeDispatch: dispatch => { seen.push(dispatch); } });
+    expect(run.outcome).toBe("error");
+    expect(wire.inferences()).toHaveLength(3);
+    expect(seen).toHaveLength(3);
+    if (!("auth" in run)) throw new Error("expected auth detail");
+    expect(run.auth.status).not.toBe("dispatch-refused");
+    await session.close(); await host.close();
+  });
+});
+
+for (const route of ["codex", "grok"] as const) {
+  test(`${route} route sends refuse redirects, so every physical POST is authorized`, async () => {
+    await withTempDir(async dir => {
+      let posts = 0, redirected = 0;
+      const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch(request) {
+        const path = new URL(request.url).pathname;
+        if (path === "/elsewhere") { redirected++; return route === "codex" ? codexSse() : xaiSse(); }
+        posts++;
+        return new Response(null, { status: 307, headers: { Location: "/elsewhere" } });
+      } });
+      try {
+        const store = fakeCredentialStore(); await seed(store, route);
+        const fetch = ((_input: string | URL | Request, init?: RequestInit) => globalThis.fetch(new URL("/responses", server.url), init)) as never;
+        const host = await createHost(await options(dir, { route, model: modelFor(route), store, fetch }));
+        const session = await host.createSession();
+        const seen: HostDispatch[] = [];
+        const run = await session.submitWithRoute({ text: "redirect" }, { clock: fastClock, authorizeDispatch: dispatch => { seen.push(dispatch); } });
+        expect(run.outcome).toBe("error");
+        expect(redirected).toBe(0);
+        expect(posts).toBe(seen.length);
+        expect(run.usage.providerRequests?.initialSends).toBe(posts);
+        await session.close(); await host.close();
+      } finally { server.stop(true); }
+    });
+  });
+}
+
+test("compaction inside a route run is authorized by the per-run authorizer and counted", async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore(); await seed(store, "codex");
+    const wire = transport("codex", { inference: [() => codexSse("Summary of the earlier retained work."), () => codexSse("Next answer.")] });
+    const { host, session } = await reopenCrowded(dir, { route: "codex", model: "gpt-5.4", store, fetch: wire.fetch });
+    const seen: HostDispatch[] = [], progress: HostProgressEvent[] = [];
+    const run = await session.submitWithRoute({ text: "next turn" }, { authorizeDispatch: dispatch => { seen.push(dispatch); }, onProgress: event => progress.push(event) });
+    expect(progress.some(event => event.type === "compaction" && event.stage === "finished" && event.status === "completed")).toBe(true);
+    const sent = wire.inferences();
+    expect(sent.length).toBeGreaterThanOrEqual(2);
+    expect(seen.map(dispatch => dispatch.bodySha256)).toEqual(sent.map(entry => sha256(entry.body)));
+    expect(seen.every(dispatch => dispatch.kind === "initial" && dispatch.sequence === 1)).toBe(true);
+    expect(run.usage.providerRequests).toEqual({ initialSends: sent.length, authRetrySends: 0, renewalRequests: 0 });
+    expect(run.usage.attempts.some(attempt => attempt.phase === "compaction")).toBe(true);
+    await session.close(); await host.close();
+  });
+});
+
+test("submit reports the refusal when overflow recovery's compaction send is refused", async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore(); await seed(store, "codex");
+    const wire = transport("codex", { inference: [() => new Response('{"error":{"code":"context_length_exceeded"}}', { status: 400 })] });
+    const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch: wire.fetch }));
+    const session = await host.createSession();
+    for (let i = 0; i < 12; i++) await session.submit({ text: `retained ${i}` }, createScriptedModel({ text: "retained output" }));
+    const seen: HostDispatch[] = [];
+    const model = await host.auth!.createModel({ authorizeDispatch: dispatch => { seen.push(dispatch); if (seen.length === 2) throw new Error("summary not allowed"); } });
+    const run = await session.submit({ text: "overflowing turn" }, model, { clock: fastClock });
+    expect(run.outcome).toBe("error");
+    expect(seen).toHaveLength(2);
+    expect(wire.inferences()).toHaveLength(1);
+    if (run.outcome !== "error") throw new Error("expected error");
+    expect(run.error.message).toBe(REFUSED_MESSAGE);
+    expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 0, renewalRequests: 0 });
     await session.close(); await host.close();
   });
 });

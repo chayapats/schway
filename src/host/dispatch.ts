@@ -59,7 +59,7 @@ export interface RunMeter {
   begin(call: ModelCallOptions | undefined): { readonly call: ModelCallOptions; settle(): void };
   /** Frozen exact counts, or null when any model call bypassed a Schway route model. */
   snapshot(): HostProviderRequests | null;
-  /** True when the run's most recent dispatch attempt was refused rather than sent. */
+  /** True when the most recent model call ended on a refused dispatch; each new call clears it. */
   readonly lastSendRefused: boolean;
 }
 
@@ -68,6 +68,8 @@ export function createRunMeter(): RunMeter {
   const state: RunState = { initialSends: 0, authRetrySends: 0, renewalRequests: 0, unobserved: false, lastSendRefused: false };
   return {
     begin(call) {
+      // A refusal belongs to its own call: a later call that fails before sending reports its own failure.
+      state.lastSendRefused = false;
       const meter: CallMeter = { attached: false, state };
       return { call: { ...call, [RUN_METER]: meter } as MeteredCall, settle() { if (!meter.attached) state.unobserved = true; } };
     },

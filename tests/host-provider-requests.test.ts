@@ -6,7 +6,7 @@ import { codexSubscriptionIdentity, grokSubscriptionIdentity, type CredentialSto
 import { fakeCredentialStore } from "./helpers/credential-store.ts";
 import { createScriptedModel } from "./helpers/scripted-model.ts";
 import { withTempDir } from "./helpers.ts";
-import { encodeXaiSse, XAI_TEXT_EVENTS } from "./fixtures/xai.ts";
+import { encodeXaiSse, XAI_PARALLEL_TOOL_EVENTS, XAI_TEXT_EVENTS } from "./fixtures/xai.ts";
 
 type Route = "codex" | "grok";
 const modelFor = (route: Route) => route === "codex" ? "gpt-5.4" : "grok-4.7";
@@ -52,16 +52,35 @@ function blockingStore(): CredentialStore & { reads: number; writes: number; rea
   return store;
 }
 
+/** A stored value that records every property readiness reads from it; promise adoption's `then` probe is excluded. */
+function probedValue(): { value: string; touched: string[] } {
+  const touched: string[] = [];
+  const value = new Proxy(new String(valid()), { get(target, key) {
+    if (key !== "then") touched.push(String(key));
+    const field = Reflect.get(target, key, target);
+    return typeof field === "function" ? field.bind(target) : field;
+  } }) as unknown as string;
+  return { value, touched };
+}
+
 for (const route of ["codex", "grok"] as const) {
-  test(`${route} readiness rejects promptly on abort and ignores the late read`, async () => {
+  test(`${route} readiness rejects promptly on abort and never uses the late value`, async () => {
+    // Control: an unabandoned check does read the value.
+    const control = probedValue();
+    const answered = fakeCredentialStore();
+    await checkAuthReadiness({ route, model: modelFor(route), store: { ...answered, get: async () => control.value } });
+    expect(control.touched.length).toBeGreaterThan(0);
+
     const store = blockingStore();
     const controller = new AbortController();
     const pending = checkAuthReadiness({ route, model: modelFor(route), store }, { signal: controller.signal });
     await store.reading;
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
-    store.release(valid());
+    const late = probedValue();
+    store.release(late.value);
     await Bun.sleep(5);
+    expect(late.touched).toEqual([]);
     expect(store.writes).toBe(0);
   });
 
@@ -197,3 +216,102 @@ test("submit and compact count route models, including forwarding wrappers, and 
     await session.close(); await host.close();
   });
 });
+
+/** Store that answers its first `answered` reads, then blocks every later read until released. */
+function gatedStore(answered: number) {
+  const blocked = Promise.withResolvers<void>(), gate = Promise.withResolvers<void>();
+  const store = {
+    reads: 0, writes: 0, blocked: blocked.promise, release: () => gate.resolve(),
+    async get() { store.reads++; if (store.reads > answered) { blocked.resolve(); await gate.promise; } return valid(); },
+    async set() { store.writes++; },
+    async delete() { store.writes++; return false; },
+  };
+  return store;
+}
+
+/** Clock whose run-deadline sleep fires only when the test says so; backoff sleeps return at once. */
+function deadlineClock() {
+  const fire = Promise.withResolvers<void>();
+  return { fire: () => fire.resolve(), clock: { now: () => Date.now(), sleep: (ms: number, signal?: AbortSignal) => ms < 60_000 ? Promise.resolve()
+    : new Promise<void>((resolve, reject) => {
+      void fire.promise.then(() => resolve());
+      signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }) } };
+}
+
+type Stop = "cancel" | "signal" | "deadline";
+const stops: Stop[] = ["cancel", "signal", "deadline"];
+
+for (const route of ["codex", "grok"] as const) {
+  for (const stop of stops) {
+    test(`${route} ${stop} during a blocked admission read settles the route run`, async () => {
+      await withTempDir(async dir => {
+        const store = gatedStore(0);
+        let requests = 0;
+        const fetch = (async () => { requests++; return routeSse(route); }) as never;
+        const host = await createHost(await options(dir, { route, model: modelFor(route), store, fetch }));
+        const session = await host.createSession();
+        const controller = new AbortController(), deadline = deadlineClock();
+        const pending = session.submitWithRoute({ text: "blocked admission" }, { signal: controller.signal, clock: deadline.clock });
+        await store.blocked;
+        if (stop === "cancel") session.cancel();
+        else if (stop === "signal") controller.abort();
+        else deadline.fire();
+        const run = await pending;
+        expect(run.outcome).toBe(stop === "deadline" ? "limit_exceeded" : "cancelled");
+        if (!("auth" in run)) throw new Error("expected auth detail");
+        expect(run.auth).toMatchObject({ route, status: "store-unavailable" });
+        expect(run.usage.providerRequests).toEqual({ initialSends: 0, authRetrySends: 0, renewalRequests: 0 });
+        expect(requests).toBe(0);
+        // The lease is released: the idle session closes, and the late read changes nothing.
+        await session.close();
+        store.release();
+        await Bun.sleep(5);
+        expect(store.writes).toBe(0);
+        await host.close();
+      });
+    });
+  }
+}
+
+const toolSse = () => new Response(encodeXaiSse(XAI_PARALLEL_TOOL_EVENTS), { headers: { "Content-Type": "text/event-stream" } });
+
+test("an unblocked route run that exhausts its rounds reports max_turns", async () => {
+  await withTempDir(async dir => {
+    const store = gatedStore(Number.MAX_SAFE_INTEGER);
+    const host = await createHost(await options(dir, { route: "grok", model: "grok-4.7", store, fetch: (async () => toolSse()) as never }, { maxTurns: 1 }));
+    const session = await host.createSession();
+    const run = await session.submitWithRoute({ text: "tools" });
+    expect(run.outcome).toBe("max_turns");
+    expect(store.reads).toBe(3);
+    await session.close(); await host.close();
+  });
+});
+
+for (const stop of stops) {
+  test(`${stop} during the blocked settling read after max_turns settles the route run`, async () => {
+    await withTempDir(async dir => {
+      // Read 1 admits, read 2 is the adapter's credential, read 3 is the settling readiness read.
+      const store = gatedStore(2);
+      let requests = 0;
+      const fetch = (async () => { requests++; return toolSse(); }) as never;
+      const host = await createHost(await options(dir, { route: "grok", model: "grok-4.7", store, fetch }, { maxTurns: 1 }));
+      const session = await host.createSession();
+      const controller = new AbortController(), deadline = deadlineClock();
+      const pending = session.submitWithRoute({ text: "tools" }, { signal: controller.signal, clock: deadline.clock });
+      await store.blocked;
+      if (stop === "cancel") session.cancel();
+      else if (stop === "signal") controller.abort();
+      else deadline.fire();
+      const run = await pending;
+      expect(run.outcome).toBe(stop === "deadline" ? "limit_exceeded" : "cancelled");
+      if (!("auth" in run)) throw new Error("expected auth detail");
+      expect(run.auth.route).toBe("grok");
+      expect(run.usage.providerRequests).toEqual({ initialSends: requests, authRetrySends: 0, renewalRequests: 0 });
+      expect(requests).toBe(1);
+      await session.close();
+      store.release();
+      await host.close();
+    });
+  });
+}
