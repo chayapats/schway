@@ -4,7 +4,7 @@ import { assertThinking } from "../thinking.ts";
 import { lookupModel } from "../catalog.ts";
 import type { Model, ModelCallOptions, ModelRequest, ThinkingLevel } from "../model.ts";
 import { isPromptCacheKey } from "../prompt-cache-key.ts";
-import { isRefusedRedirect, providerDispatch, redirectRefusedError, reportedEffort, sentControls, type ProviderSendKind } from "../dispatch.ts";
+import { controlsFromBody, isRefusedRedirect, providerDispatch, redirectRefusedError, reportedEffort, type ProviderSendKind } from "../dispatch.ts";
 import { assembleResponsesStream, buildResponsesRequest, type ResponsesReasoning } from "./responses-stream.ts";
 
 /** Public xAI Responses API origin used when tests do not inject a base URL. */
@@ -98,10 +98,9 @@ export function createXaiModel(options: {
       let refusal: unknown;
       // Authorization runs inside the SDK's single fetch call: after every SDK await, on the exact serialized body.
       // Host route sends refuse redirects, authorizer or not, so a 3xx never becomes a second, uncounted send.
-      // The controls come from the same body object the SDK serializes for this send.
-      const controls = sentControls(body);
+      // Controls come from the bytes the SDK actually sends, so no SDK transform can make them diverge from the hash.
       const authorizedFetch = (kind: ProviderSendKind): FetchLike | undefined => dispatch ? (input, init) => {
-        try { dispatch.send(kind, init?.body, controls); }
+        try { dispatch.send(kind, init?.body, controlsFromBody(init?.body)); }
         catch (error) { refusal = error; throw error; }
         return (options.fetch ?? fetch)(input, { ...init, redirect: "error" });
       } : options.fetch;

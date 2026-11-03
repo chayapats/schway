@@ -745,7 +745,7 @@ export interface HostRouteModelOptions {
 export type HostRouteModels = {
     readonly status: "listed";
     readonly route: HostAuthRoute;
-    readonly models: readonly HostModelChoice[];
+    readonly models: HostModelChoice[];
     readonly containsNoSecrets: true;
 } | {
     readonly status: Exclude<HostAuthStatusCode, "configured-unverified">;

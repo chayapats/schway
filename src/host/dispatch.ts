@@ -114,7 +114,7 @@ const CAP_NOT_SENT = "The required output cap could not be sent exactly, so the 
 
 type Observation = { effort: { requested: ThinkingLevel | null; sent: string | null; reported: string | null }; outputCap: { sent: number | null } };
 
-type RunState = { initialSends: number; authRetrySends: number; renewalRequests: number; unobserved: boolean; lastSendRefused: boolean; lastRedirectRefused: boolean };
+type RunState = { initialSends: number; authRetrySends: number; renewalRequests: number; unobserved: boolean; lastSendRefused: boolean; lastRedirectRefused: boolean; lastControlRefusal: Error | null };
 type CallMeter = { attached: boolean; observation: Observation | null; readonly state: RunState };
 const RUN_METER = Symbol("schway.host.runMeter");
 type MeteredCall = ModelCallOptions & { readonly [RUN_METER]?: CallMeter };
@@ -131,11 +131,13 @@ export interface RunMeter {
   readonly lastSendRefused: boolean;
   /** True when the most recent model call ended on one of Schway's refused redirects; each new call clears it. */
   readonly lastRedirectRefused: boolean;
+  /** The route-control refusal that ended the most recent model call, or null; each new call clears it. */
+  readonly lastControlRefusal: Error | null;
 }
 
 /** Start exact accounting for one run; zero model calls report zero requests. @internal */
 export function createRunMeter(): RunMeter {
-  const state: RunState = { initialSends: 0, authRetrySends: 0, renewalRequests: 0, unobserved: false, lastSendRefused: false, lastRedirectRefused: false };
+  const state: RunState = { initialSends: 0, authRetrySends: 0, renewalRequests: 0, unobserved: false, lastSendRefused: false, lastRedirectRefused: false, lastControlRefusal: null };
   // Each attempt's usage object is the one its own call yielded, so observations never cross attempts.
   const tagged = new WeakMap<object, CallMeter>();
   return {
@@ -143,6 +145,7 @@ export function createRunMeter(): RunMeter {
       // A refusal belongs to its own call: a later call that fails before sending reports its own failure.
       state.lastSendRefused = false;
       state.lastRedirectRefused = false;
+      state.lastControlRefusal = null;
       const meter: CallMeter = { attached: false, observation: null, state };
       return { call: { ...call, [RUN_METER]: meter } as MeteredCall, settle() { if (!meter.attached) state.unobserved = true; },
         tag(usage) { tagged.set(usage, meter); } };
@@ -156,6 +159,7 @@ export function createRunMeter(): RunMeter {
     },
     get lastSendRefused() { return state.lastSendRefused; },
     get lastRedirectRefused() { return state.lastRedirectRefused; },
+    get lastControlRefusal() { return state.lastControlRefusal; },
   };
 }
 
@@ -179,8 +183,14 @@ export function dispatchRouteModel(model: Model, route: HostAuthRoute, authorize
   return Object.freeze({ provider, id, async *stream(request, call) {
     const meter = (call as MeteredCall | undefined)?.[RUN_METER];
     if (meter) meter.attached = true;
+    // The loop keeps only the message, so the run learns of a route-control refusal here, by identity.
+    const refuseControl = (message: string): never => {
+      const refusal = routeControlRefusedError(message);
+      if (meter) meter.state.lastControlRefusal = refusal;
+      throw refusal;
+    };
     // An exact pin applies to every call, compaction included; a conflicting request is refused before any I/O.
-    if (controls.effort && request.thinking !== undefined && request.thinking !== controls.effort.level) throw routeControlRefusedError(EFFORT_CONFLICT);
+    if (controls.effort && request.thinking !== undefined && request.thinking !== controls.effort.level) refuseControl(EFFORT_CONFLICT);
     const effective = controls.effort ? { ...request, thinking: controls.effort.level } : request;
     const requested = effective.thinking ?? null;
     let sequence = 0;
@@ -192,9 +202,9 @@ export function dispatchRouteModel(model: Model, route: HostAuthRoute, authorize
       send(kind, body, sent) {
         sequence += 1;
         // Control checks run before the authorizer: a body that cannot honor the pin never reaches it or the network.
-        if (controls.effort && sent.effort !== controls.effort.sent) throw routeControlRefusedError(EFFORT_NOT_SENT);
+        if (controls.effort && sent.effort !== controls.effort.sent) refuseControl(EFFORT_NOT_SENT);
         const cap = controls.outputCap;
-        if (cap && (cap.exact !== undefined ? sent.outputCap !== cap.exact : sent.outputCap === null || sent.outputCap < 1)) throw routeControlRefusedError(CAP_NOT_SENT);
+        if (cap && (cap.exact !== undefined ? sent.outputCap !== cap.exact : sent.outputCap === null || sent.outputCap < 1)) refuseControl(CAP_NOT_SENT);
         const effort = Object.freeze({ requested, sent: sent.effort });
         const outputCap = Object.freeze({ sent: sent.outputCap });
         if (authorize) {

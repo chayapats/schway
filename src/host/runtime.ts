@@ -492,9 +492,9 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               usage: usageSummary(usages, totalMs, true, meter), model: identity };
           }
           // A refused last send explains the failure even when the loop's final message names a consequence, such as overflow.
-          const refused = reason === "error" && meter.lastSendRefused;
+          const refusal = reason !== "error" ? undefined : meter.lastSendRefused ? DISPATCH_REFUSED_MESSAGE : meter.lastControlRefusal?.message;
           return { outcome: reason, input: inputReference, usage: usageSummary(usages, totalMs, false, meter),
-            model: identity, error: failureDetail(refused ? DISPATCH_REFUSED_MESSAGE : lastMessage ?? terminalMessage(reason), identity) };
+            model: identity, error: failureDetail(refusal ?? lastMessage ?? terminalMessage(reason), identity) };
         } finally { release(); busy = false; }
       },
       readResult(result) {
@@ -622,6 +622,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
               // The loop keeps only the message, so Schway's own refusals and redirects come from the per-call meter.
               const auth = settlingInterrupted ? admitted!
                 : meter.lastSendRefused ? classifyAuthError(dispatchRefusedError(), authSelection)
+                : meter.lastControlRefusal ? classifyAuthError(meter.lastControlRefusal, authSelection)
                 : meter.lastRedirectRefused ? classifyAuthError(redirectRefusedError("route"), authSelection)
                 : observed === undefined ? admitted! : classifyAuthError(observed, authSelection);
               return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter) };
@@ -634,6 +635,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           }
           // A refused last send ends the run even when the loop's final message names a later consequence.
           if (meter.lastSendRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(dispatchRefusedError(), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+          if (meter.lastControlRefusal) return { outcome: terminal, input: inputReference, auth: classifyAuthError(meter.lastControlRefusal, authSelection), usage: usageSummary(usages, totalMs, false, meter) };
           // The loop keeps only the message; the meter saw Schway's own redirect failure by identity.
           if (meter.lastRedirectRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(redirectRefusedError("route"), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
           const auth = classifyAuthError(lastError ?? new Error("Provider request failed"), authSelection);

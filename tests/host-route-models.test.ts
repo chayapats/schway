@@ -42,10 +42,10 @@ for (const route of ["codex", "grok"] as const) {
         : Response.json({ data: [{ id: "grok-4.7" }, { id: "grok-account-choice", context_length: 64000, default: true }] });
     };
     const result = await listRouteModels(input);
-    // Rows without reasoning metadata: Codex accepts no explicit level; xAI accepts off as its disable control.
+    // Rows without reasoning metadata: Codex accepts no explicit level; xAI accepts off only as a no-op, never as a disable control.
     const effort = route === "codex"
       ? { levels: [], offSendable: false, default: null, evidence: "account-catalog" as const }
-      : { levels: ["off" as const], offSendable: true, default: null, evidence: "account-catalog" as const };
+      : { levels: ["off" as const], offSendable: false, default: null, evidence: "account-catalog" as const };
     // Codex sends no output cap; Grok sends the catalog maximum unless the embedder sets a smaller cap.
     const outputCap = route === "codex" ? { enforced: false, default: null, maximum: null } : { enforced: true, default: 16384, maximum: 16384 };
     expect(result).toEqual({ status: "listed", route, containsNoSecrets: true, models: [
@@ -66,6 +66,10 @@ for (const route of ["codex", "grok"] as const) {
     expect(result.status).toBe("listed");
     if (result.status === "listed") {
       expect(result.models).toHaveLength(64);
+      // A fresh array of frozen choices: callers may sort it in place, never edit a choice.
+      expect(Object.isFrozen(result.models)).toBe(false);
+      result.models.sort((left, right) => right.id.localeCompare(left.id));
+      expect(result.models.every(model => Object.isFrozen(model))).toBe(true);
       expect(result.models.filter(model => model.recommended).map(({ id, recommended }) => ({ id, recommended }))).toEqual([{ id: fallback, recommended: true }]);
     }
     expect(containsNoSecrets(result, ["catalog-access-sentinel"])).toBe(true);
