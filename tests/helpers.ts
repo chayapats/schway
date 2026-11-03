@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, lstatSync, mkdtempSync, realpathSync, rmSync, statSync, type Stats } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -43,8 +43,17 @@ function refusal(path: string, reason: string): Error {
   return new Error(`Refusing to remove ${JSON.stringify(path)}: ${reason}`);
 }
 
-/** Throw when removing `path` would also remove the working directory, HOME, the checkout or the temp directory. */
+/**
+ * Throw when removing `path` would also remove the working directory, HOME, the checkout or the temp directory.
+ * Paths are compared after realpath, which also settles case on case-insensitive volumes, and by device and
+ * inode, which catches any other alias such as a bind mount.
+ */
 function assertKeepsProtectedPaths(path: string, tempParent: string): void {
+  let info: Stats;
+  try { info = lstatSync(path); } catch { return; }
+  // Removing a missing path, a file or a final symlink can't remove a protected directory.
+  if (!info.isDirectory()) return;
+  const real = realpathSync(path), identity = statSync(real);
   let cwd: string | undefined;
   // A working directory that no longer exists can't be harmed, and process.cwd() may throw for it.
   try { cwd = process.cwd(); } catch { cwd = undefined; }
@@ -52,7 +61,18 @@ function assertKeepsProtectedPaths(path: string, tempParent: string): void {
   for (const protectedPath of kept) {
     if (protectedPath === undefined) continue;
     const resolved = canonical(protectedPath);
-    if (within(path, resolved)) throw refusal(path, `it contains ${resolved}`);
+    if (within(real, resolved) || sharesIdentityWithAncestor(identity, resolved)) throw refusal(path, `it contains ${resolved}`);
+  }
+}
+
+/** True when `path` or one of its existing ancestors is the directory `identity` describes. */
+function sharesIdentityWithAncestor(identity: Stats, path: string): boolean {
+  for (let current = path; ; current = dirname(current)) {
+    try {
+      const candidate = statSync(current);
+      if (candidate.dev === identity.dev && candidate.ino === identity.ino) return true;
+    } catch { /* Missing: check the parent. */ }
+    if (dirname(current) === current) return false;
   }
 }
 

@@ -1,0 +1,30 @@
+// Scanner cases for tests/temp-root-guard.test.ts, one per line; the test lists the lines that count.
+await rm(dir, { recursive: true, force: true }); // counted
+await rm(file); // not counted: no recursion
+rmSync(root, { // counted across lines
+  force: true, recursive: true,
+});
+await fs.rm(join(a, ")"), { recursive: true }); // counted despite a bracket in a string
+await rmdir(empty); // not counted
+const dir = await mkdtemp(join(tmpdir(), "x-")); // counted
+const sync = mkdtempSync(prefix); // counted
+await Bun.$`rm -rf ${dir}`; // counted
+Bun.spawn(["rm", "-r", dir]); // counted
+mock.module("node:fs/promises", () => block(promises, ["rm", "rename"])); // not counted
+import { mkdtemp, rm } from "node:fs/promises"; // not counted
+import { rm as remove, rmSync as removeSync, mkdtemp as makeTemp, mkdtempSync as makeTempSync } from "node:fs";
+await remove(dir, { recursive: true }); // counted through the alias
+removeSync(dir, { force: true }); // not counted: no recursion
+await makeTemp(prefix); // counted through the alias
+makeTempSync(prefix); // counted through the alias
+spawnSync("rm", ["-f", "-r", dir]); // counted
+execFile("rm", ["--recursive", dir]); // counted
+Bun.spawnSync(["rm", "-R", dir]); // counted
+spawn("rm", ["-f", dir]); // not counted: no recursion
+await Bun.$`rm -f -r ${dir}`; // counted
+execSync(`rm --force --recursive ${dir}`); // counted
+execSync(`find ${dir} -name '*.tmp' -delete`); // counted
+Bun.spawn(["find", dir, "-type", "f", "-delete"]); // counted
+Bun.spawn(["find", dir, "-type", "f"]); // not counted
+rm(dir, options); // escapes: options held in a variable
+fs["rm"](dir, { recursive: true }); // escapes: computed access

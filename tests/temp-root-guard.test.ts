@@ -76,6 +76,31 @@ test("a deleted working directory doesn't block later removals", async () => {
   } finally { process.chdir(cwd); }
 });
 
+test("the working-directory check sees through letter case and links", async () => {
+  const root = await makeTempRoot("schway-guard-");
+  const cwd = process.cwd();
+  try {
+    await mkdir(join(root, "Work"));
+    process.chdir(join(root, "Work"));
+    if (await exists(join(root, "work"))) {
+      // Case-insensitive volume (macOS default): root/work is the working directory.
+      await expect(removeOwnedTree(root, join(root, "work"))).rejects.toThrow(`it contains ${join(root, "Work")}`);
+      expect(() => assertRemovableOwnedTree(root, join(root, "WORK"))).toThrow("it contains");
+    } else {
+      // Case-sensitive volume: root/work is another, missing directory, so removing it is a no-op.
+      await removeOwnedTree(root, join(root, "work"));
+    }
+    expect(await exists(join(root, "Work"))).toBe(true);
+    // A link to the working directory is removed as a link; the directory stays.
+    await symlink(join(root, "Work"), join(root, "alias"));
+    await removeOwnedTree(root, join(root, "alias"));
+    expect(await exists(join(root, "Work"))).toBe(true);
+  } finally {
+    process.chdir(cwd);
+    await removeTempRoot(root);
+  }
+});
+
 test("owned-tree removal deletes only paths strictly inside the root, never through a symlink", async () => {
   const root = await makeTempRoot("schway-guard-");
   const outside = await makeTempRoot("schway-guard-outside-");
@@ -144,43 +169,39 @@ test("shared fixture helpers remove their roots through the guard", async () => 
   expect(await exists(seen)).toBe(false);
 });
 
-test("the scanner finds direct recursive removals and mkdtemp calls, including multi-line and shell forms", () => {
-  const source = [
-    "await rm(dir, { recursive: true, force: true });",
-    "await rm(file);",
-    "rmSync(root, {",
-    "  force: true, recursive: true,",
-    "});",
-    "await fs.rm(join(a, \")\"), { recursive: true });",
-    "await rmdir(empty);",
-    "const dir = await mkdtemp(join(tmpdir(), \"x-\"));",
-    "const sync = mkdtempSync(prefix);",
-    "await Bun.$`rm -rf ${dir}`;",
-    "Bun.spawn([\"rm\", \"-r\", dir]);",
-    "mock.module(\"node:fs/promises\", () => block(promises, [\"rm\", \"rename\"]));",
-    "import { mkdtemp, rm } from \"node:fs/promises\";",
-  ].join("\n");
+test("the scanner finds direct recursive removals and mkdtemp calls, including aliases, argv lists and shell forms", async () => {
+  const source = await Bun.file(join(import.meta.dir, "fixtures/temp-root-sites.txt")).text();
   expect(findTempSites("tests/x.test.ts", source).map(site => `${site.line}:${site.kind}`)).toEqual([
-    "1:recursiveRemoval", "3:recursiveRemoval", "6:recursiveRemoval", "8:mkdtemp", "9:mkdtemp", "10:recursiveRemoval", "11:recursiveRemoval",
+    "2:recursiveRemoval", "4:recursiveRemoval", "7:recursiveRemoval", "9:mkdtemp", "10:mkdtemp", "11:recursiveRemoval",
+    "12:recursiveRemoval", "16:recursiveRemoval", "18:mkdtemp", "19:mkdtemp", "20:recursiveRemoval", "21:recursiveRemoval",
+    "22:recursiveRemoval", "24:recursiveRemoval", "25:recursiveRemoval", "26:recursiveRemoval", "27:recursiveRemoval",
   ]);
+  // Every line the fixture marks as counted is found, and nothing else.
+  const marked = source.split("\n").flatMap((line, index) => / \/\/ counted/.test(line) ? [index + 1] : []);
+  expect([...new Set(findTempSites("tests/x.test.ts", source).map(site => site.line))]).toEqual(marked);
 });
 
-test("tests add no direct recursive removal or mkdtemp outside the guarded helpers", async () => {
+test("direct recursive removal and mkdtemp sites under tests/ match the allowlist exactly", async () => {
   // Existing sites are allowlisted until they move to makeTempRoot, removeTempRoot and removeOwnedTree.
-  // Removing a site, or lowering a count, is fine. A new site fails: use the guarded helpers instead.
-  const allowlist = await Bun.file(join(import.meta.dir, "fixtures/temp-root-allowlist.json")).json() as Record<string, Partial<Record<TempSiteKind, number>>>;
+  // A new site fails: use the guarded helpers instead. A migrated site fails until its entry is lowered,
+  // so the ratchet never keeps slack.
+  const allowlistPath = "tests/fixtures/temp-root-allowlist.json";
+  const allowlist = await Bun.file(join(repo, allowlistPath)).json() as Record<string, Partial<Record<TempSiteKind, number>>>;
   expect(Object.keys(allowlist)).toEqual(Object.keys(allowlist).sort());
   const sites = await scanTempSites(repo);
   const counts = countTempSites(sites);
-  const added: string[] = [];
-  for (const [file, kinds] of Object.entries(counts)) {
-    for (const [kind, count] of Object.entries(kinds) as [TempSiteKind, number][]) {
-      const allowed = allowlist[file]?.[kind] ?? 0;
-      if (count > allowed) {
+  const problems: string[] = [];
+  for (const file of [...new Set([...Object.keys(counts), ...Object.keys(allowlist)])].sort()) {
+    for (const kind of ["mkdtemp", "recursiveRemoval"] as const) {
+      const actual = counts[file]?.[kind] ?? 0, allowed = allowlist[file]?.[kind];
+      if (allowed !== undefined && (!Number.isInteger(allowed) || allowed < 1)) problems.push(`${allowlistPath}: ${file} ${kind} must be a positive count or absent`);
+      if (actual > (allowed ?? 0)) {
         const lines = sites.filter(site => site.file === file && site.kind === kind).map(site => site.line);
-        added.push(`${file}: ${count} ${kind} sites, ${allowed} allowed (lines ${lines.join(", ")})`);
+        problems.push(`${file}: ${actual} ${kind} sites, ${allowed ?? 0} allowed (lines ${lines.join(", ")}). Use makeTempRoot, removeTempRoot or removeOwnedTree from tests/helpers.ts instead.`);
+      } else if (actual < (allowed ?? 0)) {
+        problems.push(`${file}: ${actual} ${kind} sites, ${allowed} allowed. Lower ${file} ${kind} in ${allowlistPath} to ${actual}${actual === 0 ? " by removing it" : ""}.`);
       }
     }
   }
-  expect(added, "Use makeTempRoot/removeTempRoot/removeOwnedTree from tests/helpers.ts instead of direct mkdtemp or recursive rm").toEqual([]);
+  expect(problems).toEqual([]);
 });
