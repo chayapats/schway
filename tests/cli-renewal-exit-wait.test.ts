@@ -1,17 +1,28 @@
 import { expect, test } from "bun:test";
 import { createRenewalExit, RENEWAL_EXIT_LIMIT_MS, RENEWAL_TERMINATE_LIMIT_MS, renewedSignInNotSaved, SAVING_RENEWED_SIGN_IN,
   SAVING_RENEWED_SIGN_IN_HINT, type RenewalExitOptions } from "../src/cli/renewal-exit.ts";
-import type { RenewalRoute } from "../src/auth/renewals.ts";
+import type { RenewalRoute, SentRenewal } from "../src/auth/renewals.ts";
 
 const NOT_SAVED = "Renewed sign-in not saved · /login chatgpt sign in again if rejected";
 
-/** An exit wait over a renewal the test settles, recording stderr. */
+/** An exit wait over one renewal per route that the test settles, recording stderr. */
 function exitWait(options: Partial<RenewalExitOptions> & { pending?: boolean; routes?: RenewalRoute[] } = {}) {
   const lines: string[] = [];
-  const outcome = Promise.withResolvers<boolean>();
+  const outcomes = new Map<RenewalRoute, PromiseWithResolvers<boolean>>();
+  // Like the registry, a renewal leaves the pending list once it settles.
+  const live = new Set<SentRenewal>();
+  for (const route of options.routes ?? ["codex"]) {
+    const outcome = Promise.withResolvers<boolean>();
+    outcomes.set(route, outcome);
+    const renewal: SentRenewal = { route, saved: outcome.promise };
+    live.add(renewal);
+    void outcome.promise.then(() => { live.delete(renewal); });
+  }
+  const { pending, routes: _routes, ...rest } = options;
   const exit = createRenewalExit({ stderr: { write: text => { lines.push(text); } }, interactive: false, limitMs: 60_000, terminateLimitMs: 60_000,
-    renewals: { pending: () => options.pending ?? true, routes: () => options.routes ?? ["codex"], settled: () => outcome.promise }, ...options });
-  return { exit, lines, settle: (saved: boolean) => outcome.resolve(saved) };
+    renewals: () => pending === false ? [] : [...live], ...rest });
+  return { exit, lines, settle: (saved: boolean) => { for (const outcome of outcomes.values()) outcome.resolve(saved); },
+    settleRoute: (route: RenewalRoute, saved: boolean) => outcomes.get(route)!.resolve(saved) };
 }
 
 test("the exit bounds cover the refresh ceiling, the lock wait and a short termination grace", () => {
@@ -132,4 +143,31 @@ test("the SIGTERM cap counts from the signal, not from the start of the wait", a
   const started = performance.now();
   expect(await wait.exit.settle(1)).toBe(143);
   expect(performance.now() - started).toBeLessThan(200);
+});
+
+test("the notice names only routes whose renewal had not stored its sign-in when the wait ended", async () => {
+  const wait = exitWait({ routes: ["codex", "grok"], limitMs: 100 });
+  const settling = wait.exit.settle(1);
+  // ChatGPT stores its sign-in during the wait; Grok never answers, so the hard limit ends the wait.
+  wait.settleRoute("codex", true);
+  expect(await settling).toBe(1);
+  expect(wait.lines.at(-1)).toBe("Renewed sign-in not saved · /login grok sign in again if rejected\n");
+});
+
+test("a renewal sent while the wait runs is waited for too", async () => {
+  const lines: string[] = [];
+  const first = Promise.withResolvers<boolean>(), second = Promise.withResolvers<boolean>();
+  const live = new Set<SentRenewal>([{ route: "codex", saved: first.promise }]);
+  const exit = createRenewalExit({ stderr: { write: text => { lines.push(text); } }, interactive: false, limitMs: 60_000, renewals: () => [...live] });
+  const settling = exit.settle(0);
+  live.add({ route: "grok", saved: second.promise });
+  first.resolve(true);
+  await Bun.sleep(10);
+  let settled = false;
+  void settling.then(() => { settled = true; });
+  await Bun.sleep(10);
+  expect(settled).toBe(false);
+  second.resolve(false);
+  expect(await settling).toBe(0);
+  expect(lines.at(-1)).toBe("Renewed sign-in not saved · /login grok sign in again if rejected\n");
 });

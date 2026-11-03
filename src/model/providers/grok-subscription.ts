@@ -126,17 +126,40 @@ export async function refreshSubscriptionTokens(input: { refreshToken: string; f
 /** Failure text for a refused refresh. A JSON 400, 401 or 403 revokes the session; a challenge, or one of those
  * statuses without a JSON body, such as a gateway page, says nothing about the credential. */
 async function refreshFailure(response: Response, signal?: AbortSignal): Promise<string> {
-  if (response.headers.get("cf-mitigated") === "challenge") {
+  // Only a 400, 401 or 403 needs its body, and only enough of it to hold an OAuth JSON error.
+  if (response.headers.get("cf-mitigated") === "challenge" || ![400, 401, 403].includes(response.status)) {
     void response.body?.cancel().catch(() => {});
-    return GROK_CHALLENGE_ERROR;
+    return response.headers.get("cf-mitigated") === "challenge" ? GROK_CHALLENGE_ERROR : grokRefreshFailedError(`HTTP ${response.status}`);
   }
   let json = false;
   try {
-    const value: unknown = await response.json();
+    const value: unknown = JSON.parse(new TextDecoder().decode(await readErrorPrefix(response, signal)));
     json = !!value && typeof value === "object" && !Array.isArray(value);
   } catch { aborted(signal); }
-  if ([400, 401, 403].includes(response.status)) return json ? grokRevokedSessionError() : grokRefreshFailedError(`status ${response.status} with no readable error`);
-  return grokRefreshFailedError(`HTTP ${response.status}`);
+  return json ? grokRevokedSessionError() : grokRefreshFailedError(`status ${response.status} with no readable error`);
+}
+/** Longest error-body prefix read to find an OAuth JSON error, and how long to wait for it. */
+const ERROR_PREFIX_BYTES = 65_536, ERROR_PREFIX_MS = 5_000;
+/** Up to 64 KiB of an error body within 5 seconds, then release the rest; only the caller's signal aborts. */
+async function readErrorPrefix(response: Response, signal?: AbortSignal): Promise<Uint8Array> {
+  const reader = response.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const deadline = signal ? AbortSignal.any([signal, AbortSignal.timeout(ERROR_PREFIX_MS)]) : AbortSignal.timeout(ERROR_PREFIX_MS);
+  const chunks: Uint8Array[] = [];
+  let size = 0, done = false;
+  try {
+    while (size < ERROR_PREFIX_BYTES) {
+      const read = await abortableCatalogOperation(reader.read(), deadline);
+      if (read.done) { done = true; break; }
+      chunks.push(read.value); size += read.value.byteLength;
+    }
+  } catch { aborted(signal); }
+  // A page larger than the prefix, or one that stalls, is never read further.
+  if (!done) void reader.cancel().catch(() => {});
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return bytes;
 }
 /** Generate a fresh PKCE verifier and unpredictable browser state and nonce. */
 export function createBrowserAttempt(): { verifier: string; challenge: string; state: string; nonce: string } {
@@ -422,7 +445,9 @@ function sendWithRefresh(fetchFn: GrokFetch | undefined, signal: AbortSignal): G
     // An abandoned renewal may never read this response: observe its failure and release its body.
     sent.then(response => { if (signal.aborted) void response.body?.cancel().catch(() => {}); }, () => {});
     const response = await abortableCatalogOperation(sent, signal);
-    // Read under the refresh ceiling and the 1 MiB bound; status and headers stay, so a refusal can be classified.
+    // A refusal goes on unread: its classifier reads at most a short prefix, and only when the status needs it.
+    if (!response.ok) return response;
+    // A token response is read under the refresh ceiling and the 1 MiB bound.
     const bytes = response.body ? await readModelCatalogBody(response, signal, "Grok subscription") : new Uint8Array();
     return new Response(bytes.byteLength ? bytes : null, { status: response.status, headers: response.headers });
   };

@@ -1092,3 +1092,35 @@ for (const entry of [
   expect(renewal).toMatchObject({ outcome: "failed", renewalRequests: 1, auth: { status: entry.auth } });
   expect(containsNoSecrets(renewal, ["upstream-body-sentinel", "invalid_grant"])).toBe(true);
 });
+
+// A refusal is classified from its status, headers and at most a short body prefix: a page that stalls or is huge
+// is released at once instead of holding the renewal until its ceiling.
+for (const entry of [
+  { name: "a stalled challenge page", status: 403, challenge: true, size: "stalled", text: "Grok access temporarily unavailable", auth: "integration-unavailable" },
+  { name: "a stalled 503 page", status: 503, challenge: false, size: "stalled", text: "(HTTP 503)", auth: "integration-unavailable" },
+  { name: "an oversized 401 error page", status: 401, challenge: false, size: "huge", text: "(status 401 with no readable error)", auth: "integration-unavailable" },
+] as const) test(`grok classifies ${entry.name} promptly and releases its body`, async () => {
+  const cancels: string[] = [];
+  const reply = (tag: string) => {
+    let sent = 0;
+    const chunk = new TextEncoder().encode(`<html>${"x".repeat(65_530)}`);
+    return new Response(new ReadableStream({
+      pull(controller) {
+        // A stalled body sends one chunk and then nothing; a huge one would send 2 MiB if read to the end.
+        if (entry.size === "stalled") { if (sent++ === 0) controller.enqueue(chunk); return new Promise<void>(() => {}); }
+        if (sent >= 32) { controller.close(); return; }
+        sent++; controller.enqueue(chunk);
+      },
+      cancel() { cancels.push(tag); },
+    }), { status: entry.status, headers: { "Content-Type": "text/html", ...(entry.challenge ? { "cf-mitigated": "challenge" } : {}) } });
+  };
+  const started = performance.now();
+  const failure = await refreshGrokTokens({ refreshToken: "stored-refresh-sentinel", fetch: async () => reply("direct") }).then(() => undefined, (error: unknown) => error as Error);
+  expect(failure?.message).toContain(entry.text);
+  const store = await seeded("grok", EXPIRED);
+  const renewal = await renewAuthRoute({ route: "grok", store, fetch: async () => reply("shared") });
+  expect(renewal).toMatchObject({ outcome: "failed", renewalRequests: 1, auth: { status: entry.auth } });
+  expect(performance.now() - started).toBeLessThan(2_000);
+  await until(() => cancels.length === 2, "both bodies to be released");
+  expect(cancels.sort()).toEqual(["direct", "shared"]);
+});

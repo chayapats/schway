@@ -1,4 +1,4 @@
-import { hasSentRenewals, sentRenewalRoutes, sentRenewalsSettled, type RenewalRoute } from "../auth/renewals.ts";
+import { pendingRenewals, type RenewalRoute, type SentRenewal } from "../auth/renewals.ts";
 
 /** Status while the CLI waits, before exiting, for a renewed sign-in whose request already left. */
 export const SAVING_RENEWED_SIGN_IN = "Saving the renewed sign-in…";
@@ -7,7 +7,7 @@ export const SAVING_RENEWED_SIGN_IN_HINT = "Ctrl+C quit without saving";
 /** Status of the notice when the CLI exits before a renewed sign-in was saved. */
 export const RENEWED_SIGN_IN_NOT_SAVED = "Renewed sign-in not saved";
 
-/** The not-saved notice, naming the sign-in command for each route whose renewal had not settled. */
+/** The not-saved notice, naming the sign-in command for each route whose renewal did not store its sign-in. */
 export function renewedSignInNotSaved(routes: readonly RenewalRoute[]): string {
   const hints = routes.map(route => `/login ${route === "codex" ? "chatgpt" : "grok"} sign in again if rejected`);
   return [RENEWED_SIGN_IN_NOT_SAVED, ...hints].join(" · ");
@@ -25,7 +25,8 @@ export interface RenewalExitOptions {
   readonly interactive: boolean;
   readonly limitMs?: number;
   readonly terminateLimitMs?: number;
-  readonly renewals?: { pending(): boolean; routes(): readonly RenewalRoute[]; settled(): Promise<boolean> };
+  /** Renewals still settling; defaults to this process's sent renewals. */
+  readonly renewals?: () => readonly SentRenewal[];
 }
 
 /** Signal handling around the wait for renewals that already left; `settle` returns the exit status to use. */
@@ -51,10 +52,26 @@ export function createRenewalExit(options: RenewalExitOptions): RenewalExit {
       onSignal?.("terminate");
     },
     async settle(code) {
-      const renewals = options.renewals ?? { pending: hasSentRenewals, routes: sentRenewalRoutes, settled: sentRenewalsSettled };
-      if (!renewals.pending()) return code;
-      const routes = renewals.routes();
-      const notSaved = (status: number): number => { options.stderr.write(`${renewedSignInNotSaved(routes)}\n`); return status; };
+      const pending = options.renewals ?? pendingRenewals;
+      if (!pending().length) return code;
+      // Each watched renewal's outcome, recorded as it settles; renewals sent during the wait are watched too.
+      const outcomes = new Map<SentRenewal, boolean | undefined>();
+      const watch = (): Promise<boolean>[] => {
+        const added: Promise<boolean>[] = [];
+        for (const renewal of pending()) {
+          if (outcomes.has(renewal)) continue;
+          outcomes.set(renewal, undefined);
+          added.push(renewal.saved.then(saved => { outcomes.set(renewal, saved); return saved; }, () => { outcomes.set(renewal, false); return false; }));
+        }
+        return added;
+      };
+      watch();
+      // Named when the wait ends: only routes whose renewal had not stored its sign-in by then.
+      const unsavedRoutes = (): RenewalRoute[] => {
+        const routes = new Set([...outcomes].filter(([, saved]) => saved !== true).map(([renewal]) => renewal.route));
+        return (["codex", "grok"] as const).filter(route => routes.has(route));
+      };
+      const notSaved = (status: number): number => { options.stderr.write(`${renewedSignInNotSaved(unsavedRoutes())}\n`); return status; };
       // Two interrupts or two terminations before the wait mean the user already asked to quit.
       if (interrupts >= 2) return notSaved(130);
       if (terminations >= 2) return notSaved(143);
@@ -82,7 +99,10 @@ export function createRenewalExit(options: RenewalExitOptions): RenewalExit {
           else if (terminations >= 2) finish(143, false);
           else capFromTermination();
         };
-        renewals.settled().then(saved => finish(code, saved), () => finish(code, false));
+        void (async () => {
+          for (let added = [...outcomes.keys()].map(renewal => renewal.saved); added.length; added = watch()) await Promise.allSettled(added);
+          finish(code, unsavedRoutes().length === 0);
+        })();
       });
     },
   };
