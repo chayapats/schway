@@ -37,12 +37,11 @@
   once; remaining limits are documented in the credentials guide. Read-only
   connections are refused instead of admitted beside a holder, and a non-empty
   file at the lock path, such as an existing database, is refused without being
-  opened. A busy lock
-  still fails closed after its bounded wait with the sanitized store error.
-  Conditions that waiting cannot clear, such as a relative
-  `SCHWAY_CREDENTIAL_LOCK_FILE` or an unusable lock path, fail at once with a
-  specific next action. `SCHWAY_CREDENTIAL_LOCK_FILE` moves the lock to an
-  absolute path. A lock-directory build's lock is honored but never removed;
+  opened. A busy lock still fails closed after its bounded wait with the
+  sanitized store error. Conditions that waiting cannot clear, such as a
+  relative `SCHWAY_CREDENTIAL_LOCK_FILE` or an unusable lock path, fail at once
+  with a specific next action. `SCHWAY_CREDENTIAL_LOCK_FILE` moves the lock to
+  an absolute path. A lock-directory build's lock is honored but never removed;
   see the upgrade note (#428).
 - Classify Grok subscription spending-limit denials as `quota-exceeded`, with
   a subscription usage link and no API-key billing fallback. Catalog, inference

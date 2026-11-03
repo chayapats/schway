@@ -199,11 +199,11 @@ secure store. Unlock or allow access to your OS credential store; …`. Nothing
 changes, and retrying is safe. A second acquisition inside one process waits out
 the same bound and fails closed rather than deadlocking. Transient conditions,
 such as a lock file deleted just before it is opened or a shortage of file
-descriptors, are retried within the same bound. When SQLite cannot open an
-existing lock file that `access(2)` allows, Schway opens it directly once to
-learn why, so a sandbox that denies the open fails fast instead of waiting.
-Closing that descriptor would drop this process's lock on the file on Linux, so
-Schway skips the check while this process holds the lock.
+descriptors, are retried within the same bound. Schway never opens a
+descriptor on the lock file outside SQLite, so it cannot tell a sandbox that
+denies the open apart from a transient failure: when every attempt in the bound
+fails because SQLite cannot open an existing lock file that `access(2)` allows,
+the bound ends with the cannot-write message instead of the generic text.
 
 **Refusals that waiting cannot clear.** These fail at once, before contacting the
 secure store, with a specific next action. Each message starts with `Cannot save
@@ -220,8 +220,8 @@ under your home directory are shown with `~`.
 | Permission denied, a read-only mount, a sandbox that denies the open, or a lock file or connection this user cannot write | `Schway cannot write its lock file at <path>. Make that location writable for this user, then retry.` |
 | At the default path: a folder on the way to the lock file is a regular file | `<folder> is a file, not a folder. Move that file, then retry.` |
 | At a `SCHWAY_CREDENTIAL_LOCK_FILE` path: a folder on the way to the lock file is a regular file | `<folder> is a file, not a folder. Set SCHWAY_CREDENTIAL_LOCK_FILE to a path inside a folder, then retry.` |
-| The lock path, or a folder on the way to it, is a broken or looping symbolic link | `The symbolic link at <link> is broken or loops. Fix that link, then retry.` |
-| The lock path is too long for the filesystem | `The lock path <path> is too long. Set SCHWAY_CREDENTIAL_LOCK_FILE to a shorter absolute path, then retry.` |
+| The lock path, or a folder on the way to it, is a symbolic link that is broken, loops, or leads through a regular file | `The symbolic link at <link> is broken or loops. Fix that link, then retry.` |
+| The lock path is too long for the filesystem or for SQLite (see Location) | `The lock path <path> is too long. Set SCHWAY_CREDENTIAL_LOCK_FILE to a shorter absolute path, then retry.` |
 | At the default path: anything other than an empty lock file, such as a data file, database or device | `The file at <path> is not a Schway lock file. With no Schway running, delete it, then retry.` |
 | At a `SCHWAY_CREDENTIAL_LOCK_FILE` path: a folder, a value ending in a path separator, or anything other than an empty lock file | `SCHWAY_CREDENTIAL_LOCK_FILE does not name a Schway lock file. Set it to a new file path, then retry.` |
 | At the default path: an earlier build's lock folder whose owner is provably stopped | `An older Schway's lock folder is at <path>. Close every older Schway, delete that folder, then retry.` |
@@ -235,7 +235,14 @@ small regular file, so a planted FIFO or device cannot block it.
 
 **Location.** The lock file is `~/.schway/credential-store.lock`, created once
 with mode `0600` and never removed; missing parent directories are created with
-mode `0700`. Without a home directory, Schway uses
+mode `0700`. Schway creates it under a private temporary name in the same
+folder, closes that, then links it into place, so it never holds a descriptor
+on the lock file outside SQLite, even while creating it; a crash in between can
+leave an empty `.schway-lock-<pid>-<id>` file, which is safe to delete. On a
+filesystem without hard links, SQLite creates the file instead. The full lock
+path, after links, must fit SQLite's limit: 1016 bytes on macOS and 504 bytes
+elsewhere, which is SQLite's path limit minus room for a `-journal` name.
+Without a home directory, Schway uses
 `schway-credential-store-<uid>.lock` in the system temporary directory. The lock
 file must be on a local filesystem with POSIX advisory locks; network homes (NFS
 without a lock daemon, some SMB mounts) may not provide them. Do not delete or
@@ -248,10 +255,11 @@ home is read-only (systemd `ProtectHome=`). Point it at a new file under a
 writable local folder, such as `credential-store.lock` inside the unit's
 `StateDirectory=`, not at the folder itself. Schway reads the variable on every
 save or deletion and creates missing parent directories. A blank value, or one
-that reaches the default lock file, uses the default location. Schway compares
-device and inode, so a link alias of `~/.schway`, or a case variant on a
-case-insensitive filesystem, counts as the default, while a `..` after a linked
-folder counts where it physically leads. A relative value, or one ending in a
+that reaches the default lock file, uses the default location. A value spelled
+like the default path, without `..`, is the default without consulting the
+filesystem. Otherwise Schway compares device and inode, so a link alias of
+`~/.schway`, or a case variant on a case-insensitive filesystem, counts as the
+default, while a `..` after a linked folder counts where it physically leads. A relative value, or one ending in a
 path separator, fails at once with its own message, without contacting the
 store. Processes that should serialize must use the same path; processes with
 different paths do not exclude each other.
@@ -348,19 +356,22 @@ one-file deny would miss symbolic links, hard links, extensions and embedder
 code, and holding the lock in a helper process would add a process start and new
 failure modes to every save. Do not point tools at the lock file.
 
-**Worker threads.** Schway tracks the connections it holds per JavaScript thread
-and takes the lock only from its main thread. An embedder that also takes it
-from a worker thread in the same process could have one thread's open
-diagnosis, described under the bounded wait, close a descriptor and drop the
-other thread's lock on Linux. Take the lock from one thread per process.
+**Threads.** POSIX record locks belong to the whole process, and each
+JavaScript worker has its own copy of Schway's modules. Because Schway never
+opens or closes a descriptor on the lock file outside SQLite, and SQLite tracks
+its locks per process across threads, taking the lock from several workers in
+one process cannot drop another worker's lock. Embedder code must follow the
+same rule.
 
 **Reusing the primitive.** Embedders that build their own lock this way should
 follow the same rules:
 
-- Create the file once with an exclusive create (`wx`). Never delete or replace it.
-- Never open an existing lock file outside SQLite in the locking process: under
+- Never open a descriptor on the lock file outside SQLite, from any thread of
+  the locking process, not even to create it or to diagnose a failure: under
   POSIX rules, closing any descriptor for that file can release all of the
-  process's record locks on it.
+  process's record locks on it. Create the file under a private temporary name
+  in the same folder, close it, then `link(2)` it to the lock path. Never delete
+  or replace the lock file.
 - Verify the connection, not the path. After `BEGIN IMMEDIATE`, run a write
   inside the open transaction, such as `PRAGMA user_version = 1`, and refuse
   the lock if it fails. A path check such as `access(2)` can disagree with the
