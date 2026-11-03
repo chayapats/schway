@@ -3,6 +3,7 @@ import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, type C
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
 import { boundedCatalogFetch, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { GROK_CHALLENGE_ERROR, GROK_QUOTA_ERROR } from "../grok-errors.ts";
+import { countingRenewalFetch } from "../dispatch.ts";
 import { createHash, randomBytes } from "node:crypto";
 
 /** Public OAuth client shared with Grok Build, attributed to Schway by referrer. */
@@ -277,8 +278,9 @@ interface SubscriptionTokenInput {
   lifecycleStore?: CredentialStore; onCredential?: (raw: string) => void;
 }
 
-/** Share renewal per original store and generation; cancellation detaches only this caller. */
-async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: AbortSignal, rejectedToken?: string): Promise<string> {
+/** Share renewal per original store and generation; cancellation detaches only this caller.
+ * `onRenewal` fires once per physical refresh request this caller starts; joiners of a shared renewal never see it. */
+async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: AbortSignal, rejectedToken?: string, onRenewal?: () => void): Promise<string> {
   aborted(signal);
   const owner = input.lifecycleStore ?? input.store, state = credentialLifecycle(owner);
   const caller: RefreshCaller = { onCredential: input.onCredential };
@@ -317,7 +319,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
         let renewed: GrokTokens;
         try {
           renewed = await refreshSubscriptionTokens({ refreshToken, now: input.now, signal: controller.signal,
-            fetch: boundedCatalogFetch({ fetch: input.fetch, signal: controller.signal, label: "Grok subscription" }) });
+            fetch: boundedCatalogFetch({ fetch: countingRenewalFetch(input.fetch, onRenewal), signal: controller.signal, label: "Grok subscription" }) });
         } catch (error) {
           if (controller.signal.reason instanceof DOMException && controller.signal.reason.name === "TimeoutError") throw new Error(grokRefreshFailedError("timed out"));
           throw error;
@@ -353,7 +355,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
 
 /** Share renewal per store while fencing refresh writes against logout and replacement sign-ins. */
 export function createSubscriptionTokenRefresher(input: { store: CredentialStore; fetch?: GrokFetch; now?: () => number }) {
-  return { getValidAccessToken: (signal?: AbortSignal, rejectedToken?: string) => resolveSubscriptionToken(input, signal, rejectedToken) };
+  return { getValidAccessToken: (signal?: AbortSignal, rejectedToken?: string, onRenewal?: () => void) => resolveSubscriptionToken(input, signal, rejectedToken, onRenewal) };
 }
 async function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!signal) return promise;

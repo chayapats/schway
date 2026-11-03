@@ -35,7 +35,7 @@ export interface AssistantTelemetry {
 export function beginDeviceSignIn(options: HostDeviceSignInOptions): Promise<HostDeviceSignInStart>;
 
 // @public
-export function checkAuthReadiness(selection: HostAuthSelection): Promise<HostAuthReadiness>;
+export function checkAuthReadiness(selection: HostAuthSelection, options?: HostReadinessOptions): Promise<HostAuthReadiness>;
 
 // @public
 export function classifyAuthError(error: unknown, selection: HostAuthSelection): HostAuthReadiness;
@@ -92,7 +92,7 @@ export interface CoreToolOptions {
 }
 
 // @public
-export function createAuthRouteModel(selection: HostAuthSelection): Promise<Model>;
+export function createAuthRouteModel(selection: HostAuthSelection, options?: HostRouteModelOptions): Promise<Model>;
 
 // @public
 export function createHost(options: HostOptions): Promise<HostRuntime>;
@@ -229,8 +229,8 @@ export function hashSnapshotBytes(bytes: Uint8Array): string;
 
 // @public
 export interface HostAuthBinding {
-    checkReadiness(): Promise<HostAuthReadiness>;
-    createModel(): Promise<Model>;
+    checkReadiness(options?: HostReadinessOptions): Promise<HostAuthReadiness>;
+    createModel(options?: HostRouteModelOptions): Promise<Model>;
     // (undocumented)
     readonly credential: HostCredentialReference;
     // (undocumented)
@@ -305,7 +305,7 @@ export interface HostAuthSelection {
 }
 
 // @public
-export type HostAuthStatusCode = "configured-unverified" | "needs-login" | "store-unavailable" | "invalid-store" | "rejected" | "quota-exceeded" | "model-unavailable" | "integration-unavailable";
+export type HostAuthStatusCode = "configured-unverified" | "needs-login" | "store-unavailable" | "invalid-store" | "rejected" | "quota-exceeded" | "model-unavailable" | "integration-unavailable" | "dispatch-refused";
 
 // @public
 export interface HostCapabilities {
@@ -327,6 +327,7 @@ export interface HostCapabilities {
     readonly dataContract: "schway.host.managed-session-data/v1";
     // (undocumented)
     readonly deviceSignInContract: "schway.host.device-sign-in/v1";
+    readonly dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1";
     // (undocumented)
     readonly extensionDiscovery: "disabled-only";
     // (undocumented)
@@ -341,6 +342,7 @@ export interface HostCapabilities {
     readonly modelCatalog: "schway.host.model-catalog/v1";
     // (undocumented)
     readonly observedInference: "not-checked";
+    readonly providerRequestsContract: "schway.host.provider-requests/v1";
     // (undocumented)
     readonly releaseContract: "schway.host.release/v2";
     // (undocumented)
@@ -473,6 +475,20 @@ export type HostDeviceSignInStart = HostDeviceSignIn | HostDeviceSignInFailure |
     readonly route: HostAuthRoute;
     readonly containsNoSecrets: true;
 };
+
+// @public
+export interface HostDispatch {
+    readonly bodyBytes: number;
+    readonly bodySha256: string;
+    readonly kind: "initial" | "auth-retry";
+    readonly model: string;
+    readonly provider: string;
+    readonly route: HostAuthRoute;
+    readonly sequence: number;
+}
+
+// @public
+export type HostDispatchAuthorizer = (dispatch: HostDispatch) => void;
 
 // @public
 export type HostedTool = "web_search";
@@ -659,6 +675,24 @@ export type HostProgressEvent = {
 };
 
 // @public
+export interface HostProviderRequests {
+    readonly authRetrySends: number;
+    readonly initialSends: number;
+    readonly renewalRequests: number;
+}
+
+// @public
+export interface HostReadinessOptions {
+    readonly deadlineMs?: number;
+    readonly signal?: AbortSignal;
+}
+
+// @public
+export interface HostRouteModelOptions {
+    readonly authorizeDispatch?: HostDispatchAuthorizer;
+}
+
+// @public
 export type HostRouteModels = {
     readonly status: "listed";
     readonly route: HostAuthRoute;
@@ -670,6 +704,11 @@ export type HostRouteModels = {
     readonly nextAction: string;
     readonly containsNoSecrets: true;
 };
+
+// @public
+export interface HostRouteRunOptions extends HostRunOptions {
+    readonly authorizeDispatch?: HostDispatchAuthorizer;
+}
 
 // @public
 export interface HostRunAttemptUsage {
@@ -740,6 +779,7 @@ export interface HostRunUsage {
     readonly attempts: readonly HostRunAttemptUsage[];
     // (undocumented)
     readonly complete: boolean;
+    readonly providerRequests: HostProviderRequests | null;
     // (undocumented)
     readonly totalMs: number;
 }
@@ -754,7 +794,7 @@ export interface HostSession {
     readonly reference: HostSessionReference;
     retire(): Promise<void>;
     submit(input: HostInput, model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostRunResult>;
-    submitWithRoute(input: HostInput, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostAuthRunResult>;
+    submitWithRoute(input: HostInput, signalOrOptions?: AbortSignal | HostRouteRunOptions): Promise<HostAuthRunResult>;
 }
 
 // @public
@@ -908,6 +948,9 @@ export function isCleanupUncertain(error: unknown): boolean;
 
 // @public
 export function isCredentialWriteRefused(error: unknown): error is Error;
+
+// @public
+export function isDispatchRefused(error: unknown): error is Error;
 
 // @public
 export type JsonSchema = Record<string, unknown>;

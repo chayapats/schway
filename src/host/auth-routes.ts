@@ -1,6 +1,8 @@
 import type { Model } from "../model/model.ts";
 import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
 import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
+import { dispatchRouteModel, isDispatchRefused, routeModelOptions, type HostRouteModelOptions } from "./dispatch.ts";
+import { HostError } from "./index.ts";
 
 export { isCleanupUncertain, isCredentialWriteRefused };
 
@@ -66,7 +68,8 @@ export type HostAuthStatusCode =
   | "rejected"
   | "quota-exceeded"
   | "model-unavailable"
-  | "integration-unavailable";
+  | "integration-unavailable"
+  | "dispatch-refused";
 
 /** Selected-route readiness with safe next-action guidance and no secret payloads. */
 export interface HostAuthReadiness {
@@ -240,8 +243,54 @@ function invalidStoreAction(route: HostAuthRoute): string {
     : "Stored Grok subscription login is invalid. Sign in again with /login grok.";
 }
 
-/** Check local store readiness without network or inference; only the selected route identity is read. */
-export async function checkAuthReadiness(selection: HostAuthSelection): Promise<HostAuthReadiness> {
+/** Bounds for one local readiness check; omission keeps the unbounded local read. */
+export interface HostReadinessOptions {
+  /** Abort the check: it rejects with an `AbortError` and ignores the store read when it finally settles. */
+  readonly signal?: AbortSignal;
+  /** Bound the check in whole milliseconds (1–86,400,000): expiry rejects with a `TimeoutError`. */
+  readonly deadlineMs?: number;
+}
+
+const MAX_READINESS_DEADLINE_MS = 86_400_000;
+
+function readinessBounds(input: unknown): HostReadinessOptions {
+  if (input === undefined) return {};
+  if (typeof input !== "object" || input === null || Array.isArray(input) ||
+      Object.keys(input).some(key => key !== "signal" && key !== "deadlineMs")) throw new HostError("invalid-input");
+  const { signal, deadlineMs } = input as { signal?: unknown; deadlineMs?: unknown };
+  // Structural so a signal from another realm is accepted.
+  if (signal !== undefined && (typeof signal !== "object" || signal === null || typeof (signal as AbortSignal).aborted !== "boolean" ||
+      typeof (signal as AbortSignal).addEventListener !== "function" || typeof (signal as AbortSignal).removeEventListener !== "function")) throw new HostError("invalid-input");
+  if (deadlineMs !== undefined && (typeof deadlineMs !== "number" || !Number.isSafeInteger(deadlineMs) || deadlineMs < 1 || deadlineMs > MAX_READINESS_DEADLINE_MS)) throw new HostError("invalid-input");
+  return { ...(signal !== undefined ? { signal: signal as AbortSignal } : {}), ...(deadlineMs !== undefined ? { deadlineMs: deadlineMs as number } : {}) };
+}
+
+/** Check local store readiness without network or inference; only the selected route identity is read.
+ * With a signal or deadline, the check settles promptly on abort (`AbortError`) or expiry (`TimeoutError`);
+ * a store read that cannot be cancelled is ignored once it settles, and readiness never writes. */
+export async function checkAuthReadiness(selection: HostAuthSelection, options?: HostReadinessOptions): Promise<HostAuthReadiness> {
+  validateAuthSelection(selection);
+  const { signal, deadlineMs } = readinessBounds(options);
+  if (!signal && deadlineMs === undefined) return readiness(selection, () => false);
+  return new Promise<HostAuthReadiness>((resolve, reject) => {
+    let settled = false, timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (settle: () => void): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      settle();
+    };
+    const onAbort = (): void => finish(() => reject(new DOMException("The readiness check was aborted.", "AbortError")));
+    if (signal?.aborted) { onAbort(); return; }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    if (deadlineMs !== undefined) timer = setTimeout(() => finish(() => reject(new DOMException("The readiness check timed out.", "TimeoutError"))), deadlineMs);
+    readiness(selection, () => settled).then(value => finish(() => resolve(value)), (error: unknown) => finish(() => reject(error)));
+  });
+}
+
+/** Read and parse the selected identity, stopping after the read once the caller has settled. */
+async function readiness(selection: HostAuthSelection, abandoned: () => boolean): Promise<HostAuthReadiness> {
   const valid = validateAuthSelection(selection);
   const credential = credentialReferenceForRoute(valid.route);
   const base = { route: valid.route, model: valid.model, credential, observedInference: "not-checked" as const };
@@ -255,6 +304,8 @@ export async function checkAuthReadiness(selection: HostAuthSelection): Promise<
   } catch {
     return { ...base, status: "store-unavailable", nextAction: storeUnavailableAction() };
   }
+  // An abandoned check never parses, loads an adapter or acts on the late value; its caller already settled.
+  if (abandoned()) throw new DOMException("The readiness check was aborted.", "AbortError");
   if (!raw?.trim()) return { ...base, status: "needs-login", nextAction: needsLoginAction(valid.route) };
   try {
     if (valid.route === "codex") {
@@ -272,20 +323,24 @@ export async function checkAuthReadiness(selection: HostAuthSelection): Promise<
   return { ...base, status: "configured-unverified", nextAction: "Run a route-bound request to observe inference; static configuration alone does not prove live access." };
 }
 
-/** Create only the selected subscription adapter; the unselected route and TUI never load. */
-export async function createAuthRouteModel(selection: HostAuthSelection): Promise<Model> {
-  return createAuthRouteModelForRun(selection);
+/** Create only the selected subscription adapter; the unselected route and TUI never load.
+ * `authorizeDispatch` runs before every physical inference send the model makes; omission keeps request bytes unchanged. */
+export async function createAuthRouteModel(selection: HostAuthSelection, options?: HostRouteModelOptions): Promise<Model> {
+  const valid = routeModelOptions(options);
+  return createAuthRouteModelForRun(selection, undefined, valid);
 }
 
 /** Bind an admitted run to its original route epoch and readiness participation. @internal */
-export async function createAuthRouteModelForRun(selection: HostAuthSelection, admitted?: CredentialLifecycleLease): Promise<Model> {
+export async function createAuthRouteModelForRun(selection: HostAuthSelection, admitted?: CredentialLifecycleLease, options: HostRouteModelOptions = {}): Promise<Model> {
   const valid = validateAuthSelection(selection);
   const store = admitted?.store ?? effectiveStore(selection);
   const { loadProviderModel } = await import("../model/loader.ts");
   const model = valid.route === "codex"
     ? await loadProviderModel({ provider: "openai", openaiAuth: "codex", model: valid.model, codexStore: store }, valid.fetch)
     : await loadProviderModel({ provider: "xai", xaiAuth: "grok", model: valid.model, grokStore: store }, valid.fetch);
-  return valid.lifecycle ? lifecycleModel(valid.lifecycle, valid.route, store, model, valid.credentialWriteGuard, admitted) : model;
+  const bound = valid.lifecycle ? lifecycleModel(valid.lifecycle, valid.route, store, model, valid.credentialWriteGuard, admitted) : model;
+  // Outermost, so a run's accounting attaches even when an inner layer refuses before sending.
+  return dispatchRouteModel(bound, valid.route, options.authorizeDispatch);
 }
 
 function httpStatusOf(error: unknown): number | undefined {
@@ -317,6 +372,10 @@ export function classifyAuthError(error: unknown, selection: HostAuthSelection):
   const base = { route: valid.route, model: valid.model, credential, observedInference: "not-checked" as const };
   const text = errorText(error);
   const status = httpStatusOf(error);
+  if (isDispatchRefused(error)) {
+    return { ...base, status: "dispatch-refused",
+      nextAction: "The embedding application refused this provider request before it was sent. No request left this process. Retry the turn after the application allows it." };
+  }
   if (isCredentialWriteRefused(error)) {
     // An uncertain cleanup never claims a clean fence: the late value may
     // still be visible, so the guidance says verify instead of retrying.
