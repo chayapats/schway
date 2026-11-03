@@ -19,7 +19,7 @@ import type {
   ModelTool,
   ThinkingLevel,
 } from "../model.ts";
-import { countingRenewalFetch, isRefusedRedirect, providerDispatch, redirectRefusal, redirectRefusedError } from "../dispatch.ts";
+import { countingRenewalFetch, isRefusedRedirect, providerDispatch, redirectRefusal, redirectRefusedError, reportedEffort, sentControls } from "../dispatch.ts";
 import {
   CODEX_SUBSCRIPTION_LABEL,
   codexSubscriptionIdentity,
@@ -1163,7 +1163,7 @@ export function createCodexSubscriptionModel(options: {
       if (dispatch) {
         // Authorize after every await that precedes the send, on the exact body; nothing awaits before fetch starts.
         throwIfAborted(request.signal, secrets);
-        dispatch.send("initial", serialized);
+        dispatch.send("initial", serialized, sentControls(body));
       }
       let response: Response;
       try {
@@ -1190,6 +1190,7 @@ export function createCodexSubscriptionModel(options: {
       for await (const event of readCodexStreamEvents(response, request.signal)) {
         if (event.type === "response.completed" || event.type === "response.incomplete" || event.type === "response.failed") {
           sawTerminal = true;
+          dispatch?.reported({ effort: reportedEffort(event.response) });
         }
         if (["response.completed", "response.incomplete", "response.failed"].includes(event.type) && event.response?.usage && typeof event.response.usage === "object") {
           yield { type: "usage", usage: responsesUsage(event.response.usage) };

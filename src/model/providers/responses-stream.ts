@@ -64,12 +64,15 @@ export async function* assembleResponsesStream(input: {
   stream: AsyncIterable<ResponseStreamEvent>;
   namespace: ResponsesNamespace;
   label: string;
+  /** Observe the terminal response object, for metadata it states such as the applied reasoning effort. */
+  onTerminal?: (response: unknown) => void;
 }): AsyncIterable<ModelStreamEvent> {
   const builder = createStreamBuilder(input.namespace);
   let sawTerminal = false;
   for await (const event of input.stream) {
     if (event.type === "response.completed" || event.type === "response.incomplete" || event.type === "response.failed") {
       sawTerminal = true;
+      input.onTerminal?.(event.response);
       const usage = event.response.usage;
       // Searches are counted only from items Schway kept; nothing is inferred when none arrived.
       const searches = builder.hosted().filter(kept => kept.item.type === "web_search_call").length;

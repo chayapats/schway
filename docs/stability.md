@@ -149,6 +149,34 @@ minor, additive host API change. Consumers that construct structural
 exhaustive `HostAuthStatusCode` handling must add `dispatch-refused`. See
 [host contracts](host.md#dispatch-authorization-and-provider-requests).
 
+The additive `schway.host.effort/v1` slice also remains under
+`schway.host.release/v2`. Listed models and the static route description report
+exact effort support from the adapter's own policy. Route models accept listed
+account evidence and an opt-in exact effort pin; a pin the adapter would refuse
+or drop rejects `invalid-input` before any request, and a conflicting request is
+refused by identity and never retried. `HostDispatch` and `HostRunAttemptUsage`
+report the effort requested, the exact control sent and, per attempt, what the
+response stated. Without the new options, request bytes and behavior are
+unchanged, and the CLI/TUI path is unchanged. This is a minor, additive host API
+change. Consumers that construct structural `HostDispatch`,
+`HostRunAttemptUsage`, `HostModelChoice`, `HostAuthDescription` or
+`HostCapabilities` values must add the new fields. See
+[host contracts](host.md#reasoning-effort-support-and-exact-pins).
+
+The additive `schway.host.output-cap/v1` slice also remains under
+`schway.host.release/v2`. Route descriptions and listed models state, without
+network for the description, whether the route sends a provider-enforced output
+cap: Codex does not, Grok does, with its default and maximum. Route models accept
+an exact `maxOutputTokens` and `requireOutputCap`; either rejects `invalid-input`
+before any request on a route that sends no cap, and out-of-range caps reject the
+same way. `HostDispatch` and `HostRunAttemptUsage` report the exact cap sent.
+Output caps are not monetary bounds, and subscription spend stays unknown.
+Without the new options, request bytes are unchanged, and the CLI/TUI path is
+unchanged. This is a minor, additive host API change. Consumers that construct
+structural `HostDispatch`, `HostRunAttemptUsage`, `HostModelChoice`,
+`HostAuthDescription` or `HostCapabilities` values must add the new fields. See
+[host contracts](host.md#output-caps).
+
 ## Core tool semantics
 
 The core tools are `read`, `write`, `edit`, `bash`, `web_fetch`, `grep`, `find`

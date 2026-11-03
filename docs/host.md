@@ -515,6 +515,99 @@ See `tests/host-dispatch-authorization.test.ts`,
 `tests/host-provider-requests.test.ts` and the packed consumer in
 `tests/host-release.test.ts`.
 
+## Reasoning effort support and exact pins
+
+`hostCapabilities().effortContract` advertises `schway.host.effort/v1`
+([#445](https://github.com/chayapats/schway/issues/445)), an additive slice
+under `release/v2`. `RELEASE_CONTRACT` is unchanged.
+
+```ts
+const listing = await listRouteModels({ route: "codex", store });
+const choice = listing.status === "listed" ? listing.models.find(model => model.id === "gpt-6-luna") : undefined;
+// choice.effort: { levels: ["off", "low", "high"], offSendable: true, default: "low", evidence: "account-catalog" }
+const model = await host.auth!.createModel({ catalogModel: choice, effort: { level: "high", mode: "exact" } });
+```
+
+**Read support before I/O.** `listRouteModels` returns each `HostModelChoice`
+with `effort` (`HostEffortSupport`), computed from the same policy and account
+evidence the adapter enforces: the accepted `levels`, whether `off` sends the
+provider's disable control (`offSendable`; otherwise `off` sends no control and
+the provider default applies), the provider-advertised `default` (null when the
+listing names none), and `evidence: "account-catalog"`. Listing reads the
+account catalog without inference, renewal or credential writes.
+`describeAuthRoute(selection).effort` is the static description, with
+`evidence: "none"`: without account evidence, subscription routes accept no
+explicit level, which is what the adapter enforces.
+
+**Use evidence and pin an effort.** Pass a listed choice to
+`createModel({ catalogModel: choice })`, and the adapter accepts that model's
+listed levels. Only a choice Schway listed for the same route and model counts;
+anything else rejects `invalid-input`. Add `effort: { level, mode: "exact" }`
+(`HostEffortPin`) to send exactly that level on every call the model makes,
+compaction summaries and auth-retry resends included. Codex and Grok send `none`
+for a disabling `off` and the level name otherwise. A pin the adapter would
+refuse, or drop (an `off` without a disable control), rejects `invalid-input` at
+`createModel`, before any request: the choice is decidable from Schway-issued
+evidence before any session work, like other option errors, so it needs no new
+auth status. A request whose own `thinking` differs from the pin is refused
+before any I/O with an error `isRouteControlRefused` recognizes by identity.
+Each body is also checked before the authorizer runs, so a body without the
+pinned control is refused the same way. These refusals are never retried, and
+`submit` reports their stable message. Pins are opt-in: without `catalogModel`
+and `effort`, request bytes and behavior are unchanged, and the CLI/TUI path is
+unchanged. `submitWithRoute` takes no effort options, because its model has no
+account evidence; use `createModel` with `submit` for pinned work.
+
+**Observe what was sent.** Every `HostDispatch` carries `effort`
+(`HostDispatchEffort`): `requested`, the level the call asked for after any pin
+(null when none), and `sent`, the exact `reasoning.effort` value in the body
+(null when the body carries no effort control). Each `HostRunAttemptUsage`
+carries `effort` (`HostAttemptEffort`) for its last route send, plus `reported`:
+the effort a terminal provider response states it applied, or null. `reported`
+is never copied from `sent`. Provider metadata states what the provider says it
+applied; it does not prove the model's internal computation. An attempt that
+sent nothing observable reports `effort: null`.
+
+See `tests/host-effort.test.ts`.
+
+## Output caps
+
+`hostCapabilities().outputCapContract` advertises `schway.host.output-cap/v1`
+([#446](https://github.com/chayapats/schway/issues/446)), an additive slice
+under `release/v2`. `RELEASE_CONTRACT` is unchanged.
+
+**Read support before I/O.** `describeAuthRoute(selection).outputCap` and each
+listed `HostModelChoice.outputCap` (`HostOutputCapSupport`) say, with no network
+or inference for the description, whether the route sends a provider-enforced
+output cap. Codex reports `{ enforced: false, default: null, maximum: null }`:
+its subscription endpoint rejects output caps, so the adapter never sends one.
+Grok reports `enforced: true` with `default` and `maximum` set to the cap the
+adapter sends when you set none, from Schway's model catalog. This uses the same
+listing surface as effort support, so one read covers both.
+
+**Set and require a cap.** `createModel({ maxOutputTokens })` sends exactly that
+cap on every call, compaction summaries and auth-retry resends included. It must
+be a positive safe integer at or below `maximum`. `requireOutputCap: true` makes
+every call carry a provider-enforced cap. On a route that sends no cap, either
+option rejects `invalid-input` at `createModel`, before any request; out-of-range
+values reject the same way. Each body is checked before the authorizer runs, and
+a body without the required cap is refused with an error `isRouteControlRefused`
+recognizes. Without these options, request bytes are unchanged, and the CLI/TUI
+path is unchanged. `submitWithRoute` takes no cap options; it keeps the route
+default, which `HostDispatch.outputCap` reports. Use the #444 authorizer for a
+call-count ceiling.
+
+**Observe what was sent.** Every `HostDispatch` carries `outputCap: { sent }`
+(`HostDispatchOutputCap`), the exact `max_output_tokens` value in the body, or
+null when the body carries none, as on Codex. Each `HostRunAttemptUsage` carries
+the same for its last route send, or null when it sent nothing observable.
+
+Output-token caps bound how many tokens the provider may return; they are not
+monetary bounds. Subscription spend stays unknown to Schway: it never estimates
+cost, and an enforced cap does not prove a charge.
+
+See `tests/host-output-cap.test.ts`.
+
 ## Managed session data: retire and delete owned native sessions
 
 `schway.host.managed-session-data/v1` narrows the supported native-data lifecycle for Jit correction, forget and delete. The application retires a context and removes owned native artifacts after active work settles, without private imports or rewriting conversation records.
@@ -869,7 +962,8 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `beginDeviceSignIn` | Start bounded selected-route device approval without exposing tokens. |
 | `checkAuthReadiness` | Check selected-route store readiness without network or inference, optionally bounded. |
 | `listRouteModels` | List a bounded selected-account catalog without inference or credential writes. |
-| `HostModelChoice` | Selectable model with recommendation and observed context limit. |
+| `HostModelChoice` | Selectable model with recommendation, observed context limit, effort and output-cap support. |
+| `HostOutputCapSupport` | Whether a route sends an enforced output cap, with its default and maximum. |
 | `HostRouteModels` | Listed models or safe route failure with `containsNoSecrets`. |
 | `classifyAuthError` | Map a route-bound failure to a safe status without secrets. |
 | `containsNoSecrets` | Test helper confirming sentinels are absent from returned data. |
@@ -922,9 +1016,14 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostCredentialReference` | Opaque credential account and label. |
 | `HostCredentialStore` | Secure-store boundary for a selected route. |
 | `HostCredentialWriteGuard` | Embedding-application fence for credential-store writes. |
+| `HostAttemptEffort` | Effort an attempt requested and sent, and what the response stated. |
 | `HostDeletedArtifact` | Owned artifact inventory for deletion reporting. |
 | `HostDispatch` | Frozen credential-free record of one physical inference send. |
 | `HostDispatchAuthorizer` | Synchronous veto called immediately before each physical send. |
+| `HostDispatchEffort` | Effort requested and the exact effort control one body carries. |
+| `HostDispatchOutputCap` | Exact output cap one body carries. |
+| `HostEffortPin` | Exact effort a route model sends on every call. |
+| `HostEffortSupport` | Accepted effort levels, `off` support and default from the adapter's policy. |
 | `HostedTool` | Native closed hosted-lookup union; host sends none. |
 | `HostDeviceSignIn` | Ephemeral approval handle with shared polling and cancellation. |
 | `HostDeviceSignInFailure` | Secret-free failure categories and cleanup uncertainty. |
@@ -963,6 +1062,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `isCleanupUncertain` | Test whether an error marks an unverified credential cleanup. |
 | `isCredentialWriteRefused` | Test whether an error is a fence refusal, not a store failure. |
 | `isDispatchRefused` | Test whether an error is a dispatch-authorizer refusal. |
+| `isRouteControlRefused` | Test whether an error is a refused pinned effort or required cap. |
 | `JsonSchema` | Provider-independent tool input schema. |
 | `localExecutionBackend` | Run core tools in this process with CLI behavior. |
 | `MAX_SNAPSHOT_ARTIFACT_BYTES` | Per-artifact byte bound for snapshots. |

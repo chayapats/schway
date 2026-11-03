@@ -359,7 +359,7 @@ test("route 401 whose body echoes redirect wording still refreshes and resends",
       ? Response.json({ error: { message: "edge proxy: unexpected redirect from origin" } }, { status: 401 })
       : new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } }),
   });
-  const events = await collect(model.stream(sampleRequest(), withProviderDispatch(undefined, { send: kind => { sends.push(kind); }, renewal: () => {} })));
+  const events = await collect(model.stream(sampleRequest(), withProviderDispatch(undefined, { send: kind => { sends.push(kind); }, renewal: () => {}, reported: () => {} })));
   expect(events.some(event => event.type === "message_complete")).toBe(true);
   expect(refreshCalls).toBe(1);
   expect(sends).toEqual(["initial", "auth-retry"]);

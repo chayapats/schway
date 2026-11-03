@@ -10,10 +10,33 @@ export type ProviderSendKind = "initial" | "auth-retry";
  * @internal Travels beside `ModelCallOptions` under a private symbol; never public API.
  */
 export interface ProviderDispatch {
-  /** Authorize and record one inference send; throws a dispatch refusal when it must not leave. */
-  send(kind: ProviderSendKind, body: unknown): void;
+  /** Authorize and record one inference send with the exact controls its body carries; throws a refusal when it must not leave. */
+  send(kind: ProviderSendKind, body: unknown, controls: ProviderSendControls): void;
   /** Record one credential renewal request this stream's caller started. */
   renewal(): void;
+  /** Record the effort a terminal provider response states it applied; null when the response names none. */
+  reported(applied: { readonly effort: string | null }): void;
+}
+
+/** Exact effort and output-cap controls one request body carries; null where the body carries none. @internal */
+export interface ProviderSendControls {
+  readonly effort: string | null;
+  readonly outputCap: number | null;
+}
+
+/** Read the controls from the Responses body object about to be serialized, never from a separate guess. @internal */
+export function sentControls(body: Record<string, unknown>): ProviderSendControls {
+  const reasoning = body["reasoning"];
+  const effort = typeof reasoning === "object" && reasoning !== null ? (reasoning as { effort?: unknown }).effort : undefined;
+  const cap = body["max_output_tokens"];
+  return { effort: typeof effort === "string" ? effort : null, outputCap: typeof cap === "number" && Number.isSafeInteger(cap) ? cap : null };
+}
+
+/** Effort a terminal Responses object states it applied; null when it names none, never inferred from the request. @internal */
+export function reportedEffort(response: unknown): string | null {
+  const reasoning = typeof response === "object" && response !== null ? (response as { reasoning?: unknown }).reasoning : undefined;
+  const effort = typeof reasoning === "object" && reasoning !== null ? (reasoning as { effort?: unknown }).effort : undefined;
+  return typeof effort === "string" ? effort : null;
 }
 
 const PROVIDER_DISPATCH = Symbol("schway.providerDispatch");
@@ -65,6 +88,26 @@ function causeChain(error: unknown): unknown[] {
     current = (current as { cause?: unknown }).cause;
   }
   return chain;
+}
+
+// Schway's refusals of calls whose pinned effort or required output cap it could not send exactly.
+const controlRefusals = new WeakSet<Error>();
+
+/** Credential-free refusal of one call whose pinned effort or required output cap could not be sent exactly. @internal */
+export function routeControlRefusedError(message: string): Error {
+  const error = new Error(message);
+  controlRefusals.add(error);
+  return error;
+}
+
+/** True only for a route-control refusal error object Schway threw, not its `cause` wrappers; text never matches. */
+export function isRouteControlRefused(error: unknown): error is Error {
+  return error instanceof Error && controlRefusals.has(error);
+}
+
+/** True when the error or an error it wraps as `cause` is a dispatch or route-control refusal; neither is ever retried. @internal */
+export function hasPolicyRefusal(error: unknown): boolean {
+  return causeChain(error).some(item => isDispatchRefused(item) || isRouteControlRefused(item));
 }
 
 /** True when the error or an error it wraps as `cause` is a refusal Schway threw; text never matches. @internal */

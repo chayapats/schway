@@ -228,6 +228,11 @@ export interface ExecutionStat {
 export function hashSnapshotBytes(bytes: Uint8Array): string;
 
 // @public
+export interface HostAttemptEffort extends HostDispatchEffort {
+    readonly reported: string | null;
+}
+
+// @public
 export interface HostAuthBinding {
     checkReadiness(options?: HostReadinessOptions): Promise<HostAuthReadiness>;
     createModel(options?: HostRouteModelOptions): Promise<Model>;
@@ -243,8 +248,10 @@ export interface HostAuthBinding {
 export interface HostAuthDescription {
     // (undocumented)
     readonly credential: HostCredentialReference;
+    readonly effort: HostEffortSupport;
     // (undocumented)
     readonly model: string;
+    readonly outputCap: HostOutputCapSupport;
     // (undocumented)
     readonly route: HostAuthRoute;
     // (undocumented)
@@ -328,6 +335,7 @@ export interface HostCapabilities {
     // (undocumented)
     readonly deviceSignInContract: "schway.host.device-sign-in/v1";
     readonly dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1";
+    readonly effortContract: "schway.host.effort/v1";
     // (undocumented)
     readonly extensionDiscovery: "disabled-only";
     // (undocumented)
@@ -342,6 +350,7 @@ export interface HostCapabilities {
     readonly modelCatalog: "schway.host.model-catalog/v1";
     // (undocumented)
     readonly observedInference: "not-checked";
+    readonly outputCapContract: "schway.host.output-cap/v1";
     readonly providerRequestsContract: "schway.host.provider-requests/v1";
     // (undocumented)
     readonly releaseContract: "schway.host.release/v2";
@@ -480,8 +489,10 @@ export type HostDeviceSignInStart = HostDeviceSignIn | HostDeviceSignInFailure |
 export interface HostDispatch {
     readonly bodyBytes: number;
     readonly bodySha256: string;
+    readonly effort: HostDispatchEffort;
     readonly kind: "initial" | "auth-retry";
     readonly model: string;
+    readonly outputCap: HostDispatchOutputCap;
     readonly provider: string;
     readonly route: HostAuthRoute;
     readonly sequence: number;
@@ -491,7 +502,32 @@ export interface HostDispatch {
 export type HostDispatchAuthorizer = (dispatch: HostDispatch) => void;
 
 // @public
+export interface HostDispatchEffort {
+    readonly requested: ThinkingLevel | null;
+    readonly sent: string | null;
+}
+
+// @public
+export interface HostDispatchOutputCap {
+    readonly sent: number | null;
+}
+
+// @public
 export type HostedTool = "web_search";
+
+// @public
+export interface HostEffortPin {
+    readonly level: ThinkingLevel;
+    readonly mode: "exact";
+}
+
+// @public
+export interface HostEffortSupport {
+    readonly default: ThinkingLevel | null;
+    readonly evidence: "account-catalog" | "none";
+    readonly levels: readonly ThinkingLevel[];
+    readonly offSendable: boolean;
+}
 
 // @public
 export interface HostEntryReference {
@@ -593,8 +629,10 @@ export interface HostLimits {
 export interface HostModelChoice {
     // (undocumented)
     readonly contextWindow?: number;
+    readonly effort: HostEffortSupport;
     // (undocumented)
     readonly id: string;
+    readonly outputCap: HostOutputCapSupport;
     // (undocumented)
     readonly recommended: boolean;
 }
@@ -635,6 +673,13 @@ export interface HostOptions {
     };
     // (undocumented)
     workspaceRoot: string;
+}
+
+// @public
+export interface HostOutputCapSupport {
+    readonly default: number | null;
+    readonly enforced: boolean;
+    readonly maximum: number | null;
 }
 
 // @public
@@ -690,6 +735,10 @@ export interface HostReadinessOptions {
 // @public
 export interface HostRouteModelOptions {
     readonly authorizeDispatch?: HostDispatchAuthorizer;
+    readonly catalogModel?: HostModelChoice;
+    readonly effort?: HostEffortPin;
+    readonly maxOutputTokens?: number;
+    readonly requireOutputCap?: boolean;
 }
 
 // @public
@@ -714,6 +763,8 @@ export interface HostRouteRunOptions extends HostRunOptions {
 export interface HostRunAttemptUsage {
     // (undocumented)
     readonly complete: boolean;
+    readonly effort: HostAttemptEffort | null;
+    readonly outputCap: HostDispatchOutputCap | null;
     // (undocumented)
     readonly phase: "turn" | "compaction";
     // (undocumented)
@@ -951,6 +1002,9 @@ export function isCredentialWriteRefused(error: unknown): error is Error;
 
 // @public
 export function isDispatchRefused(error: unknown): error is Error;
+
+// @public
+export function isRouteControlRefused(error: unknown): error is Error;
 
 // @public
 export type JsonSchema = Record<string, unknown>;

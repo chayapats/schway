@@ -91,7 +91,9 @@ test("grok 401 refresh resend authorizes initial then auth-retry with exact body
     expect(sent).toHaveLength(2);
     expect(seen.map(dispatch => dispatch.bodySha256)).toEqual(sent.map(entry => sha256(entry.body)));
     expect(seen.map(dispatch => dispatch.bodyBytes)).toEqual(sent.map(entry => Buffer.byteLength(entry.body)));
-    expect(Object.keys(seen[0]!).sort()).toEqual(["bodyBytes", "bodySha256", "kind", "model", "provider", "route", "sequence"]);
+    expect(Object.keys(seen[0]!).sort()).toEqual(["bodyBytes", "bodySha256", "effort", "kind", "model", "outputCap", "provider", "route", "sequence"]);
+    // No pin and no requested thinking: nothing requested and no effort control in either body.
+    expect(seen.map(dispatch => dispatch.effort)).toEqual([{ requested: null, sent: null }, { requested: null, sent: null }]);
     expect(seen[0]).toMatchObject({ route: "grok", provider: "xai", model: "grok-4.7" });
     expect(Object.isFrozen(seen[0])).toBe(true);
     expect(run.usage.providerRequests).toEqual({ initialSends: 1, authRetrySends: 1, renewalRequests: 1 });
@@ -542,5 +544,32 @@ test("provider text echoing the redirect wording never gets the redirect guidanc
     const selection = { route: "codex" as const, model: "gpt-5.4" };
     expect(classifyAuthError(new Error("The ChatGPT subscription answered with an HTTP redirect."), selection).nextAction).not.toContain("redirect");
     await session.close(); await host.close();
+  });
+});
+
+test("a deadline that lands after a refused redirect keeps the redirect guidance", async () => {
+  await withTempDir(async dir => {
+    let posts = 0;
+    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch() { posts++; return new Response(null, { status: 307, headers: { Location: "/elsewhere" } }); } });
+    try {
+      const store = fakeCredentialStore(); await seed(store, "codex");
+      const fetch = ((_input: string | URL | Request, init?: RequestInit) => globalThis.fetch(new URL("/responses", server.url), init)) as never;
+      const host = await createHost(await options(dir, { route: "codex", model: "gpt-5.4", store, fetch }));
+      const session = await host.createSession();
+      // An embedder clock fires the deadline once the failed attempt is reported, before the run settles.
+      const fire = Promise.withResolvers<void>();
+      const clock = { now: () => Date.now(), sleep: (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
+        if (ms < 60_000) { resolve(); return; }
+        void fire.promise.then(() => resolve());
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      }) };
+      const run = await session.submitWithRoute({ text: "redirect at deadline" }, { clock, onProgress: event => { if (event.type === "usage") fire.resolve(); } });
+      expect(run.outcome).toBe("limit_exceeded");
+      expect(posts).toBe(1);
+      if (!("auth" in run)) throw new Error("expected auth detail");
+      expect(run.auth.status).toBe("integration-unavailable");
+      expect(run.auth.nextAction).toBe("The ChatGPT subscription answered with an HTTP redirect, which route requests never follow. Retry later; Schway never falls back to API-key billing.");
+      await session.close(); await host.close();
+    } finally { server.stop(true); }
   });
 });

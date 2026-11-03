@@ -7,6 +7,7 @@ import {
   createWebSearchTool,
   type SearchProvider,
   hostCapabilities,
+  describeAuthRoute,
   isDispatchRefused,
   listRouteModels,
   credentialReferenceForRoute,
@@ -544,6 +545,7 @@ if (input.action === "capabilities") {
       renewals++;
       return Response.json({ access_token: "dispatch-new-token", refresh_token: "dispatch-refresh", expires_in: 3600 });
     }
+    if (init?.method === "GET") return Response.json({ data: [{ id: "grok-4.7", supported_reasoning_levels: ["low", "high"], default_reasoning_effort: "high" }] });
     bodies.push(typeof init?.body === "string" ? init.body : "");
     if (rejectNext) { rejectNext = false; return new Response("expired", { status: 401 }); }
     return grokOk();
@@ -568,6 +570,7 @@ if (input.action === "capabilities") {
     if (dispatch.kind === "auth-retry") throw new Error("budget exhausted");
   } });
   if (!("auth" in refusedRun)) throw new Error("Expected refusal detail");
+  const refusedInferences = bodies.length - before;
 
   const model = await host.auth!.createModel({ authorizeDispatch: () => { throw new Error("revoked"); } });
   let directRefused = false;
@@ -586,13 +589,40 @@ if (input.action === "capabilities") {
   } as unknown as HostOptions);
   let timedOut = "resolved";
   try { await blocked.auth!.checkReadiness({ deadlineMs: 20 }); } catch (error) { timedOut = (error as Error).name; }
+
+  // Effort: read support from the listing, pin an exact level, and observe it per send and attempt.
+  const listing = await listRouteModels({ route: "grok", store, fetch });
+  const choice = listing.status === "listed" ? listing.models.find(model => model.id === "grok-4.7") : undefined;
+  if (!choice) throw new Error("Expected a listed grok model");
+  const pinnedSeen: HostDispatch[] = [];
+  const pinned = await host.auth!.createModel({ catalogModel: choice, effort: { level: "low", mode: "exact" }, authorizeDispatch: dispatch => { pinnedSeen.push(dispatch); } });
+  const pinnedRun = await session.submit({ text: "pinned probe" }, pinned);
+  if (pinnedRun.outcome !== "completed") throw new Error(`Expected pinned completion, got ${pinnedRun.outcome}`);
+  let invalidPin = "accepted";
+  try { await host.auth!.createModel({ catalogModel: choice, effort: { level: "off", mode: "exact" } }); }
+  catch (error) { invalidPin = (error as { code?: string }).code ?? "unknown"; }
+  const lastBody = JSON.parse(bodies.at(-1) ?? "{}") as { reasoning?: { effort?: string } };
+
+  // Output caps: Codex declares none; Grok sends exactly the requested cap and rejects one above its maximum.
+  const cappedSeen: HostDispatch[] = [];
+  const capped = await host.auth!.createModel({ maxOutputTokens: 2048, requireOutputCap: true, authorizeDispatch: dispatch => { cappedSeen.push(dispatch); } });
+  const cappedRun = await session.submit({ text: "capped probe" }, capped);
+  if (cappedRun.outcome !== "completed") throw new Error(`Expected capped completion, got ${cappedRun.outcome}`);
+  const cappedBody = JSON.parse(bodies.at(-1) ?? "{}") as { max_output_tokens?: number };
+  let invalidCap = "accepted";
+  try { await host.auth!.createModel({ maxOutputTokens: choice.outputCap.maximum! + 1 }); }
+  catch (error) { invalidCap = (error as { code?: string }).code ?? "unknown"; }
   const result = {
     caps: { dispatch: hostCapabilities().dispatchAuthorizationContract, providerRequests: hostCapabilities().providerRequestsContract },
     kinds: seen.map(dispatch => `${dispatch.kind}:${dispatch.sequence}`), hashesMatch,
     completed: completed.usage.providerRequests,
-    refused: { status: refusedRun.auth.status, inferences: bodies.length - before, providerRequests: refusedRun.usage.providerRequests },
+    refused: { status: refusedRun.auth.status, inferences: refusedInferences, providerRequests: refusedRun.usage.providerRequests },
     directRefused, renewals,
     readiness: { aborted: await readinessName({ signal: AbortSignal.abort() }), timedOut },
+    effort: { contract: hostCapabilities().effortContract, support: choice.effort, dispatch: pinnedSeen.map(dispatch => dispatch.effort),
+      attempts: pinnedRun.usage.attempts.map(attempt => attempt.effort), body: lastBody.reasoning?.effort ?? null, invalidPin },
+    outputCap: { contract: hostCapabilities().outputCapContract, codex: describeAuthRoute({ route: "codex", model: "gpt-5.4" }).outputCap, grok: choice.outputCap,
+      dispatch: cappedSeen.map(dispatch => dispatch.outputCap), attempts: cappedRun.usage.attempts.map(attempt => attempt.outputCap), body: cappedBody.max_output_tokens ?? null, invalidCap },
   };
   const text = JSON.stringify([result, seen, completed, refusedRun]);
   for (const secret of ["dispatch-old-token", "dispatch-new-token", "dispatch-refresh", "dispatch-bait-key"]) if (text.includes(secret)) throw new Error("Secret leaked into dispatch evidence");

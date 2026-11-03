@@ -29,8 +29,10 @@ export type {
 } from "./auth-routes.ts";
 export { checkAuthReadiness, classifyAuthError, containsNoSecrets, createAuthRouteModel, credentialReferenceForRoute, describeAuthRoute, isCleanupUncertain, isCredentialWriteRefused } from "./auth-routes.ts";
 /** Synchronous per-send authorization with credential-free dispatch records and a stable refusal identity. */
-export type { HostDispatch, HostDispatchAuthorizer, HostRouteModelOptions } from "./dispatch.ts";
-export { isDispatchRefused } from "./dispatch.ts";
+export type { HostAttemptEffort, HostDispatch, HostDispatchAuthorizer, HostDispatchEffort, HostDispatchOutputCap, HostRouteModelOptions } from "./dispatch.ts";
+export { isDispatchRefused, isRouteControlRefused } from "./dispatch.ts";
+/** Exact effort support from the adapter's own policy, and exact effort pins for route models. */
+export type { HostEffortPin, HostEffortSupport, HostOutputCapSupport } from "./route-capabilities.ts";
 /** Bounded device approval with opaque credential writes and secret-free terminal outcomes. */
 export type { HostDeviceSignInOptions, HostDeviceSignIn, HostDeviceSignInFailure, HostDeviceSignInOutcome, HostDeviceSignInStart } from "./device-sign-in.ts";
 export { beginDeviceSignIn } from "./device-sign-in.ts";
@@ -106,6 +108,10 @@ export interface HostCapabilities {
   readonly dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1";
   /** Exact per-run provider-request counts on terminal results and abortable local readiness. */
   readonly providerRequestsContract: "schway.host.provider-requests/v1";
+  /** Exact effort support before I/O, opt-in exact effort pins, and the effort requested, sent and reported per send and attempt. */
+  readonly effortContract: "schway.host.effort/v1";
+  /** Static output-cap support per route and model, opt-in exact or required caps, and the cap sent per send and attempt. */
+  readonly outputCapContract: "schway.host.output-cap/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -191,6 +197,10 @@ export interface HostRunAttemptUsage {
   readonly phase: "turn" | "compaction";
   readonly usage: ModelUsage;
   readonly complete: boolean;
+  /** Effort this attempt's last route send requested and carried, and what the response stated; null when it sent nothing observable. */
+  readonly effort: import("./dispatch.ts").HostAttemptEffort | null;
+  /** Output cap this attempt's last route send carried; null when it sent nothing observable. */
+  readonly outputCap: import("./dispatch.ts").HostDispatchOutputCap | null;
 }
 
 /** Exact physical provider requests one run started; summing runs never double-counts a shared renewal. */
@@ -331,6 +341,8 @@ const capabilities: HostCapabilities = Object.freeze({
   imageInputRoutes: imageRouteCapabilities([]),
   dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1",
   providerRequestsContract: "schway.host.provider-requests/v1",
+  effortContract: "schway.host.effort/v1",
+  outputCapContract: "schway.host.output-cap/v1",
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */
