@@ -1,5 +1,5 @@
 import { DeviceFlowError, deviceFlowExpiresAt, sleepDeviceFlow, validateDeviceVerificationUri, withinDeviceFlow, type DeviceFlowAuthorization } from "../../auth/device-flow.ts";
-import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, type CredentialStore } from "../../auth/store.ts";
+import { grokSubscriptionIdentity, credentialStoreError, preserveRefusal, replaceCredential, type CredentialStore } from "../../auth/store.ts";
 import { MISSING_GROK_SUBSCRIPTION } from "../../auth/credentials.ts";
 import { boundedCatalogFetch, readModelCatalogBody, fetchProviderModelListResult, fetchProviderModelList, requireXaiModels, type ListedModel, type ModelListResult } from "../model-list.ts";
 import { GROK_CHALLENGE_ERROR, GROK_QUOTA_ERROR } from "../grok-errors.ts";
@@ -242,10 +242,14 @@ export async function loginWithDeviceFlow(input: { signal: AbortSignal; deps: Gr
 
 /** Read only Schway's dedicated Grok subscription identity, preserving secure-store failures. */
 export async function loadSubscriptionTokens(store: CredentialStore, onCredential?: (raw: string) => void): Promise<GrokTokens | null> {
+  return (await readSubscriptionLogin(store, onCredential)).tokens;
+}
+/** Read the stored login with its exact stored value, which a renewal later replaces only if it is unchanged. */
+async function readSubscriptionLogin(store: CredentialStore, onCredential?: (raw: string) => void): Promise<{ raw: string; tokens: GrokTokens } | { raw: null; tokens: null }> {
   let raw: string | null;
   try { raw = await store.get(grokSubscriptionIdentity()); } catch { throw new Error(credentialStoreError("read")); }
   if (raw) onCredential?.(raw);
-  return raw?.trim() ? parseSubscriptionTokens(raw) : null;
+  return raw?.trim() ? { raw, tokens: parseSubscriptionTokens(raw) } : { raw: null, tokens: null };
 }
 type RefreshCaller = { onCredential?: (raw: string) => void };
 type CredentialLifecycle = {
@@ -312,7 +316,7 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
     const generation = state.generation;
     // Memoized route selection is reusable only before an in-process mutation or renewal.
     const currentStore = input.lifecycleStore && (generation !== 0 || state.refresh) ? owner : input.store;
-    const tokens = await raceAbort(loadSubscriptionTokens(currentStore, input.onCredential), signal);
+    const { tokens, raw: startedFrom } = await raceAbort(readSubscriptionLogin(currentStore, input.onCredential), signal);
     aborted(signal);
     if (generation !== state.generation) return getToken();
     if (!tokens) throw new Error(MISSING_GROK_SUBSCRIPTION);
@@ -334,17 +338,22 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
         }
         const merged = { ...renewed, refreshToken: renewed.refreshToken ?? refreshToken };
         for (const interested of state.callers) interested.onCredential?.(JSON.stringify(merged));
-        await serializeCredentialWrite(state, async () => {
+        const stored = await serializeCredentialWrite(state, async () => {
           controller.signal.throwIfAborted();
           if (state.generation !== generation) throw new Error(grokRevokedSessionError());
-          // A credential replaced since this renewal read it wins, whichever store object or process wrote it.
-          if (!await grokCredentialUnchanged(owner, tokens)) throw new Error(grokRevokedSessionError());
-          // A discovery wrapper belongs to one deadline; only the original store can serve all callers.
-          await writeTokens(owner, merged);
+          // Written only over the login this renewal started from, in the store's critical section where it has one,
+          // so a sign-in or another process's write that landed meanwhile wins. A discovery wrapper belongs to one
+          // deadline; only the original store can serve all callers.
+          let wrote: boolean;
+          try { wrote = await replaceCredential(owner, grokSubscriptionIdentity(), startedFrom!, JSON.stringify(merged)); }
+          catch (error) { throw preserveRefusal("save", error); }
+          if (!wrote) return loginStoredMeanwhile(owner, merged, input.now);
           if (state.generation !== generation) throw new Error(grokRevokedSessionError());
           state.generation++;
+          return merged;
         });
-        return merged;
+        if (stored !== merged) for (const interested of state.callers) interested.onCredential?.(JSON.stringify(stored));
+        return stored;
       })().finally(() => {
         clearTimeout(timer);
         if (state.refresh?.promise === promise) state.refresh = undefined;
@@ -355,9 +364,8 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
       state.refresh = refresh;
       // Creating the renewal sent its request: count it for this caller, with the renewal's settlement, and keep
       // the process from exiting before a rotated token is stored.
-      const settled = promise.then(() => {}, () => {});
-      trackSentRenewal(settled);
-      onRenewal?.(settled);
+      trackSentRenewal(promise.then(() => true, () => false));
+      onRenewal?.(promise.then(() => {}, () => {}));
     }
     const renewed = await raceAbort(refresh.promise, signal);
     aborted(signal);
@@ -368,14 +376,16 @@ async function resolveSubscriptionToken(input: SubscriptionTokenInput, signal?: 
   finally { signal?.removeEventListener("abort", detach); detach(); }
 }
 
-/** True when the stored login is still the one `read` holds; an unreadable value counts as replaced. */
-async function grokCredentialUnchanged(store: CredentialStore, read: GrokTokens): Promise<boolean> {
-  let raw: string | null;
-  try { raw = await store.get(grokSubscriptionIdentity()); }
-  catch (error) { throw preserveRefusal("save", error); }
-  let current: GrokTokens | undefined;
-  try { current = raw?.trim() ? parseSubscriptionTokens(raw) : undefined; } catch { return false; }
-  return current?.accessToken === read.accessToken && current.refreshToken === read.refreshToken;
+/** The login another writer stored while a renewal was in flight: the same rotated pair is that renewal's result, a
+ * different unexpired login is used instead, and anything else fails as a missing or revoked login. */
+async function loginStoredMeanwhile(store: CredentialStore, renewed: GrokTokens, now?: () => number): Promise<GrokTokens> {
+  let current: GrokTokens | null;
+  try { current = (await readSubscriptionLogin(store)).tokens; }
+  catch { throw new Error(grokRevokedSessionError()); }
+  if (!current) throw new Error(MISSING_GROK_SUBSCRIPTION);
+  if (current.accessToken === renewed.accessToken && current.refreshToken === renewed.refreshToken) return renewed;
+  if (!subscriptionAccessExpired(current, (now ?? Date.now)())) return current;
+  throw new Error(grokRevokedSessionError());
 }
 
 /** Share renewal per store while fencing refresh writes against logout and replacement sign-ins. */

@@ -958,13 +958,23 @@ work with `authorizeDispatch`, abort signals and run cancellation instead.
 During shutdown, keep the guard permissive until in-flight renewals settle; the
 lifecycle's `close()` reports `busy` until they have.
 
+A renewal writes only over the login it started from. With the OS store,
+directly or through a lifecycle, that comparison and the write share one
+critical section of the cross-process credential lock, after the write guards
+run, so a sign-in or another process's write that lands meanwhile is never
+overwritten. A caller waiting on that renewal then uses the newer login, or the
+same rotated pair, instead of failing. A `HostCredentialStore` without
+`compareAndSet` gets a read and then a set, and a writer can still land between
+the two.
+
 The embedding application owns the lifecycle handle. Hosts borrow it; closing a
 host never disposes the owner or logs out. An admitted `submitWithRoute` pins
 its owner from readiness through terminal settlement, including tools and retry
 waits. Direct `createAuthRouteModel` streams and in-flight credential writes
 also pin it, and so does a renewal request that a stopped run, stream or renewal
 sent, until that request settles: at most the refresher's 30-second timeout plus
-the store write, even when the transport ignores cancellation. Logout releases
+the credential-store read, lock wait and write, even when the transport ignores
+cancellation. Logout releases
 that hold at once. When `close()` reports `busy` only because such a request is
 settling, retry it or wait, within that bound. Exiting the process before the
 request settles loses the rotated refresh token, and the next run must sign in

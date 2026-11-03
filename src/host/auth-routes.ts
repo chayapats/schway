@@ -1,6 +1,6 @@
 import type { Model } from "../model/model.ts";
 import { credentialLifecycleStore, lifecycleModel, validateCredentialLifecycle, type CredentialLifecycleLease, type HostCredentialLifecycle } from "./credential-lifecycle.ts";
-import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, findCredentialLockError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
+import { codexSubscriptionIdentity, grokSubscriptionIdentity, createNativeCredentialStore, credentialWriteRefusedError, findCredentialLockError, isCleanupUncertain, isCredentialWriteRefused, markCleanupUncertain, replaceCredential, type CredentialIdentity, type CredentialStore } from "../auth/store.ts";
 import { dispatchRouteModel, routeModelOptions, type HostRouteModelOptions, type RouteControls } from "./dispatch.ts";
 import { catalogCapability, effortSupport, exactEffort, outputCapSupport, routeOutputCap, type HostEffortSupport, type HostOutputCapSupport } from "./route-capabilities.ts";
 import { hasDispatchRefusal, hasRedirectRefusal, routeControlRefusal } from "../model/dispatch.ts";
@@ -33,6 +33,13 @@ export interface HostCredentialStore {
    * falls back to a serialized read-then-delete otherwise.
    */
   compareAndDelete?(identity: HostCredentialReference, expectedValue: string): Promise<boolean>;
+  /**
+   * Atomically replace exactly the expected value, reporting whether it wrote;
+   * returns false without writing on a mismatch. Optional: without it, a
+   * renewal reads, compares and then sets, which another writer can overtake
+   * between the read and the write.
+   */
+  compareAndSet?(identity: HostCredentialReference, expectedValue: string, value: string): Promise<boolean>;
 }
 
 /** Fetch override used by deterministic protocol fixtures; production uses global fetch. */
@@ -202,38 +209,43 @@ export function effectiveStore(selection: HostAuthSelection): CredentialStore {
       throw credentialWriteRefusedError(error);
     }
   };
+  // The fence runs before every write and again after it; a refusal after the write removes exactly that value.
+  const fenced = async (identity: CredentialIdentity, value: string, write: () => Promise<boolean>): Promise<boolean> => {
+    await runGuard(identity);
+    if (!await write()) return false;
+    // Final visibility is generation-fenced: a stop that lands while the
+    // backend write is in flight makes the post-write guard fail, and
+    // exactly the late value is removed. Prefers the store's atomic
+    // compare-and-delete; without it, falls back to a serialized
+    // read-then-delete inside the caller's lifecycle chain (same
+    // guarantee against fenced writers, best effort against unfenced
+    // cross-process writers). A concurrent legitimate write is never
+    // touched. Reads stay unfenced; only persisted writes are fenced.
+    // Cleanup backend failures propagate distinctly: the refusal still
+    // terminalizes, but marked uncertain instead of claiming the value
+    // is gone.
+    try {
+      await runGuard(identity);
+    } catch (refusal) {
+      try {
+        if (typeof base.compareAndDelete === "function") {
+          await base.compareAndDelete(identity, value);
+        } else {
+          const current = await base.get(identity);
+          if (current === value) await base.delete(identity);
+        }
+      } catch (cleanupError) {
+        throw markCleanupUncertain(refusal, cleanupError);
+      }
+      throw refusal;
+    }
+    return true;
+  };
   const store: CredentialStore = {
     get: identity => base.get(identity),
-    set: async (identity, value) => {
-      await runGuard(identity);
-      await base.set(identity, value);
-      // Final visibility is generation-fenced: a stop that lands while the
-      // backend write is in flight makes the post-write guard fail, and
-      // exactly the late value is removed. Prefers the store's atomic
-      // compare-and-delete; without it, falls back to a serialized
-      // read-then-delete inside the caller's lifecycle chain (same
-      // guarantee against fenced writers, best effort against unfenced
-      // cross-process writers). A concurrent legitimate write is never
-      // touched. Reads stay unfenced; only persisted writes are fenced.
-      // Cleanup backend failures propagate distinctly: the refusal still
-      // terminalizes, but marked uncertain instead of claiming the value
-      // is gone.
-      try {
-        await runGuard(identity);
-      } catch (refusal) {
-        try {
-          if (typeof base.compareAndDelete === "function") {
-            await base.compareAndDelete(identity, value);
-          } else {
-            const current = await base.get(identity);
-            if (current === value) await base.delete(identity);
-          }
-        } catch (cleanupError) {
-          throw markCleanupUncertain(refusal, cleanupError);
-        }
-        throw refusal;
-      }
-    },
+    set: async (identity, value) => { await fenced(identity, value, async () => { await base.set(identity, value); return true; }); },
+    // The guard runs before the compare and the write, which then share the base store's critical section.
+    compareAndSet: (identity, expectedValue, value) => fenced(identity, value, () => replaceCredential(base, identity, expectedValue, value)),
     delete: async identity => {
       await runGuard(identity);
       return base.delete(identity);

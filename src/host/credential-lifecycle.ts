@@ -1,4 +1,4 @@
-import { createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialLockError, markCleanupUncertain, type CredentialStore } from "../auth/store.ts";
+import { createNativeCredentialStore, credentialWriteRefusedError, isCleanupUncertain, isCredentialLockError, markCleanupUncertain, replaceCredential, type CredentialStore } from "../auth/store.ts";
 import type { Model } from "../model/model.ts";
 import { providerDispatch, withProviderDispatch } from "../model/dispatch.ts";
 import type { HostAuthRoute, HostCredentialStore, HostCredentialWriteGuard } from "./auth-routes.ts";
@@ -94,6 +94,34 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
     // When all peers refuse, let the write/cleanup error reach every waiter first.
     for (const interest of route.interests) if (interest.refused) interest.controller.abort();
   };
+  /** Authorize, write and re-authorize under the route chain; a refusal after a write removes exactly that value. */
+  function commit(value: string, write: () => Promise<boolean>): Promise<boolean> {
+    const writers = new Set([...route.interests].map(interest => interest.owner));
+    for (const owner of writers) owner.active++;
+    return serialized(route, async () => {
+      await authorize();
+      current();
+      try {
+        if (!await write()) return false;
+        await authorize();
+        return true;
+      } catch (error) {
+        // A credential-lock refusal means the backend write never ran: nothing to remove, and the route stays usable.
+        if (isCredentialLockError(error)) throw error;
+        // A backend can commit then reject. Remove only this write, under the route chain.
+        try {
+          if (state.base.compareAndDelete) await state.base.compareAndDelete(identity, value);
+          else if (await state.base.get(identity) === value) await state.base.delete(identity);
+        } catch {
+          route.uncertain = true;
+          const refused = credentialWriteRefusedError();
+          refused.message = "Credential store write refused by the embedding-application fence. Credential cleanup could not be verified.";
+          throw markCleanupUncertain(refused, new HostError("storage"));
+        }
+        throw error;
+      }
+    }).finally(() => { for (const owner of writers) owner.active--; });
+  }
   return {
     async get(requested) {
       current();
@@ -105,30 +133,12 @@ function routeStore(state: State, route: Route, name: HostAuthRoute): Credential
     },
     set(requested, value) {
       if (requested.account !== identity.account) return Promise.reject(new HostError("invalid-options"));
-      const writers = new Set([...route.interests].map(interest => interest.owner));
-      for (const owner of writers) owner.active++;
-      return serialized(route, async () => {
-        await authorize();
-        current();
-        try {
-          await state.base.set(identity, value);
-          await authorize();
-        } catch (error) {
-          // A credential-lock refusal means the backend write never ran: nothing to remove, and the route stays usable.
-          if (isCredentialLockError(error)) throw error;
-          // A backend can commit then reject. Remove only this write, under the route chain.
-          try {
-            if (state.base.compareAndDelete) await state.base.compareAndDelete(identity, value);
-            else if (await state.base.get(identity) === value) await state.base.delete(identity);
-          } catch {
-            route.uncertain = true;
-            const refused = credentialWriteRefusedError();
-            refused.message = "Credential store write refused by the embedding-application fence. Credential cleanup could not be verified.";
-            throw markCleanupUncertain(refused, new HostError("storage"));
-          }
-          throw error;
-        }
-      }).finally(() => { for (const owner of writers) owner.active--; });
+      return commit(value, async () => { await state.base.set(identity, value); return true; }).then(() => {});
+    },
+    // Participants' guards run first; the compare and the write then share the base store's critical section.
+    compareAndSet(requested, expectedValue, value) {
+      if (requested.account !== identity.account) return Promise.reject(new HostError("invalid-options"));
+      return commit(value, () => replaceCredential(state.base, identity, expectedValue, value));
     },
     async delete() { throw new HostError("invalid-options"); },
   };
