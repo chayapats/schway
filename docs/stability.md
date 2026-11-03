@@ -126,6 +126,25 @@ metadata stays explicitly unresolved. This is a minor, additive host API change;
 capability names must be checked by consumers. See
 [host contracts](host.md) and [S14 conformance](host-s14-conformance.md).
 
+The additive `schway.host.dispatch-authorization/v1` and
+`schway.host.provider-requests/v1` slices also remain under
+`schway.host.release/v2`. The first adds an optional synchronous authorizer that
+route models call immediately before each physical inference send, auth-retry
+resends included, with a frozen credential-free `HostDispatch`. A refusal never
+sends, is never retried, never switches route, model or billing, and adds the
+`dispatch-refused` member to `HostAuthStatusCode`. Without an authorizer,
+behavior and request bytes are unchanged. The second adds
+`HostRunUsage.providerRequests`: exact initial, auth-retry and renewal request
+counts when every model call is observable, and `null` otherwise; a shared
+renewal counts once, for the run that started it. Local readiness accepts an
+abort signal and deadline and rejects with `AbortError` or `TimeoutError`.
+Existing call signatures gain only optional parameters, and retry policy,
+renewal single-flight and route/model/billing selection are unchanged. This is a
+minor, additive host API change. Consumers that construct structural
+`HostRunUsage` or `HostCapabilities` test doubles must add the new fields, and
+exhaustive `HostAuthStatusCode` handling must add `dispatch-refused`. See
+[host contracts](host.md#dispatch-authorization-and-provider-requests).
+
 ## Core tool semantics
 
 The core tools are `read`, `write`, `edit`, `bash`, `web_fetch`, `grep`, `find`
