@@ -324,10 +324,13 @@ export interface HostRuntime {
 
 /** Safe typed host rejection; underlying storage/provider diagnostics remain outside this base surface. */
 export class HostError extends Error {
+  /** Exact steering disposition, present exactly when a `submit`/`submitWithRoute` run was admitted before this rejection. */
+  declare readonly steering?: import("./steering.ts").HostSteeringReport;
   constructor(readonly code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" |
-    "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found") {
+    "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found", steering?: import("./steering.ts").HostSteeringReport) {
     super(`Host ${code}`);
     this.name = "HostError";
+    if (steering !== undefined) this.steering = steering;
   }
 }
 

@@ -207,7 +207,8 @@ the admitted run, applied as ordinary user entries before the next model round
 and reported per run as applied, unapplied or uncertain. This is a minor,
 additive host API change. Consumers that construct structural `HostSession`,
 `HostRunResult`, `HostAuthRunResult` or `HostCapabilities` values must add the
-new members, and exhaustive `HostProgressEvent` switches gain `steer_applied`.
+new members; `HostError` and `HostImageError` gain an optional `steering` report
+and constructor argument, and exhaustive `HostProgressEvent` switches gain `steer_applied`.
 See [host contracts](host.md#steering-an-admitted-run).
 
 ## Core tool semantics

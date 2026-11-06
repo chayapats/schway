@@ -228,6 +228,13 @@ function normalizeRunArgs(signalOrOptions?: AbortSignal | HostRunOptions | HostR
     ...(authorizeDispatch ? { authorizeDispatch: authorizeDispatch as HostDispatchAuthorizer } : {}) };
 }
 
+/** Re-raise a typed post-admission rejection with the run's exact steering report; the code and ownership verdict are unchanged. */
+function withSteering(error: unknown, steering: HostSteeringReport): unknown {
+  if (error instanceof HostError) return new HostError(error.code, steering);
+  if (error instanceof HostImageError) return new HostImageError(error.code, steering);
+  return error;
+}
+
 /** Zero physical requests, exact for runs that made no model call. */
 const NO_PROVIDER_REQUESTS: HostProviderRequests = Object.freeze({ initialSends: 0, authRetrySends: 0, renewalRequests: 0 });
 
@@ -512,6 +519,9 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           const refusal = reason !== "error" ? undefined : meter.lastSendRefused ? DISPATCH_REFUSED_MESSAGE : meter.lastControlRefusal?.message;
           return { outcome: reason, input: inputReference, usage: usageSummary(usages, totalMs, false, meter),
             model: identity, error: failureDetail(refusal ?? lastMessage ?? terminalMessage(reason), identity), steering: steered };
+        } catch (error) {
+          // An admitted run's rejection still reports which steers joined history and which the application must resubmit.
+          throw window ? withSteering(error, settleSteering(window)) : error;
         } finally { if (window) settleSteering(window); release(); busy = false; }
       },
       readResult(result) {
@@ -671,6 +681,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             if (lastCategory === "rate-limit") return { outcome: terminal, input: inputReference, auth: classifyAuthError(Object.assign(new Error("rate-limited"), { status: 429 }), authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           }
           return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter), steering: steered };
+        } catch (error) {
+          throw window ? withSteering(error, settleSteering(window)) : error;
         } finally { if (window) settleSteering(window); credentials?.release(); if (admittedAbort) runAbort = previousAbort; release(); busy = false; }
       },
       async compact(model, signalOrOptions) {

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
-import { mkdir, readFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createHost, hostCapabilities, HostError, MAX_STEERS_PER_RUN, STEERING_CONTRACT,
+import { containsNoSecrets, createHost, hostCapabilities, HostError, MAX_STEERS_PER_RUN, STEERING_CONTRACT,
   type HostDispatch, type HostOptions, type HostProgressEvent, type HostSession, type Model, type ModelRequest, type ToolDefinition } from "schway/host";
 import { runAgentLoop } from "../src/agent/loop.ts";
 import { grokSubscriptionIdentity } from "../src/auth/store.ts";
@@ -360,4 +360,99 @@ test("a failed steer append is reported uncertain, ends the run and leaves later
   expect(window.accept({ id: "a", text: "first" })).toEqual({ kind: "rejected", id: "a", reason: "uncertain" });
   expect(window.settle()).toEqual({ applied: [], unapplied: [{ id: "b" }], uncertain: [{ id: "a" }] });
   expect(window.accept({ id: "c", text: "after settle" })).toEqual({ kind: "idle" });
+});
+
+/** Another writer forks the native file, so the run's next durable append and its settlement check conflict. */
+async function foreignWrite(config: HostOptions, session: HostSession): Promise<void> {
+  await appendFile(join(config.sessionDirectory, `${session.reference.id}.jsonl`), JSON.stringify({ type: "branch_fork", version: 1,
+    branchId: "foreign-branch", headId: session.reference.id }) + "\n");
+}
+
+test("a conflict rejection after admission carries the exact steering report", async () => {
+  await withTempDir(async dir => {
+    const toolStarted = gate(), toolRelease = gate();
+    const config = await options(dir, {}, [blockingTool(toolStarted.open, toolRelease.opened)]);
+    const host = await createHost(config), session = await host.createSession();
+    const model: Model = { provider: "scripted", id: "steer-conflict", async *stream(request) {
+      if (!request.items.some(item => item.type === "tool_result")) {
+        yield { type: "message_complete", message: { type: "assistant", id: crypto.randomUUID(), content: [{ type: "tool_call", id: "c1", name: "wait", arguments: {} }] } };
+        return;
+      }
+      // Round two already carries steer a; steer b waits while another writer forks the session.
+      expect(session.steer({ id: "b", text: "second" })).toEqual({ kind: "queued", id: "b" });
+      await foreignWrite(config, session);
+      yield { type: "message_complete", message: { type: "assistant", id: "must-not-commit", content: [{ type: "text", text: "mixed" }] } };
+    } };
+    const pending = session.submit({ text: "go" }, model);
+    await toolStarted.opened;
+    session.steer({ id: "a", text: "first" });
+    toolRelease.open();
+    let thrown: unknown;
+    try { await pending; } catch (error) { thrown = error; }
+    expect(thrown).toBeInstanceOf(HostError);
+    const error = thrown as HostError;
+    expect(error.code).toBe("conflict");
+    expect(error.steering?.applied.map(steer => steer.id)).toEqual(["a"]);
+    expect(error.steering?.applied[0]!.entry.session).toEqual(session.reference);
+    expect(error.steering?.unapplied).toEqual([{ id: "b" }]);
+    expect(error.steering?.uncertain).toEqual([]);
+    expect(Object.isFrozen(error.steering)).toBe(true);
+    // The ownership verdict is unchanged: the handle stays fenced, and that later rejection carries no report.
+    let fenced: unknown;
+    try { await session.submit({ text: "again" }, stagedModel([{ text: "x" }], [])); } catch (failure) { fenced = failure; }
+    expect(fenced).toMatchObject({ code: "conflict" });
+    expect((fenced as HostError).steering).toBeUndefined();
+    expect(session.steer({ id: "c", text: "after" })).toEqual({ kind: "idle" });
+    await host.close();
+  });
+});
+
+test("a route-bound conflict rejection after admission carries the exact steering report", async () => {
+  await withTempDir(async dir => {
+    const store = fakeCredentialStore();
+    await store.set(grokSubscriptionIdentity(), JSON.stringify({ accessToken: "sentinel-access", refreshToken: "sentinel-refresh",
+      obtainedAt: Date.now(), expiresAt: Date.now() + 3_600_000 }));
+    const firstSent = gate(), firstRelease = gate();
+    let sends = 0;
+    let config!: HostOptions;
+    let session!: HostSession;
+    const fetch = (async () => {
+      sends++;
+      if (sends === 1) { firstSent.open(); await firstRelease.opened; }
+      else {
+        expect(session.steer({ id: "b", text: "route second" })).toEqual({ kind: "queued", id: "b" });
+        await foreignWrite(config, session);
+      }
+      return new Response(encodeXaiSse(XAI_TEXT_EVENTS), { headers: { "Content-Type": "text/event-stream" } });
+    }) as never;
+    config = await options(dir, {}, [], { route: "grok", model: "grok-4.7", store, fetch });
+    const host = await createHost(config);
+    session = await host.createSession();
+    const pending = session.submitWithRoute({ text: "route task" });
+    await firstSent.opened;
+    session.steer({ id: "a", text: "route first" });
+    firstRelease.open();
+    let thrown: unknown;
+    try { await pending; } catch (error) { thrown = error; }
+    expect(thrown).toBeInstanceOf(HostError);
+    const error = thrown as HostError;
+    expect(error.code).toBe("conflict");
+    expect(sends).toBe(2);
+    expect(error.steering?.applied.map(steer => steer.id)).toEqual(["a"]);
+    expect(error.steering?.unapplied).toEqual([{ id: "b" }]);
+    expect(error.steering?.uncertain).toEqual([]);
+    expect(containsNoSecrets(error, ["sentinel-access", "sentinel-refresh"])).toBe(true);
+    await host.close();
+  });
+});
+
+test("rejections before admission carry no steering report", async () => {
+  await withTempDir(async dir => {
+    const host = await createHost(await options(dir)), session = await host.createSession();
+    let thrown: unknown;
+    try { await session.submit({ text: "" }, stagedModel([{ text: "x" }], [])); } catch (error) { thrown = error; }
+    expect(thrown).toMatchObject({ code: "invalid-input" });
+    expect("steering" in (thrown as object)).toBe(false);
+    await session.close(); await host.close();
+  });
 });

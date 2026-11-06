@@ -551,16 +551,18 @@ export interface HostEntryReference {
 
 // @public
 export class HostError extends Error {
-    constructor(code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" | "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found");
+    constructor(code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" | "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found", steering?: HostSteeringReport);
     // (undocumented)
     readonly code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" | "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found";
+    readonly steering?: HostSteeringReport;
 }
 
 // @public
 export class HostImageError extends Error {
-    constructor(code: "image-count-limit" | "image-byte-limit" | "image-pixel-limit" | "invalid-image" | "images-unavailable" | "images-unsupported");
+    constructor(code: "image-count-limit" | "image-byte-limit" | "image-pixel-limit" | "invalid-image" | "images-unavailable" | "images-unsupported", steering?: HostSteeringReport);
     // (undocumented)
     readonly code: "image-count-limit" | "image-byte-limit" | "image-pixel-limit" | "invalid-image" | "images-unavailable" | "images-unsupported";
+    readonly steering?: HostSteeringReport;
 }
 
 // @public

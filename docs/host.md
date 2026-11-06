@@ -535,7 +535,7 @@ interface HostSteeringReport {
 - **Limits.** Each extra round counts against `maxTurns`, the deadline and every other run bound. When the round bound leaves no further round, the waiting steer stays unapplied and the run settles as it would have (`completed` after a final answer, `max_turns` after a tool batch). Once a steer continues a run past a committed answer, the run's outcome is that of the later rounds: if one errors, is cancelled or hits the deadline, the outcome has no `result` even though the earlier answer stays committed in history.
 - **Policy.** Steering text is owner input with the same trust as submitted input; like any later user entry it becomes the latest turn for path-scoped context discovery. The exact tool registry, context policy, dispatch authorization, usage accounting and provider-request counts apply unchanged to the extra rounds; each extra round's send is a separately authorized `initial` dispatch.
 - **Disposition.** Every admitted outcome of `submit` and `submitWithRoute` carries `steering: HostSteeringReport`, each list in acceptance order: `applied` steers with their committed entry references, `unapplied` steers that were never appended, and `uncertain`, at most one steer whose append failed after it may have reached storage (the run then ends `error`). A pre-admission `images-unsupported` outcome has no report; an admitted `images-unavailable` outcome includes one. Each application also emits a transient `{ type: "steer_applied", id, entry, transient: true }` progress event.
-- **Ownership.** Schway keeps no durable steer queue across process loss. The application owns its queue: resubmit each `unapplied` steer exactly once, as an ordinary turn or a steer of a later run, and reconcile an `uncertain` one against the reopened history first. `cancel()` leaves waiting steers unapplied; a steer accepted after the loop has passed its last boundary is reported unapplied, never silently dropped. `close()` rules are unchanged. If `submit` rejects instead of settling (for example `conflict` or `storage`), there is no report; treat its steers like the submitted input.
+- **Ownership.** Schway keeps no durable steer queue across process loss. The application owns its queue: resubmit each `unapplied` steer exactly once, as an ordinary turn or a steer of a later run, and reconcile an `uncertain` one against the reopened history first. `cancel()` leaves waiting steers unapplied; a steer accepted after the loop has passed its last boundary is reported unapplied, never silently dropped. `close()` rules are unchanged. If an admitted run rejects instead of settling (for example `conflict` or `storage` after another writer changed the session), the typed rejection still carries the exact report: `HostError.steering` (or `HostImageError.steering` for a post-admission image rejection) is present exactly when the run had been admitted, and absent for rejections before input acceptance. The rejection's code and the handle's ownership verdict are unchanged.
 
 See ADR0019 and `tests/host-steering.test.ts`.
 
@@ -1142,7 +1142,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostSessionInventoryOptions` | Bounded lexical store/workspace traversal. |
 | `HostSessionInventoryPage` | Metadata entries and optional continuation cursor. |
 | `createImageContent` | Validate sanitized bytes and return a byte-free image reference. |
-| `HostImageError` | Typed image validation and transport rejection codes. |
+| `HostImageError` | Typed image validation and transport rejection codes, with an admitted run's steering report. |
 | `HostImageRoute` | Explicit Codex or Grok subscription image route. |
 | `HostImageProbeRecord` | Embedder-reviewed evidence for both image formats on one exact route/model. |
 | `HostImageResolver` | Fresh authorized lookup of embedder-owned sanitized image bytes. |
@@ -1237,7 +1237,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostDeviceSignInOutcome` | Local ready or an explicit terminal failure category. |
 | `HostDeviceSignInStart` | Pending approval, busy route or a safe startup failure. |
 | `HostEntryReference` | Exact native entry in a selected session branch. |
-| `HostError` | Safe typed startup/lifecycle/reference rejection. |
+| `HostError` | Safe typed startup/lifecycle/reference rejection, with an admitted run's steering report. |
 | `HostInput` | Bounded text and optional byte-free image references accepted before inference. |
 | `HostLimits` | Explicit finite loop/context/input/deadline/retry bounds. |
 | `HostModelIdentity` | Selected model identity carried on terminal outcomes. |
