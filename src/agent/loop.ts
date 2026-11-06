@@ -49,6 +49,18 @@ export interface AgentLoopOptions {
   webSearch?: WebSearchSetting;
   /** Enforce the supplied registry exactly; never inject skill activation or built-ins even when permitted. */
   exactTools?: boolean;
+  /** Follow-up user input accepted while this run is admitted, appended at the start of each model round. */
+  steering?: LoopSteering;
+}
+
+/** FIFO source of accepted follow-up input; the loop appends the head, then reports its outcome before taking the next. */
+export interface LoopSteering {
+  /** Return the oldest accepted input not yet appended, or undefined when none is waiting. */
+  next(): { readonly id: string; readonly text: string } | undefined;
+  /** Record that the head input is durably committed as the user entry `entryId`. */
+  applied(id: string, entryId: string): void;
+  /** Record that appending the head input failed after it may have reached storage. */
+  failed(id: string): void;
 }
 
 /** Internal protocol-fixture dependencies, separate from config and extension-visible options. */
@@ -224,6 +236,27 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
     return { outcome, prepared };
   }
 
+  /** Append waiting follow-up input in acceptance order; false after yielding a terminal event. */
+  function* applySteering(steering: LoopSteering): Generator<RuntimeEvent, boolean> {
+    for (let steer = steering.next(); steer; steer = steering.next()) {
+      // A progress observer may cancel synchronously; nothing is appended once cancellation is visible.
+      if (signal?.aborted || toolHooks?.signal.aborted) {
+        yield { type: "agent.finished", reason: "cancelled" };
+        return false;
+      }
+      const id = crypto.randomUUID();
+      try { options.session.append({ type: "user", id, content: [{ type: "text", text: steer.text }] }); }
+      catch (error) {
+        steering.failed(steer.id);
+        yield classifiedError(errorMessage(error), "harness", "session-write");
+        yield { type: "agent.finished", reason: "error" };
+        return false;
+      }
+      steering.applied(steer.id, id);
+    }
+    return true;
+  }
+
   try {
     yield { type: "agent.started" };
     if (!options.exactTools && options.workspace && options.contextManager.skillActivationAllowed !== false) {
@@ -241,6 +274,8 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
         yield { type: "agent.finished", reason: "cancelled" };
         return;
       }
+      // The previous tool batch is committed, so accepted follow-up input joins history before this round's request.
+      if (options.steering && !(yield* applySteering(options.steering))) return;
 
       let prepared = yield* prepareContext();
       yield* compactionUsage();
@@ -281,6 +316,8 @@ async function* runAgentLoopInternal(options: AgentLoopOptions, dependencies: Ag
 
       const calls = toolCallsOf(outcome.message);
       if (calls.length === 0) {
+        // Waiting follow-up input runs one more round instead of completing, while the round bound allows it.
+        if (options.steering?.next() && turn + 1 < maxTurns && !signal?.aborted && !toolHooks?.signal.aborted) continue;
         yield { type: "agent.finished", reason: "completed" };
         return;
       }

@@ -16,9 +16,13 @@ export const MAX_REQUEST_IMAGE_BYTES = 50 * 1024 * 1024;
 
 /** Typed image validation failure without image bytes, references or decoder diagnostics. */
 export class HostImageError extends Error {
-  constructor(readonly code: "image-count-limit" | "image-byte-limit" | "image-pixel-limit" | "invalid-image" | "images-unavailable" | "images-unsupported") {
+  /** Exact steering disposition, present exactly when a host run was admitted before this rejection. */
+  declare readonly steering?: import("../host/steering.ts").HostSteeringReport;
+  constructor(readonly code: "image-count-limit" | "image-byte-limit" | "image-pixel-limit" | "invalid-image" | "images-unavailable" | "images-unsupported",
+    steering?: import("../host/steering.ts").HostSteeringReport) {
     super(`Image input rejected: ${code}`);
     this.name = "HostImageError";
+    if (steering !== undefined) this.steering = steering;
   }
 }
 

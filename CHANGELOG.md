@@ -91,6 +91,18 @@
 
 ### Added
 
+- Steer an admitted host run with the owner's follow-up text, advertised by
+  `steeringContract: "schway.host.steering/v1"`. `HostSession.steer({ id,
+  text })` returns `queued`, `applied`, `idle` or `rejected` (`id-conflict`,
+  `limit`, `uncertain`);
+  queued steers join history as ordinary user entries at the start of the next
+  model round, after committed tool results, and a final answer gives way to one
+  more round while a steer waits, within `maxTurns` and the deadline. Every
+  admitted `submit`/`submitWithRoute` outcome reports `steering` with the
+  applied steers' entry references and the unapplied or uncertain ones for the
+  application to resubmit, and a typed rejection after admission carries the
+  same report as `HostError.steering`/`HostImageError.steering`; a transient
+  `steer_applied` progress event marks each application. `RELEASE_CONTRACT` stays `schway.host.release/v2` (#460).
 - Add an optional synchronous dispatch authorizer for host route models,
   advertised by `dispatchAuthorizationContract:
   "schway.host.dispatch-authorization/v1"`. `createModel({ authorizeDispatch })`,

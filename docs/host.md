@@ -500,6 +500,45 @@ Accepted input is appended and flushed before the first model request; a failed 
 
 Terminal outcomes distinguish `completed`, `error`, `cancelled`, `max_turns` and `limit_exceeded`, carry the selected route/session/run references, the selected model identity and durable output references only when committed, plus honest `HostRunUsage` and sanitized `HostRunError` diagnostics preserving the effective context/tool policy. Route-bound runs add safe `auth` readiness and `observedInference: "observed"` only on committed completion. A late provider callback after cancellation or the deadline cannot flip the outcome to `completed` or append a late accepted answer; the loop checks cancellation before durable publication and the host trusts a loop-reported `completed` over a raced abort or deadline. Schway adds no competing durable job scheduler; Jit owns queue priority, attempt generations and task acceptance. See ADR0014 and `tests/host-run-control.test.ts`.
 
+## Steering an admitted run
+
+`hostCapabilities().steeringContract` is `"schway.host.steering/v1"` (#460, for chayapats/jit#406). This is an additive slice: `RELEASE_CONTRACT` and `releaseContract` remain `schway.host.release/v2`; the integration owner composes the next release.
+
+`HostSession.steer(input)` queues the owner's follow-up text for the run that `submit` or `submitWithRoute` has admitted on the same handle, so the model sees it at the next safe point instead of the application cancelling the run:
+
+```ts
+const verdict = session.steer({ id: "msg-42", text: "Skip the tests, just fix the build." });
+// { kind: "queued", id } | { kind: "applied", id, entry } | { kind: "idle" }
+// | { kind: "rejected", id, reason: "id-conflict" | "limit" | "uncertain" }
+if (verdict.kind === "idle") {
+  // No run is admitted: submit an ordinary turn once the handle is free.
+}
+```
+
+```ts
+interface HostSteerInput { readonly id: string; readonly text: string }
+type HostSteerResult =
+  | { readonly kind: "queued"; readonly id: string }
+  | { readonly kind: "applied"; readonly id: string; readonly entry: HostEntryReference }
+  | { readonly kind: "idle" }
+  | { readonly kind: "rejected"; readonly id: string; readonly reason: "id-conflict" | "limit" | "uncertain" };
+interface HostSteeringReport {
+  readonly applied: readonly { readonly id: string; readonly entry: HostEntryReference }[];
+  readonly unapplied: readonly { readonly id: string }[];
+  readonly uncertain: readonly { readonly id: string }[];
+}
+```
+
+- **Admission.** `steer` is synchronous. It accepts input from the moment the run's input is durably appended until the run's outcome is built. Outside that window, including during `compact` and after settlement, it returns `idle`; an ordinary `submit` may still reject `busy` until the handle is free. `id` is 1–128 characters from `[A-Za-z0-9._:-]` starting with a letter or digit; `text` must be non-blank and within `limits.maxInputChars`. Images are not accepted. Malformed input throws `HostError("invalid-input")`, and a closed handle throws `closed`; neither echoes the text.
+- **Idempotency and bounds.** Ids are unique within one run, and a repeated id never applies twice. Repeating an id with the same text returns `queued` while it waits, `applied` with its committed entry once appended, and `rejected` with `uncertain` after its append failed; the same id with different text returns `rejected` with `id-conflict`. A run accepts at most `MAX_STEERS_PER_RUN` (32) steers; later new ids return `rejected` with `limit`.
+- **Application point.** At the start of every model round, after the previous tool batch's results are committed and before the round's context preparation and request, the loop appends each waiting steer, oldest first, as a normal native user entry. The append is flushed like submitted input, so a reopened session replays it. A steer accepted while a tool runs therefore follows that tool's result. When the model answers without tool calls while a steer is waiting, the run does not complete; it runs another round that includes the steer. Nothing is appended once cancellation is visible.
+- **Limits.** Each extra round counts against `maxTurns`, the deadline and every other run bound. When the round bound leaves no further round, the waiting steer stays unapplied and the run settles as it would have (`completed` after a final answer, `max_turns` after a tool batch). Once a steer continues a run past a committed answer, the run's outcome is that of the later rounds: if one errors, is cancelled or hits the deadline, the outcome has no `result` even though the earlier answer stays committed in history.
+- **Policy.** Steering text is owner input with the same trust as submitted input; like any later user entry it becomes the latest turn for path-scoped context discovery. The exact tool registry, context policy, dispatch authorization, usage accounting and provider-request counts apply unchanged to the extra rounds; each extra round's send is a separately authorized `initial` dispatch.
+- **Disposition.** Every admitted outcome of `submit` and `submitWithRoute` carries `steering: HostSteeringReport`, each list in acceptance order: `applied` steers with their committed entry references, `unapplied` steers that were never appended, and `uncertain`, at most one steer whose append failed after it may have reached storage (the run then ends `error`). A pre-admission `images-unsupported` outcome has no report; an admitted `images-unavailable` outcome includes one. Each application also emits a transient `{ type: "steer_applied", id, entry, transient: true }` progress event.
+- **Ownership.** Schway keeps no durable steer queue across process loss. The application owns its queue: resubmit each `unapplied` steer exactly once, as an ordinary turn or a steer of a later run, and reconcile an `uncertain` one against the reopened history first. `cancel()` leaves waiting steers unapplied; a steer accepted after the loop has passed its last boundary is reported unapplied, never silently dropped. `close()` rules are unchanged. If an admitted run rejects instead of settling (for example `conflict` or `storage` after another writer changed the session), the typed rejection still carries the exact report: `HostError.steering` (or `HostImageError.steering` for a post-admission image rejection) is present exactly when the run had been admitted, and absent for rejections before input acceptance. The rejection's code and the handle's ownership verdict are unchanged.
+
+See ADR0019 and `tests/host-steering.test.ts`.
+
 ## Dispatch authorization and provider requests
 
 `hostCapabilities()` advertises two additive slices under `release/v2`:
@@ -1103,7 +1142,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostSessionInventoryOptions` | Bounded lexical store/workspace traversal. |
 | `HostSessionInventoryPage` | Metadata entries and optional continuation cursor. |
 | `createImageContent` | Validate sanitized bytes and return a byte-free image reference. |
-| `HostImageError` | Typed image validation and transport rejection codes. |
+| `HostImageError` | Typed image validation and transport rejection codes, with an admitted run's steering report. |
 | `HostImageRoute` | Explicit Codex or Grok subscription image route. |
 | `HostImageProbeRecord` | Embedder-reviewed evidence for both image formats on one exact route/model. |
 | `HostImageResolver` | Fresh authorized lookup of embedder-owned sanitized image bytes. |
@@ -1167,12 +1206,13 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `ExecutionSpawnResult` | Complete decoded output, exit code and timeout flag. |
 | `ExecutionStat` | Followed-symlink metadata for one path. |
 | `hashSnapshotBytes` | SHA-256 helper for snapshot integrity. |
+| `HostAppliedSteer` | Steer id with its committed native user entry. |
 | `HostAuthBinding` | Route-bound host composition with readiness, lazy model and renewal. |
 | `HostAuthDescription` | Static supported route with opaque credential. |
 | `HostAuthFetch` | Protocol-fixture fetch override for deterministic tests. |
 | `HostAuthReadiness` | Selected-route status with safe next action. |
 | `HostAuthRoute` | Selected subscription route (`codex` or `grok`). |
-| `HostAuthRunResult` | Route-bound terminal outcome with safe auth detail. |
+| `HostAuthRunResult` | Route-bound terminal outcome with safe auth detail and an admitted run's steering report. |
 | `HostAuthSelection` | Explicit route/model binding without raw tokens. |
 | `HostAuthStatusCode` | Stable safe categories for readiness, failures and dispatch refusals. |
 | `HostCapabilities` | Static API features with no inference observation. |
@@ -1197,7 +1237,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostDeviceSignInOutcome` | Local ready or an explicit terminal failure category. |
 | `HostDeviceSignInStart` | Pending approval, busy route or a safe startup failure. |
 | `HostEntryReference` | Exact native entry in a selected session branch. |
-| `HostError` | Safe typed startup/lifecycle/reference rejection. |
+| `HostError` | Safe typed startup/lifecycle/reference rejection, with an admitted run's steering report. |
 | `HostInput` | Bounded text and optional byte-free image references accepted before inference. |
 | `HostLimits` | Explicit finite loop/context/input/deadline/retry bounds. |
 | `HostModelIdentity` | Selected model identity carried on terminal outcomes. |
@@ -1210,10 +1250,10 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostRunAttemptUsage` | One reported usage sample with its completeness flag. |
 | `HostRunError` | Sanitized failure detail with effective policy and model. |
 | `HostRunOptions` | Cooperative signal, fake clock and transient progress observer. |
-| `HostRunResult` | Terminal outcome with a durable result only on completion. |
+| `HostRunResult` | Terminal outcome with a durable result only on completion and an admitted run's steering report. |
 | `HostRuntime` | Create, open, retire, delete, snapshot, validate, restore and close managed native handles. |
 | `HostRunUsage` | Honest run consumption with nulls preserved and exact provider requests when observable. |
-| `HostSession` | Submit, compact, retire and inspect one exact native ancestry. |
+| `HostSession` | Submit, steer, compact, retire and inspect one exact native ancestry. |
 | `HostSessionDeletion` | Honest deletion outcome with retry guidance. |
 | `HostSessionReference` | Stable native session and branch identity. |
 | `HostSessionSnapshot` | Coherent native-state snapshot with contract versions and sessions. |
@@ -1225,6 +1265,10 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `HostSnapshotRestoreResult` | Restored, quarantined or partial restore outcome. |
 | `HostSnapshotSession` | Captured session refs, ancestry, versions and inventory. |
 | `HostSnapshotValidation` | Offline snapshot validation verdict. |
+| `HostSteerIdentity` | Steer identified by its application id. |
+| `HostSteeringReport` | Applied, unapplied and uncertain steers of one admitted run. |
+| `HostSteerInput` | Application steer id and bounded owner text. |
+| `HostSteerResult` | Queued, applied, idle or rejected steering verdict. |
 | `isCleanupUncertain` | Test whether an error marks an unverified credential cleanup. |
 | `isCredentialWriteRefused` | Test whether an error is a fence refusal, not a store failure. |
 | `isDispatchRefused` | Test whether an error is a dispatch-authorizer refusal. |
@@ -1234,6 +1278,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `MAX_SNAPSHOT_ARTIFACT_BYTES` | Per-artifact byte bound for snapshots. |
 | `MAX_SNAPSHOT_SESSIONS` | Per-snapshot session bound. |
 | `MAX_SNAPSHOT_TOTAL_BYTES` | Total decoded byte bound for snapshots. |
+| `MAX_STEERS_PER_RUN` | Per-run steer bound. |
 | `Model` | Host-supplied normalized model stream. |
 | `ModelCallOptions` | Schway-owned model-call settings. |
 | `ModelRequest` | Native prompt/context/conversation/tool request. |
@@ -1244,6 +1289,7 @@ The checked API report is `api/host.api.md`. Only this inventory and `schway/ext
 | `RELEASE_CONTRACT` | Composed release contract version for downstream pinning. |
 | `SNAPSHOT_CONTRACT` | Snapshot contract version. |
 | `SNAPSHOT_NATIVE_FORMAT_VERSION` | Native format version for snapshots. |
+| `STEERING_CONTRACT` | Steering contract version. |
 | `TextContent` | Native plain-text block. |
 | `ThinkingContent` | Native reasoning block and replay metadata. |
 | `ThinkingLevel` | Provider-independent requested reasoning level. |

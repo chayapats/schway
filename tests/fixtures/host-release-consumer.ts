@@ -16,6 +16,7 @@ import {
   hashSnapshotBytes,
   RELEASE_CONTRACT,
   SNAPSHOT_CONTRACT,
+  STEERING_CONTRACT,
   type ExecutionBackend,
   type HostDispatch,
   type HostOptions,
@@ -35,7 +36,7 @@ type Input =
   | { action: "route-renewal"; route: "codex" | "grok"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "inventory"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
   | { action: "dispatch"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string }
-  | { action: "core-tools" | "web-tools"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
+  | { action: "core-tools" | "web-tools" | "steering"; workspaceRoot: string; homeDirectory: string; sessionDirectory: string };
 
 function fakeStore() {
   const values = new Map<string, string>();
@@ -593,6 +594,27 @@ if (input.action === "capabilities") {
   const run = await session.submit({ text: "Read the web" }, model);
   await session.close(); await host.close();
   console.log(JSON.stringify({ outcome: run.outcome, calls, results, contract: hostCapabilities().webToolsContract }));
+} else if (input.action === "steering") {
+  // A steer accepted during a final answer continues the run for one more round that includes it.
+  const host = await createHost({
+    workspaceRoot: input.workspaceRoot, homeDirectory: input.homeDirectory, sessionDirectory: input.sessionDirectory,
+    context: { policy: "strict", systemPrompt: "Follow the owner's latest instruction.", sections: [] },
+    tools: { policy: "exact", hostedLookup: "off", definitions: [] },
+    limits: { maxTurns: 3, maxConcurrentTools: 1, contextWindow: 32768, maxInputChars: 1024 },
+  });
+  const session = await host.createSession();
+  const seen: string[][] = [];
+  const verdicts: unknown[] = [];
+  const model: Model = { provider: "scripted", id: "steering", async *stream(request) {
+    seen.push(request.items.flatMap(item => item.type === "user" ? item.content.flatMap(part => part.type === "text" ? [part.text] : []) : []));
+    if (seen.length === 1) verdicts.push(session.steer({ id: "packed", text: "packed follow-up" }));
+    yield { type: "message_complete", message: { type: "assistant", id: crypto.randomUUID(), content: [{ type: "text", text: `answer ${seen.length}` }] } };
+  } };
+  const run = await session.submit({ text: "Start the task" }, model);
+  verdicts.push(session.steer({ id: "after", text: "too late" }));
+  await session.close(); await host.close();
+  console.log(JSON.stringify({ outcome: run.outcome, contract: hostCapabilities().steeringContract, constant: STEERING_CONTRACT, seen, verdicts,
+    applied: "steering" in run && run.steering ? run.steering.applied.map(steer => steer.id) : null }));
 } else if (input.action === "dispatch") {
   // Every physical Grok send is authorized with exact body hashes, the auth-retry resend included.
   const store = fakeStore();

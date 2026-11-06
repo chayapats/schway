@@ -137,6 +137,7 @@ test("packed release artifact installs without private source access and adverti
       snapshotContract: "schway.host.session-snapshot/v1",
       dispatchAuthorizationContract: "schway.host.dispatch-authorization/v1",
       routeRenewalContract: "schway.host.route-renewal/v1",
+      steeringContract: "schway.host.steering/v1",
       providerRequestsContract: "schway.host.provider-requests/v1",
       effortContract: "schway.host.effort/v1",
       outputCapContract: "schway.host.output-cap/v1",
@@ -376,6 +377,21 @@ test("packed release example builds against the public host entry", async () => 
   });
 });
 
+
+test("packed consumer steers an admitted run through the public surface without loading the TUI", async () => {
+  await withTempDir(async dir => {
+    const { consumer } = await packAndInstall(dir);
+    const workspaceRoot = join(consumer, "steer-work"), homeDirectory = join(consumer, "steer-home"), sessionDirectory = join(consumer, "steer-sessions");
+    await mkdir(workspaceRoot); await mkdir(homeDirectory);
+    const result = await packedConsumer(consumer, { action: "steering", workspaceRoot, homeDirectory, sessionDirectory },
+      `await Bun.plugin({name:'steering-guard',setup(builder){
+        builder.onLoad({filter:/(?:[/\\\\](?:providers|tui)[/\\\\]|@opentui|[/\\\\]openai[/\\\\])/},()=>{throw new Error('Steering loaded provider or TUI');});
+      }});`) as { outcome: string; contract: string; constant: string; seen: string[][]; verdicts: unknown[]; applied: string[] | null };
+    expect(result).toEqual({ outcome: "completed", contract: "schway.host.steering/v1", constant: "schway.host.steering/v1",
+      seen: [["Start the task"], ["Start the task", "packed follow-up"]],
+      verdicts: [{ kind: "queued", id: "packed" }, { kind: "idle" }], applied: ["packed"] });
+  });
+}, 120_000);
 
 test("packed consumer admits vendor-neutral web tools with guarded untrusted results and hosted lookup off", async () => {
   await withTempDir(async dir => {

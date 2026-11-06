@@ -10,6 +10,9 @@ export type { HostCredentialLifecycle, HostCredentialLifecycleOptions } from "./
 export type { HostSessionInventoryEntry, HostSessionInventoryOptions, HostSessionInventoryPage } from "./session-inventory.ts";
 
 export { IMAGE_INPUT_CONTRACT } from "./image-input.ts";
+/** Follow-up owner input for an admitted run, with an exact per-run disposition report. */
+export { STEERING_CONTRACT, MAX_STEERS_PER_RUN } from "./steering.ts";
+export type { HostAppliedSteer, HostSteerIdentity, HostSteerInput, HostSteerResult, HostSteeringReport } from "./steering.ts";
 export type { HostImageRoute, HostImageProbeRecord, HostImageResolver, HostImageOptions, HostImageRouteCapability, HostImagesRejected } from "./image-input.ts";
 export { createImageContent, HostImageError, MAX_INPUT_IMAGES, MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS, MAX_REQUEST_IMAGES, MAX_REQUEST_IMAGE_BYTES } from "../conversation/images.ts";
 
@@ -117,6 +120,8 @@ export interface HostCapabilities {
   readonly outputCapContract: "schway.host.output-cap/v1";
   /** Explicit route credential renewal without inference, counted and fenced like a run's renewal. */
   readonly routeRenewalContract: "schway.host.route-renewal/v1";
+  /** Follow-up owner input steered into an admitted run at the next safe boundary, with exact applied/unapplied reporting. */
+  readonly steeringContract: "schway.host.steering/v1";
 }
 
 /** Explicit finite bounds for this host's native loop and accepted text input. */
@@ -177,7 +182,8 @@ export type HostProgressEvent =
   | { type: "tool_finished"; toolCallId: string; name: string; status: "success" | "error" | "cancelled"; transient: true }
   | { type: "retry"; attempt: number; maxAttempts: number; delayMs: number; message: string; transient: true }
   | { type: "compaction"; stage: "started" | "finished"; reason: string; status?: "completed" | "failed" | "cancelled" | "noop"; transient: true }
-  | { type: "usage"; phase: "turn" | "compaction"; usage: ModelUsage; complete: boolean; transient: true };
+  | { type: "usage"; phase: "turn" | "compaction"; usage: ModelUsage; complete: boolean; transient: true }
+  | { type: "steer_applied"; id: string; entry: HostEntryReference; transient: true };
 
 /** Per-run options carrying cancellation, a fake clock and transient progress. */
 export interface HostRunOptions {
@@ -235,11 +241,11 @@ export interface HostRunError {
   readonly toolPolicy: "exact";
 }
 
-/** A native terminal observation; completed results include a persisted assistant entry. */
+/** A native terminal observation; completed results include a persisted assistant entry, and admitted runs report steering. */
 export type HostRunResult =
   | import("./image-input.ts").HostImagesRejected
-  | { outcome: "completed"; input: HostEntryReference; result: HostEntryReference; message: AssistantMessage; usage: HostRunUsage; model: HostModelIdentity }
-  | { outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded"; input: HostEntryReference; usage: HostRunUsage; model: HostModelIdentity; error: HostRunError };
+  | { outcome: "completed"; input: HostEntryReference; result: HostEntryReference; message: AssistantMessage; usage: HostRunUsage; model: HostModelIdentity; steering: import("./steering.ts").HostSteeringReport }
+  | { outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded"; input: HostEntryReference; usage: HostRunUsage; model: HostModelIdentity; error: HostRunError; steering: import("./steering.ts").HostSteeringReport };
 
 /** Native explicit compaction distinguishes a persisted summary reference from an unchanged or unsuccessful attempt. */
 export type HostCompactionResult = { outcome: "completed"; result: HostEntryReference; usage: HostRunUsage }
@@ -256,6 +262,11 @@ export interface HostSession {
   compact(model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostCompactionResult>;
   /** Read one assistant entry from this exact native ancestry without calling models or tools. */
   readResult(reference: HostEntryReference): AssistantMessage;
+  /**
+   * Queue follow-up owner text for the admitted `submit`/`submitWithRoute` run, appended as a user entry before its next model round.
+   * Returns `idle` when no run is admitted; malformed input throws `invalid-input` and a closed handle throws `closed`.
+   */
+  steer(input: import("./steering.ts").HostSteerInput): import("./steering.ts").HostSteerResult;
   /** Abort the admitted run and settle cooperative tools; safe to repeat and safe when idle. */
   cancel(): void;
   /** Release this idle handle; busy handles reject with busy instead of aborting. Cancel first, await settlement, then close. */
@@ -313,10 +324,13 @@ export interface HostRuntime {
 
 /** Safe typed host rejection; underlying storage/provider diagnostics remain outside this base surface. */
 export class HostError extends Error {
+  /** Exact steering disposition, present exactly when a `submit`/`submitWithRoute` run was admitted before this rejection. */
+  declare readonly steering?: import("./steering.ts").HostSteeringReport;
   constructor(readonly code: "invalid-options" | "unsupported-policy" | "invalid-input" | "invalid-reference" |
-    "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found") {
+    "busy" | "conflict" | "closed" | "storage" | "workspace-mismatch" | "result-not-found", steering?: import("./steering.ts").HostSteeringReport) {
     super(`Host ${code}`);
     this.name = "HostError";
+    if (steering !== undefined) this.steering = steering;
   }
 }
 
@@ -351,6 +365,7 @@ const capabilities: HostCapabilities = Object.freeze({
   effortContract: "schway.host.effort/v1",
   outputCapContract: "schway.host.output-cap/v1",
   routeRenewalContract: "schway.host.route-renewal/v1",
+  steeringContract: "schway.host.steering/v1",
 } as HostCapabilities);
 
 /** Discover static supported features without loading engine composition, TUI or provider adapters. */
