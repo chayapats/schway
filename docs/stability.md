@@ -201,6 +201,15 @@ values must add the new members. `HostCredentialStore` gains an optional
 fallback. See
 [host contracts](host.md#explicit-route-renewal).
 
+The additive `schway.host.steering/v1` slice also remains under
+`schway.host.release/v2`. `HostSession.steer()` queues follow-up owner text for
+the admitted run, applied as ordinary user entries before the next model round
+and reported per run as applied, unapplied or uncertain. This is a minor,
+additive host API change. Consumers that construct structural `HostSession`,
+`HostRunResult`, `HostAuthRunResult` or `HostCapabilities` values must add the
+new members, and exhaustive `HostProgressEvent` switches gain `steer_applied`.
+See [host contracts](host.md#steering-an-admitted-run).
+
 ## Core tool semantics
 
 The core tools are `read`, `write`, `edit`, `bash`, `web_fetch`, `grep`, `find`

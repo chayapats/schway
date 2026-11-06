@@ -1,0 +1,20 @@
+---
+status: accepted
+scope: host steering of admitted runs
+---
+
+# Steer an admitted run at the next safe boundary with an exact disposition report
+
+`schway.host.steering/v1` ([#460](https://github.com/chayapats/schway/issues/460)) serves Jit's CHAT16-02 ([jit#406](https://github.com/chayapats/jit/issues/406)): the owner's follow-up message while a run works must reach the model without cancelling that run. Before this contract a host could only `submit` and `cancel()`, so the owner either lost in-flight work or waited while the model kept following a stale instruction.
+
+`HostSession.steer({ id, text })` is synchronous and returns `queued`, `applied`, `idle` or `rejected` (`id-conflict`, `limit`, `uncertain`). It accepts input only while a `submit`/`submitWithRoute` run is admitted on the handle: from durable input acceptance until the outcome is built. Ids are application-chosen and unique within a run; a repeated id with the same text is idempotent and reports the steer's current state (waiting, applied with its entry, or uncertain). Input follows the submitted-input rules (`maxInputChars`, non-blank, typed `invalid-input` without echoing text), text only. A run accepts at most 32 steers.
+
+The agent loop takes an optional FIFO steering source. At the start of every model round, after the previous tool batch is committed and before context preparation and the request, it appends each waiting steer as an ordinary native user entry, checking cancellation before each append. A response without tool calls does not complete the run while a steer waits: the loop runs another round, within `maxTurns`, the deadline and every other run-control bound (ADR0014). The steer is therefore owner input with the same trust and the same durability as submitted input, and tool policy, context policy, dispatch authorization and usage accounting apply unchanged; the extra round is a separately authorized initial send. No new durable record type or session format change is needed, and reopen replays applied steers like any user entry.
+
+Schway does not own a durable steer queue across process loss; the embedding application does. Every admitted outcome therefore carries `steering: { applied, unapplied, uncertain }` in acceptance order: applied steers with committed entry references, steers never appended (resubmit exactly once) and at most one steer whose append failed after it may have reached storage, which ends the run as `error`. A steer the round bound or a cancellation prevents, or one accepted after the loop's last boundary, is reported unapplied instead of dropped. A transient `steer_applied` progress event marks each application. `cancel()` and `close()` keep their ADR0014 semantics.
+
+The contract is additive. `hostCapabilities()` gains `steeringContract`, `schway/host` exports `STEERING_CONTRACT` and `MAX_STEERS_PER_RUN`, `HostRunResult`/`HostAuthRunResult` gain a required `steering` report and `HostProgressEvent` a `steer_applied` member. `RELEASE_CONTRACT` stays `schway.host.release/v2` until the integration owner composes the next release.
+
+Rejected: applying steers mid-stream or mid-tool-batch (it would split an assistant turn from its tool results and break provider replay); dropping a steer that arrives during a final answer (silent loss); a Schway-owned durable steer queue (it would compete with Jit's job and attempt ownership, as ADR0014 already declines); a new `HostError` code for id conflicts (a conflicting id is an expected operational verdict, not a malformed call); accepting steers during `compact` (compaction is not a submitted run and has no model round to steer).
+
+Evidence: `tests/host-steering.test.ts` (tool-call boundary, final-answer continuation, FIFO, idempotency and conflicts, input bounds, idle/compaction/post-settlement idle, cancel and `maxTurns` leaving steers unapplied, reopen replay, route-bound dispatch authorization and request counts, append failure reported uncertain), the packed steering consumer in `tests/host-release.test.ts`, existing host and agent-loop fixtures, `bun run typecheck` and full `bun test`. See [host contracts](../host.md#steering-an-admitted-run).

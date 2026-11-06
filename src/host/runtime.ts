@@ -33,6 +33,7 @@ import { managedSessionInventory, type HostSessionInventoryOptions } from "./ses
 import { acquireCredentialLifecycle, type CredentialLifecycleLease } from "./credential-lifecycle.ts";
 import { renewSelectedRoute } from "./route-renewal.ts";
 import { createRunMeter, type HostDispatchAuthorizer, type RunMeter } from "./dispatch.ts";
+import { idleSteer, openSteeringWindow, validSteerInput, type HostSteeringReport, type SteeringWindow } from "./steering.ts";
 import { DISPATCH_REFUSED_MESSAGE, dispatchRefusedError, redirectRefusedError } from "../model/dispatch.ts";
 
 // Fast same-process rejection supplements the cross-process native session lease.
@@ -363,6 +364,13 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
     };
     let disposed = false, busy = false;
     let runAbort: AbortController | null = null;
+    // Open only while a submitted run is admitted: from durable input acceptance until the run's outcome is built.
+    let steering: SteeringWindow | null = null;
+    /** Close one run's window and freeze the disposition of every steer it accepted. */
+    const settleSteering = (window: SteeringWindow): HostSteeringReport => {
+      if (steering === window) steering = null;
+      return window.settle();
+    };
     const reference = Object.freeze({ id: native.header.id, branchId: native.activeBranchId });
     const context = createContextManager(workspace, { home, contextWindow: options.limits.contextWindow,
       systemPrompt: options.context.systemPrompt, sections: options.context.sections, sources: options.context.sources, policy: options.sourcePolicy });
@@ -457,11 +465,14 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         delete imageState.failure;
         busy = true;
         const release = native.acquireOperation();
+        let window: SteeringWindow | undefined;
         try {
           const id = crypto.randomUUID();
           try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }, ...images] }); }
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
           const inputReference = ref(id);
+          window = steering = openSteeringWindow(ref);
+          const accepted = window;
           let reason: HostRunResult["outcome"] = "error";
           let usages: HostRunAttemptUsage[] = [];
           let totalMs = 0;
@@ -471,7 +482,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             let message: string | undefined;
             for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
               maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, maxAttempts: options.limits.maxAttempts,
-              signal, webSearch: "off", exactTools: true, clock })) {
+              signal, webSearch: "off", exactTools: true, clock, steering: accepted.source(report) })) {
               const seen = observe(event, report, collect, meter);
               if (seen.reason) terminal = seen.reason;
               if (seen.message !== undefined) message = seen.message;
@@ -482,25 +493,26 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           usages = bounded.usages;
           totalMs = bounded.totalMs;
           lastMessage = bounded.message;
+          const steered = settleSteering(accepted);
           try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
           if (conflict) throw new HostError("conflict");
           const imageFailure = getImageFailure();
           if (imageFailure && reason !== "completed" && reason !== "cancelled" && reason !== "limit_exceeded") {
             if (imageFailure.code !== "images-unavailable") throw imageFailure;
-            return { outcome: "images-unavailable", input: inputReference, model: identity, usage: usageSummary(usages, totalMs, false, meter) };
+            return { outcome: "images-unavailable", input: inputReference, model: identity, usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           }
           if (reason === "completed") {
             check();
             const message = native.items.findLast(item => item.type === "assistant");
             if (!message || message.type !== "assistant") throw new HostError("storage");
             return { outcome: reason, input: inputReference, result: ref(message.id), message: structuredClone(message),
-              usage: usageSummary(usages, totalMs, true, meter), model: identity };
+              usage: usageSummary(usages, totalMs, true, meter), model: identity, steering: steered };
           }
           // A refused last send explains the failure even when the loop's final message names a consequence, such as overflow.
           const refusal = reason !== "error" ? undefined : meter.lastSendRefused ? DISPATCH_REFUSED_MESSAGE : meter.lastControlRefusal?.message;
           return { outcome: reason, input: inputReference, usage: usageSummary(usages, totalMs, false, meter),
-            model: identity, error: failureDetail(refusal ?? lastMessage ?? terminalMessage(reason), identity) };
-        } finally { release(); busy = false; }
+            model: identity, error: failureDetail(refusal ?? lastMessage ?? terminalMessage(reason), identity), steering: steered };
+        } finally { if (window) settleSteering(window); release(); busy = false; }
       },
       readResult(result) {
         requireIdle(); check();
@@ -526,6 +538,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
         busy = true;
         const release = native.acquireOperation();
         let credentials: CredentialLifecycleLease | undefined;
+        let window: SteeringWindow | undefined;
         const previousAbort = runAbort;
         const admittedAbort = authSelection.lifecycle ? new AbortController() : undefined;
         if (admittedAbort) runAbort = admittedAbort;
@@ -536,6 +549,8 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           try { native.append({ type: "user", id, content: [{ type: "text", text: input.text }, ...images] }); }
           catch (error) { if (error instanceof HostError) throw error; if (error instanceof SessionConflictError) throw new HostError("conflict"); throw new HostError("storage"); }
           const inputReference = ref(id);
+          window = steering = openSteeringWindow(ref);
+          const accepted = window;
           const meter = createRunMeter();
           let terminal: HostRunResult["outcome"] = "error";
           let lastError: unknown;
@@ -570,7 +585,7 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
             let reason: "completed" | "error" | "cancelled" | "max_turns" = "error";
             for await (const event of runAgentLoop({ session: native, model: route, contextManager: context, tools: runTools, workspace,
               maxTurns: options.limits.maxTurns, maxConcurrentTools: options.limits.maxConcurrentTools, maxAttempts: options.limits.maxAttempts,
-              signal, webSearch: "off", exactTools: true, clock })) {
+              signal, webSearch: "off", exactTools: true, clock, steering: accepted.source(report) })) {
               const seen = observe(event, report, collect, meter);
               if (seen.reason) reason = seen.reason;
               // A retried provider failure is evidence too, even when the deadline ends its backoff,
@@ -600,24 +615,25 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           terminal = bounded.reason;
           usages = bounded.usages;
           totalMs = bounded.totalMs;
-          if (admissionFailure) return { outcome: "error", input: inputReference, auth: admissionFailure, usage: usageSummary([], totalMs, false, meter) };
+          const steered = settleSteering(accepted);
+          if (admissionFailure) return { outcome: "error", input: inputReference, auth: admissionFailure, usage: usageSummary([], totalMs, false, meter), steering: steered };
           if (!admitted && (terminal === "cancelled" || terminal === "limit_exceeded")) {
             // Stopped before the secure store answered: no credential verdict exists, and nothing was sent.
-            return { outcome: terminal, input: inputReference, auth: readinessInterrupted(authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+            return { outcome: terminal, input: inputReference, auth: readinessInterrupted(authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           }
           try { check(); } catch (error) { if (error instanceof HostError && error.code === "conflict") throw error; }
           if (conflict) throw new HostError("conflict");
           const imageFailure = getImageFailure();
           if (imageFailure && terminal !== "completed" && terminal !== "cancelled" && terminal !== "limit_exceeded") {
             if (imageFailure.code !== "images-unavailable") throw imageFailure;
-            return { outcome: "images-unavailable", input: inputReference, model: imageIdentity, usage: usageSummary(usages, totalMs, false, meter) };
+            return { outcome: "images-unavailable", input: inputReference, model: imageIdentity, usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           }
           if (terminal === "completed") {
             check();
             const message = native.items.findLast(item => item.type === "assistant");
             if (!message || message.type !== "assistant") throw new HostError("storage");
             return { outcome: terminal, input: inputReference, result: ref(message.id), message: structuredClone(message),
-              observedInference: "observed" as const, usage: usageSummary(usages, totalMs, true, meter) };
+              observedInference: "observed" as const, usage: usageSummary(usages, totalMs, true, meter), steering: steered };
           }
           if (terminal === "cancelled" || terminal === "max_turns" || terminal === "limit_exceeded") {
             if (terminal === "limit_exceeded") {
@@ -631,31 +647,31 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
                 : meter.lastRedirectRefused ? classifyAuthError(redirectRefusedError("route"), authSelection)
                 : meter.lastStoreFailure ? classifyAuthError(meter.lastStoreFailure, authSelection)
                 : observed === undefined ? admitted! : classifyAuthError(observed, authSelection);
-              return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter) };
+              return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter), steering: steered };
             }
             // Without a settling read (aborted, or it failed), the admission verdict is the latest one observed.
             const current = settledReadiness ?? admitted!;
             return { outcome: terminal, input: inputReference,
               auth: current.status === "configured-unverified" ? current : classifyAuthError(lastError ?? new Error(String(terminal)), authSelection),
-              usage: usageSummary(usages, totalMs, false, meter) };
+              usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           }
           // A refused last send ends the run even when the loop's final message names a later consequence.
-          if (meter.lastSendRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(dispatchRefusedError(), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
-          if (meter.lastControlRefusal) return { outcome: terminal, input: inputReference, auth: classifyAuthError(meter.lastControlRefusal, authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+          if (meter.lastSendRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(dispatchRefusedError(), authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
+          if (meter.lastControlRefusal) return { outcome: terminal, input: inputReference, auth: classifyAuthError(meter.lastControlRefusal, authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           // The loop keeps only the message; the meter saw Schway's own redirect failure by identity.
-          if (meter.lastRedirectRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(redirectRefusedError("route"), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+          if (meter.lastRedirectRefused) return { outcome: terminal, input: inputReference, auth: classifyAuthError(redirectRefusedError("route"), authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           // A lock refusal or an uncertain cleanup carries its own guidance; the meter kept it by identity.
-          if (meter.lastStoreFailure) return { outcome: terminal, input: inputReference, auth: classifyAuthError(meter.lastStoreFailure, authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+          if (meter.lastStoreFailure) return { outcome: terminal, input: inputReference, auth: classifyAuthError(meter.lastStoreFailure, authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           const auth = classifyAuthError(lastError ?? new Error("Provider request failed"), authSelection);
           // Preserve retry category when the sanitized message alone is ambiguous.
           if (auth.status === "integration-unavailable" && typeof lastCategory === "string") {
-            if (lastCategory === "auth") return { outcome: terminal, input: inputReference, auth: classifyAuthError(new Error("The subscription session was revoked."), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
-            if (lastCategory === "credential-store") return { outcome: terminal, input: inputReference, auth: classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
-            if (lastCategory === "model") return { outcome: terminal, input: inputReference, auth: { ...auth, status: "model-unavailable" as const, nextAction: `Model ${authSelection.model} is not available on this subscription. Choose a listed model for this route.` }, usage: usageSummary(usages, totalMs, false, meter) };
-            if (lastCategory === "rate-limit") return { outcome: terminal, input: inputReference, auth: classifyAuthError(Object.assign(new Error("rate-limited"), { status: 429 }), authSelection), usage: usageSummary(usages, totalMs, false, meter) };
+            if (lastCategory === "auth") return { outcome: terminal, input: inputReference, auth: classifyAuthError(new Error("The subscription session was revoked."), authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
+            if (lastCategory === "credential-store") return { outcome: terminal, input: inputReference, auth: classifyAuthError(new Error("Cannot read credential in the OS secure store."), authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
+            if (lastCategory === "model") return { outcome: terminal, input: inputReference, auth: { ...auth, status: "model-unavailable" as const, nextAction: `Model ${authSelection.model} is not available on this subscription. Choose a listed model for this route.` }, usage: usageSummary(usages, totalMs, false, meter), steering: steered };
+            if (lastCategory === "rate-limit") return { outcome: terminal, input: inputReference, auth: classifyAuthError(Object.assign(new Error("rate-limited"), { status: 429 }), authSelection), usage: usageSummary(usages, totalMs, false, meter), steering: steered };
           }
-          return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter) };
-        } finally { credentials?.release(); if (admittedAbort) runAbort = previousAbort; release(); busy = false; }
+          return { outcome: terminal, input: inputReference, auth, usage: usageSummary(usages, totalMs, false, meter), steering: steered };
+        } finally { if (window) settleSteering(window); credentials?.release(); if (admittedAbort) runAbort = previousAbort; release(); busy = false; }
       },
       async compact(model, signalOrOptions) {
         requireIdle();
@@ -725,6 +741,12 @@ export async function createHostRuntime(input: HostOptions): Promise<HostRuntime
           }
           throw error;
         } finally { busy = false; }
+      },
+      steer(input) {
+        requireOpen();
+        if (disposed) throw new HostError("closed");
+        if (!validSteerInput(input, options.limits.maxInputChars)) throw new HostError("invalid-input");
+        return steering ? steering.accept({ id: input.id, text: input.text }) : idleSteer();
       },
       cancel() {
         // Cooperative cancellation only; synchronous extension code stays outside hard preemption.

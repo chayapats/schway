@@ -39,6 +39,8 @@ export interface HostImagesRejected {
   readonly model: HostModelIdentity;
   readonly input?: HostEntryReference;
   readonly usage: HostRunUsage;
+  /** Present exactly when `input` is: the steering disposition of the admitted run. */
+  readonly steering?: import("./steering.ts").HostSteeringReport;
 }
 
 /** Validate and detach bounded route/model evidence without reading credentials or making live calls. */

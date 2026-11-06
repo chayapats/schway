@@ -228,6 +228,12 @@ export interface ExecutionStat {
 export function hashSnapshotBytes(bytes: Uint8Array): string;
 
 // @public
+export interface HostAppliedSteer {
+    readonly entry: HostEntryReference;
+    readonly id: string;
+}
+
+// @public
 export interface HostAttemptEffort extends HostDispatchEffort {
     readonly reported: string | null;
 }
@@ -289,11 +295,13 @@ export type HostAuthRunResult = HostImagesRejected | {
     message: AssistantMessage;
     observedInference: "observed";
     usage: HostRunUsage;
+    steering: HostSteeringReport;
 } | {
     outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded";
     input: HostEntryReference;
     auth: HostAuthReadiness;
     usage: HostRunUsage;
+    steering: HostSteeringReport;
 };
 
 // @public
@@ -366,6 +374,7 @@ export interface HostCapabilities {
     readonly sessionOwnership: "exclusive-local-process-lease";
     // (undocumented)
     readonly snapshotContract: "schway.host.session-snapshot/v1";
+    readonly steeringContract: "schway.host.steering/v1";
     // (undocumented)
     readonly toolContract: "schway.host.tool-policy/v1";
     // (undocumented)
@@ -602,6 +611,7 @@ export interface HostImagesRejected {
     readonly model: HostModelIdentity;
     // (undocumented)
     readonly outcome: "images-unsupported" | "images-unavailable";
+    readonly steering?: HostSteeringReport;
     // (undocumented)
     readonly usage: HostRunUsage;
 }
@@ -720,6 +730,11 @@ export type HostProgressEvent = {
     usage: ModelUsage;
     complete: boolean;
     transient: true;
+} | {
+    type: "steer_applied";
+    id: string;
+    entry: HostEntryReference;
+    transient: true;
 };
 
 // @public
@@ -818,12 +833,14 @@ export type HostRunResult = HostImagesRejected | {
     message: AssistantMessage;
     usage: HostRunUsage;
     model: HostModelIdentity;
+    steering: HostSteeringReport;
 } | {
     outcome: "error" | "cancelled" | "max_turns" | "limit_exceeded";
     input: HostEntryReference;
     usage: HostRunUsage;
     model: HostModelIdentity;
     error: HostRunError;
+    steering: HostSteeringReport;
 };
 
 // @public
@@ -863,6 +880,7 @@ export interface HostSession {
     // (undocumented)
     readonly reference: HostSessionReference;
     retire(): Promise<void>;
+    steer(input: HostSteerInput): HostSteerResult;
     submit(input: HostInput, model: Model, signalOrOptions?: AbortSignal | HostRunOptions): Promise<HostRunResult>;
     submitWithRoute(input: HostInput, signalOrOptions?: AbortSignal | HostRouteRunOptions): Promise<HostAuthRunResult>;
 }
@@ -993,6 +1011,41 @@ export type HostSnapshotValidation = {
 };
 
 // @public
+export interface HostSteerIdentity {
+    // (undocumented)
+    readonly id: string;
+}
+
+// @public
+export interface HostSteeringReport {
+    readonly applied: readonly HostAppliedSteer[];
+    readonly unapplied: readonly HostSteerIdentity[];
+    readonly uncertain: readonly HostSteerIdentity[];
+}
+
+// @public
+export interface HostSteerInput {
+    readonly id: string;
+    readonly text: string;
+}
+
+// @public
+export type HostSteerResult = {
+    readonly kind: "queued";
+    readonly id: string;
+} | {
+    readonly kind: "applied";
+    readonly id: string;
+    readonly entry: HostEntryReference;
+} | {
+    readonly kind: "idle";
+} | {
+    readonly kind: "rejected";
+    readonly id: string;
+    readonly reason: "id-conflict" | "limit" | "uncertain";
+};
+
+// @public
 export const IMAGE_INPUT_CONTRACT: "schway.host.image-input/v1";
 
 // @public
@@ -1060,6 +1113,9 @@ export const MAX_SNAPSHOT_SESSIONS = 64;
 
 // @public
 export const MAX_SNAPSHOT_TOTAL_BYTES: number;
+
+// @public
+export const MAX_STEERS_PER_RUN = 32;
 
 // @public
 export interface Model {
@@ -1159,6 +1215,9 @@ export const SNAPSHOT_CONTRACT: "schway.host.session-snapshot/v1";
 
 // @public
 export const SNAPSHOT_NATIVE_FORMAT_VERSION = 4;
+
+// @public
+export const STEERING_CONTRACT: "schway.host.steering/v1";
 
 // @public
 export interface TextContent {
